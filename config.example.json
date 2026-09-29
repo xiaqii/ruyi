@@ -1,0 +1,33 @@
+{
+  "host": "127.0.0.1",
+  "port": 8899,
+  "dbPath": "./data/ruyi.db",
+  "sessions": [
+    { "agent": "pi", "dir": "~/.pi/agent/sessions" }
+  ],
+  "llm": {
+    "baseUrl": "https://api.anthropic.com",
+    "apiKey": "PUT-YOUR-KEY-IN-config.local.json",
+    "model": "claude-sonnet-4-5",
+    "maxTokens": 8192,
+    "requestTimeoutMs": 180000
+  },
+  "dream": {
+    "pipeline": "full",
+    "minDeltaChars": 300,
+    "maxSessionChars": 120000,
+    "mergeSummaryLimit": 300
+  },
+  "inject": {
+    "constitutionMax": 5,
+    "indexMax": 20,
+    "indexDays": 30,
+    "recallK": 5,
+    "recallCandidateDays": 60,
+    "recallCandidateMax": 300
+  },
+  "decay": {
+    "inferredArchiveDays": 90,
+    "inferredArchiveConfidenceBelow": 0.7
+  }
+}

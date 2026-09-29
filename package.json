@@ -1,0 +1,20 @@
+{
+  "name": "ruyi",
+  "version": "0.1.0",
+  "description": "如忆 (ruyi) - an agent-agnostic long-term memory service: nightly LLM distillation, precise recall, graceful degradation",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "start": "node src/cli.ts serve",
+    "mcp": "node src/cli.ts mcp",
+    "distill": "node src/cli.ts distill"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0"
+  }
+}

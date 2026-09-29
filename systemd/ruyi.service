@@ -1,0 +1,13 @@
+[Unit]
+Description=ruyi (如忆) long-term memory service for AI agents
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/app/ruyi
+ExecStart=/usr/bin/node /app/ruyi/src/cli.ts serve
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
