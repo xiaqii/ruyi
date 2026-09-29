@@ -174,6 +174,23 @@ export function activeCandidates(d: DatabaseSync, days: number, owner: string): 
 		.all(owner, since) as unknown as MemoryRow[];
 }
 
+export type RecallScope = "smart" | "cwd" | "all";
+
+/**
+ * Scope filter for recall/injection:
+ *  - smart: personal kinds (preference/fact) are global; project/lesson/skill_index stay in their cwd
+ *  - cwd:   strict per-directory isolation
+ *  - all:   no directory filtering
+ */
+export function scopeFilter(scope: RecallScope, cwd: string | null): { where: string; params: string[] } {
+	if (scope === "all" || !cwd) return { where: "", params: [] };
+	if (scope === "cwd") return { where: "AND (m.cwd = ? OR m.cwd IS NULL)", params: [cwd] };
+	return {
+		where: "AND (m.cwd = ? OR m.cwd IS NULL OR m.kind IN ('preference', 'fact'))",
+		params: [cwd],
+	};
+}
+
 export function ftsSearch(d: DatabaseSync, query: string, limit: number, owner: string): MemoryRow[] {
 	// Escape double quotes for FTS5; OR-join terms for broad candidate generation.
 	const terms = query

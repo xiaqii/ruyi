@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.ts";
-import { archiveMemory, getDb, listMemories, memoryCounts, tokenUsage } from "./db.ts";
+import { archiveMemory, getDb, insertMemory, listMemories, memoryCounts, tokenUsage } from "./db.ts";
 import { runDream } from "./distill.ts";
 import { recall } from "./recall.ts";
 import { startServer } from "./server.ts";
@@ -31,6 +31,8 @@ Commands:
   list [--limit=30]            List active memories
   forget <id>                  Archive a memory
   pin <id> [0|1]               Pin/unpin a memory (pinned = always injected)
+  add --kind=K --summary="S" <content>
+                               Explicitly add a memory (rules, specs, skill pointers)
   stats [--days=7]             Memory counts and token usage
 `;
 
@@ -108,6 +110,31 @@ async function main(): Promise<void> {
 				id,
 			);
 			console.log(`${pinned ? "pinned" : "unpinned"} #${id}`);
+			break;
+		}
+
+		case "add": {
+			const kind = typeof flags.kind === "string" ? flags.kind : "fact";
+			const summary = typeof flags.summary === "string" ? flags.summary : "";
+			const content = rest.join(" ");
+			if (!summary || !content) {
+				console.error('usage: add --kind=lesson --summary="一句话" 具体内容...');
+				process.exit(1);
+			}
+			const id = insertMemory(
+				db,
+				{
+					kind: kind as never,
+					domain: typeof flags.domain === "string" ? flags.domain : undefined,
+					summary,
+					content,
+					origin: "user_stated",
+					confidence: 0.9,
+					source: null,
+				},
+				{ owner: "default", cwd: process.cwd() },
+			);
+			console.log(`added #${id}`);
 			break;
 		}
 

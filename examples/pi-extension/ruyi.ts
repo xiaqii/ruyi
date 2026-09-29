@@ -16,7 +16,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 const BASE = (process.env.RUYI_URL ?? "http://127.0.0.1:8899").replace(/\/+$/, "");
-const OWNER = process.env.RUYI_OWNER ?? "default";
+const OWNER = "default"; // single-user mode; the owner column stays for future multi-account use
 const TIMEOUT_MS = 1500;
 const RECALL_TIMEOUT_MS = 20000;
 const BREAKER_MS = 5 * 60_000;
@@ -60,6 +60,13 @@ function formatInject(payload: InjectPayload): string | null {
 const RecallParams = Type.Object({
 	query: Type.String({ description: "What you are working on or looking for in long-term memory" }),
 	k: Type.Optional(Type.Number({ description: "Max memories to return (default 5)" })),
+	scope: Type.Optional(
+		Type.Union([Type.Literal("smart"), Type.Literal("cwd"), Type.Literal("all")], {
+			description:
+				"Memory scope: 'smart' (default: personal memories global, project memories per-directory), " +
+				"'cwd' (strict current-directory only), 'all' (search everything; use when smart finds nothing)",
+		}),
+	),
 });
 
 interface RecallMemory {
@@ -72,8 +79,10 @@ interface RecallMemory {
 }
 
 export default function (pi: ExtensionAPI) {
-	pi.on("before_agent_start", async (event) => {
-		const payload = await api<InjectPayload>(`/inject?owner=${encodeURIComponent(OWNER)}`);
+	pi.on("before_agent_start", async (event, ctx) => {
+		const payload = await api<InjectPayload>(
+			`/inject?owner=${encodeURIComponent(OWNER)}&cwd=${encodeURIComponent(ctx.cwd)}&scope=smart`,
+		);
 		if (!payload) return;
 		const text = formatInject(payload);
 		if (text) event.systemPromptOptions.sections["ruyi-memory"] = text;
@@ -94,7 +103,13 @@ export default function (pi: ExtensionAPI) {
 				{
 					method: "POST",
 					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ query: params.query, k: params.k, owner: OWNER }),
+					body: JSON.stringify({
+						query: params.query,
+						k: params.k,
+						owner: OWNER,
+						cwd: _ctx.cwd,
+						scope: params.scope ?? "smart",
+					}),
 				},
 				RECALL_TIMEOUT_MS,
 			);
@@ -151,6 +166,75 @@ export default function (pi: ExtensionAPI) {
 				`ruyi @ ${BASE} owner=${OWNER} | memories: ${JSON.stringify(stats.counts)}`,
 				"info",
 			);
+		},
+	});
+
+	const RememberParams = Type.Object({
+		kind: Type.Union(
+			[
+				Type.Literal("preference"),
+				Type.Literal("fact"),
+				Type.Literal("project"),
+				Type.Literal("lesson"),
+				Type.Literal("skill_index"),
+			],
+			{ description: "Memory kind" },
+		),
+		summary: Type.String({ description: "One-line summary (<= 30 words)" }),
+		content: Type.String({ description: "Full memory content, concrete and self-contained" }),
+		domain: Type.Optional(Type.String({ description: "Short free-form tag" })),
+	});
+
+	pi.registerTool({
+		name: "ruyi_remember",
+		label: "Memory Write",
+		description:
+			"Explicitly save something to long-term memory RIGHT NOW when the user asks you to remember " +
+			"it (e.g. '记住…', 'remember this'), or when you identify a durable rule/convention/skill pointer " +
+			"that must not wait for the nightly distillation. Do NOT use for one-off task details.",
+		parameters: RememberParams,
+
+		async execute(_id, params, _signal, _onUpdate, ctx) => {
+			const result = await api<{ id: number }>(
+				`/memories`,
+				{
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ ...params, owner: OWNER, cwd: ctx.cwd }),
+				},
+			);
+			if (!result) {
+				return {
+					content: [
+						{
+							type: "text",
+							text:
+								"Memory service is unavailable; the fact was NOT saved. Tell the user it will only live in this conversation.",
+						},
+					],
+					details: { saved: false },
+				};
+			}
+			return {
+				content: [{ type: "text", text: `Saved to long-term memory as #${result.id}: ${params.summary}` }],
+				details: { saved: true, id: result.id },
+			};
+		},
+
+		renderCall(args, theme) {
+			return new Text(
+				theme.fg("toolTitle", theme.bold("ruyi_remember ")) + theme.fg("accent", args.summary),
+				0,
+				0,
+			);
+		},
+
+		renderResult(result, { isPartial }, theme) {
+			if (isPartial) return new Text(theme.fg("warning", "Saving..."), 0, 0);
+			const d = result.details as { saved?: boolean } | undefined;
+			return d?.saved
+				? new Text(theme.fg("success", "saved"), 0, 0)
+				: new Text(theme.fg("warning", "not saved (service unavailable)"), 0, 0);
 		},
 	});
 }

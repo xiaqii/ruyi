@@ -26,6 +26,9 @@
     "recallCandidateDays": 60,
     "recallCandidateMax": 300
   },
+  "recall": {
+    "defaultScope": "smart"
+  },
   "decay": {
     "inferredArchiveDays": 90,
     "inferredArchiveConfidenceBelow": 0.7

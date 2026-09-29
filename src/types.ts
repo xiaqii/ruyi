@@ -75,6 +75,9 @@ export interface Config {
 		inferredArchiveDays: number;
 		inferredArchiveConfidenceBelow: number;
 	};
+	recall: {
+		defaultScope: "smart" | "cwd" | "all";
+	};
 }
 
 export interface DreamReport {
@@ -83,11 +86,19 @@ export interface DreamReport {
 	finishedAt: string;
 	sessionsScanned: number;
 	sessionsDistilled: number;
+	triaged: number;
 	new: number;
 	reinforced: number;
 	refined: number;
 	superseded: number;
 	archived: number;
+	reorganize: {
+		owner: string;
+		merged: number;
+		conflictsResolved: number;
+		archived: number;
+		retagged: number;
+	}[];
 	inputTokens: number;
 	outputTokens: number;
 	errors: string[];

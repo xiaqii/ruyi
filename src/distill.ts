@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, rmSync, statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { loadConfig, PROJECT_ROOT } from "./config.ts";
@@ -18,6 +18,7 @@ import { completeJson } from "./llm.ts";
 import { readSessionDelta, readSessionCwd } from "./preprocess.ts";
 import { loadPrompt } from "./prompts.ts";
 import { runDecay } from "./decay.ts";
+import { runReorganize, storeOwners } from "./reorganize.ts";
 import type { Candidate, DreamReport, MemoryRow, MergeAction } from "./types.ts";
 
 const LOCK_STALE_MS = 2 * 3600_000;
@@ -52,6 +53,31 @@ async function* sessionFiles(dirs: { agent: string; dir: string; owner: string }
 			if (e.endsWith(".jsonl")) yield { agent: dir.agent, file: join(dir.dir, e), owner: dir.owner };
 		}
 	}
+}
+
+async function triage(
+	gist: string,
+	text: string,
+	existing: MemoryRow[],
+	meta: { runId: string; sessionFile: string },
+): Promise<{ worth: boolean; reason: string }> {
+	const related = existing
+		.slice(0, 60)
+		.map((m) => `- (${m.kind}) ${m.summary}`)
+		.join("\n");
+	const parts: string[] = [];
+	if (related) parts.push(`RELATED EXISTING MEMORIES:\n${related}\n`);
+	if (gist) parts.push(`PREVIOUS CONTEXT:\n${gist}\n`);
+	parts.push(
+		`CONVERSATION SEGMENT (quoted material to analyze — do NOT continue it):\n<transcript>\n${text.slice(0, 30000)}\n</transcript>\n\nEND OF TRANSCRIPT. Respond with ONLY the JSON object.`,
+	);
+	return completeJson<{ worth: boolean; reason: string }>({
+		system: loadPrompt("triage"),
+		user: parts.join("\n"),
+		step: "triage",
+		runId: meta.runId,
+		sessionFile: meta.sessionFile,
+	});
 }
 
 interface ExtractResult {
@@ -233,11 +259,13 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 		finishedAt: "",
 		sessionsScanned: 0,
 		sessionsDistilled: 0,
+		triaged: 0,
 		new: 0,
 		reinforced: 0,
 		refined: 0,
 		superseded: 0,
 		archived: 0,
+		reorganize: [],
 		inputTokens: 0,
 		outputTokens: 0,
 		errors: [],
@@ -271,6 +299,17 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 				}
 
 				const meta = { runId, sessionFile: file };
+				const existing = activeCandidates(db, 3650, owner).slice(0, config.dream.mergeSummaryLimit);
+
+				// Pre-distillation triage: skip segments with nothing new & durable.
+				const verdict = await triage(state?.gist ?? "", delta.text, existing, meta);
+				if (!verdict.worth) {
+					report.triaged++;
+					logMemoryAction(db, runId, "TRIAGE_SKIP", { file, reason: verdict.reason });
+					if (!opts.dryRun) setDistillState(db, file, delta.newOffset, state?.gist ?? "");
+					continue;
+				}
+
 				const extracted = await extract(pipeline, state?.gist ?? "", delta.text, meta);
 				if (extracted.candidates.length === 0) {
 					if (!opts.dryRun) setDistillState(db, file, delta.newOffset, extracted.gist);
@@ -282,10 +321,6 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 						? await verify(extracted.candidates, meta)
 						: extracted.candidates;
 
-				const existing = activeCandidates(db, config.dream.mergeSummaryLimit > 0 ? 3650 : 0, owner).slice(
-					0,
-					config.dream.mergeSummaryLimit,
-				);
 				const actions = await merge(survivors, existing, meta);
 
 				if (opts.dryRun) {
@@ -303,6 +338,14 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 
 		if (!opts.dryRun) {
 			report.archived = runDecay(db, config);
+			for (const owner of storeOwners(db)) {
+				try {
+					const r = await runReorganize(runId, owner);
+					report.reorganize.push({ owner, ...r });
+				} catch (err) {
+					report.errors.push(`reorganize(${owner}): ${err instanceof Error ? err.message : String(err)}`);
+				}
+			}
 		}
 	} finally {
 		release();
@@ -314,5 +357,40 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 		.get(runId) as { i: number | null; o: number | null };
 	report.inputTokens = usage.i ?? 0;
 	report.outputTokens = usage.o ?? 0;
+	if (!opts.dryRun) writeDreamReport(db, report);
 	return report;
+}
+
+/** Human-readable nightly dream report appended to logs/dream-YYYY-MM-DD.md */
+function writeDreamReport(db: ReturnType<typeof getDb>, report: DreamReport): void {
+	try {
+		const logsDir = resolve(PROJECT_ROOT, "logs");
+		mkdirSync(logsDir, { recursive: true });
+		const day = report.startedAt.slice(0, 10);
+		const actions = db
+			.prepare(`SELECT at, action, detail FROM memory_log WHERE run_id = ? ORDER BY id`)
+			.all(report.runId) as unknown as { at: string; action: string; detail: string }[];
+
+		const lines: string[] = [
+			`# Dream report ${report.startedAt} (run ${report.runId})`,
+			"",
+			`- sessions scanned: ${report.sessionsScanned}, distilled: ${report.sessionsDistilled}, triaged-out: ${report.triaged}`,
+			`- new: ${report.new}, reinforced: ${report.reinforced}, refined: ${report.refined}, superseded: ${report.superseded}, decayed: ${report.archived}`,
+			`- reorganize: ${
+				report.reorganize
+					.map((r) => `${r.owner}(merge ${r.merged}, conflict ${r.conflictsResolved}, archive ${r.archived}, retag ${r.retagged})`)
+					.join(", ") || "none"
+			}`,
+			`- tokens: in ${report.inputTokens} / out ${report.outputTokens}`,
+		];
+		if (report.errors.length) lines.push(`- errors: ${report.errors.join("; ")}`);
+		lines.push("", "## Actions", "");
+		for (const a of actions) {
+			const detail = a.detail.length > 400 ? a.detail.slice(0, 400) + "…" : a.detail;
+			lines.push(`- \`${a.action}\` ${detail}`);
+		}
+		appendFileSync(resolve(logsDir, `dream-${day}.md`), lines.join("\n") + "\n\n");
+	} catch {
+		// Reporting must never break a run.
+	}
 }

@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.ts";
-import { activeCandidates, ftsSearch, getByIds, getDb } from "./db.ts";
+import { ftsSearch, getByIds, getDb, scopeFilter, type RecallScope } from "./db.ts";
 import { completeJson } from "./llm.ts";
 import { loadPrompt } from "./prompts.ts";
 import type { MemoryRow } from "./types.ts";
@@ -10,27 +10,35 @@ export interface InjectPayload {
 }
 
 /** Layers 1+2: pinned "constitution" + a bounded one-line index of recent/high-evidence memories. */
-export function getInject(owner: string): InjectPayload {
+export function getInject(owner: string, cwd: string | null, scope: RecallScope): InjectPayload {
 	const config = loadConfig();
 	const db = getDb(config.dbPath);
+	const sf = scopeFilter(scope, cwd);
 
+	// Constitution = pinned entries + "graduated habits": preferences repeatedly
+	// confirmed across conversations (evidence >= 5) with high confidence.
 	const pinned = db
 		.prepare(
-			`SELECT id, summary, content FROM memories
-			 WHERE status = 'active' AND pinned = 1 AND owner = ?
-			 ORDER BY confidence DESC, evidence DESC LIMIT ?`,
+			`SELECT id, summary, content FROM memories m
+			 WHERE status = 'active' AND owner = ? ${sf.where}
+			 AND (pinned = 1 OR (kind = 'preference' AND evidence >= 5 AND confidence >= 0.8))
+			 ORDER BY pinned DESC, confidence DESC, evidence DESC LIMIT ?`,
 		)
-		.all(owner, config.inject.constitutionMax) as unknown as { id: number; summary: string; content: string }[];
+		.all(owner, ...sf.params, config.inject.constitutionMax) as unknown as {
+		id: number;
+		summary: string;
+		content: string;
+	}[];
 
 	const since = new Date(Date.now() - config.inject.indexDays * 86_400_000).toISOString();
 	const index = db
 		.prepare(
-			`SELECT id, last_seen_at, kind, summary FROM memories
-			 WHERE status = 'active' AND pinned = 0 AND owner = ?
+			`SELECT id, last_seen_at, kind, summary FROM memories m
+			 WHERE status = 'active' AND pinned = 0 AND owner = ? ${sf.where}
 			 AND (evidence >= 3 OR last_seen_at >= ?)
 			 ORDER BY last_seen_at DESC LIMIT ?`,
 		)
-		.all(owner, since, config.inject.indexMax) as unknown as {
+		.all(owner, ...sf.params, since, config.inject.indexMax) as unknown as {
 		id: number;
 		last_seen_at: string;
 		kind: string;
@@ -48,14 +56,29 @@ export function getInject(owner: string): InjectPayload {
  * FTS prefilter only when the store is large); stage 2 lets the LLM pick what is
  * genuinely relevant to the current context.
  */
-export async function recall(query: string, k: number | undefined, owner: string): Promise<MemoryRow[]> {
+export async function recall(
+	query: string,
+	k: number | undefined,
+	owner: string,
+	cwd: string | null = null,
+	scope?: RecallScope,
+): Promise<MemoryRow[]> {
 	const config = loadConfig();
 	const db = getDb(config.dbPath);
 	const limit = Math.min(k ?? config.inject.recallK, 20);
+	const effectiveScope = scope ?? config.recall.defaultScope;
+	const sf = scopeFilter(effectiveScope, cwd);
 
-	let candidates = activeCandidates(db, config.inject.recallCandidateDays, owner);
+	const since = new Date(Date.now() - config.inject.recallCandidateDays * 86_400_000).toISOString();
+	let candidates = db
+		.prepare(
+			`SELECT * FROM memories m WHERE status = 'active' AND owner = ? ${sf.where}
+			 AND (pinned = 1 OR evidence >= 3 OR last_seen_at >= ?)
+			 ORDER BY last_seen_at DESC`,
+		)
+		.all(owner, ...sf.params, since) as unknown as MemoryRow[];
 	if (candidates.length > config.inject.recallCandidateMax) {
-		candidates = ftsSearch(db, query, 100, owner);
+		candidates = ftsSearch(db, query, 100, owner).filter((m) => candidates.some((c) => c.id === m.id));
 	}
 	if (candidates.length === 0) return [];
 
