@@ -7,7 +7,7 @@ You will see:
 Judge by substance, not by surface novelty:
 
 - **Not worth distilling**: the user merely CONSUMES memory (asks about things already known: their car, their past views, project status); chit-chat; one-off commands and their outputs; re-discussion of facts the store already has without meaningful new decisions or changes; routine work whose details live in the codebase anyway.
-- **Worth distilling**: genuinely new preferences/facts/projects/lessons; a decision or its rationale; a changed situation that contradicts or updates existing memory; a hard-won pitfall.
+- **Worth distilling**: genuinely new preferences/facts/lessons; a decision or its rationale; a changed situation that contradicts or updates existing memory; a hard-won pitfall; research or discussion that produced a conclusion the user endorsed (a knowledge asset worth reusing).
 
 When in doubt, lean toward "not worth" — the store's quality depends on restraint.
 

@@ -186,7 +186,7 @@ export function scopeFilter(scope: RecallScope, cwd: string | null): { where: st
 	if (scope === "all" || !cwd) return { where: "", params: [] };
 	if (scope === "cwd") return { where: "AND (m.cwd = ? OR m.cwd IS NULL)", params: [cwd] };
 	return {
-		where: "AND (m.cwd = ? OR m.cwd IS NULL OR m.kind IN ('preference', 'fact'))",
+		where: "AND (m.cwd = ? OR m.cwd IS NULL OR m.kind IN ('preference', 'fact', 'knowledge'))",
 		params: [cwd],
 	};
 }

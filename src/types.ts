@@ -1,4 +1,4 @@
-export type MemoryKind = "preference" | "fact" | "lesson" | "skill_index";
+export type MemoryKind = "preference" | "fact" | "knowledge" | "lesson" | "skill_index";
 export type MemoryOrigin = "user_stated" | "agent_inferred" | "mixed";
 export type MemoryStatus = "active" | "superseded" | "archived";
 

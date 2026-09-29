@@ -112,7 +112,7 @@ export async function runReorganize(runId: string, owner: string): Promise<Reorg
 		report.archived++;
 	}
 
-	const VALID_KINDS = new Set(["preference", "fact", "lesson", "skill_index"]);
+	const VALID_KINDS = new Set(["preference", "fact", "knowledge", "lesson", "skill_index"]);
 	for (const r of plan.retag ?? []) {
 		if (!valid.has(r.id) || (!r.kind && !r.domain)) continue;
 		if (r.kind && !VALID_KINDS.has(r.kind)) r.kind = undefined;

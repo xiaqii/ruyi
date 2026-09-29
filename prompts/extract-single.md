@@ -8,9 +8,10 @@ The test: strip away everything about *this* project and *this* task. What remai
 
 Memory kinds:
 
-- **preference** — tastes, style, working rules held across contexts
+- **preference** — tastes, style, working rules held across contexts (the user's own words are the only authority)
 - **fact** — stable things about the person or environment that live in no repository
-- **lesson** — generalizable experience, stated abstractly
+- **knowledge** — user-ENDORSED findings and conclusions: research outcomes, validated frameworks, settled answers worth reusing without re-researching. Assistant output only counts when the user accepted/built on it.
+- **lesson** — generalizable experience, stated abstractly; what the user pushed back on is often the best lesson
 - **skill_index** — a pointer to reusable know-how, never the know-how itself
 
 Naturally leave out: project state, task mechanics, codebase-derivable facts, secrets, small talk. Before including each memory, silently verify: is it grounded in an exact quote? Is it abstracted from the episode? Is it durable? Is it safe? Empty output is a perfectly good answer.
@@ -24,7 +25,7 @@ Return ONLY a JSON object:
   "gist": "2-3 sentence rolling summary of the conversation, incorporating the previous gist if provided",
   "candidates": [
     {
-      "kind": "preference|fact|lesson|skill_index",
+      "kind": "preference|fact|knowledge|lesson|skill_index",
       "domain": "a short tag",
       "summary": "one line, <= 30 words",
       "content": "full memory, self-contained, abstracted from the episode",
