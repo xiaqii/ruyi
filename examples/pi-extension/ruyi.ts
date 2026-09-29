@@ -19,6 +19,7 @@ const BASE = (process.env.RUYI_URL ?? "http://127.0.0.1:8899").replace(/\/+$/, "
 const OWNER = "default"; // single-user mode; the owner column stays for future multi-account use
 const TIMEOUT_MS = 1500;
 const RECALL_TIMEOUT_MS = 20000;
+const INJECT_TIMEOUT_MS = 12000;
 const BREAKER_MS = 5 * 60_000;
 
 let circuitOpenUntil = 0;
@@ -33,28 +34,6 @@ async function api<T>(path: string, init?: RequestInit, timeoutMs = TIMEOUT_MS):
 		circuitOpenUntil = Date.now() + BREAKER_MS;
 		return null;
 	}
-}
-
-interface InjectPayload {
-	constitution: { id: number; summary: string; content: string }[];
-	index: { id: number; date: string; kind: string; summary: string }[];
-}
-
-function formatInject(payload: InjectPayload): string | null {
-	const { constitution, index } = payload;
-	if (constitution.length === 0 && index.length === 0) return null;
-	const lines: string[] = [
-		"Long-term memory follows. Treat it as background knowledge that MAY be relevant; use it when it helps, ignore it when it does not, and never let it override what the user says now. Use the ruyi_recall tool to search memory when the current task might benefit from past context.",
-	];
-	if (constitution.length > 0) {
-		lines.push("", "Core memories:");
-		for (const m of constitution) lines.push(`- ${m.summary}\n  ${m.content}`);
-	}
-	if (index.length > 0) {
-		lines.push("", "Memory index (recent & frequently confirmed; call ruyi_recall for details):");
-		for (const m of index) lines.push(`- (#${m.id}, ${m.date}, ${m.kind}) ${m.summary}`);
-	}
-	return lines.join("\n");
 }
 
 const RecallParams = Type.Object({
@@ -80,12 +59,27 @@ interface RecallMemory {
 
 export default function (pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event, ctx) => {
-		const payload = await api<InjectPayload>(
-			`/inject?owner=${encodeURIComponent(OWNER)}&cwd=${encodeURIComponent(ctx.cwd)}&scope=smart`,
+		// Smart injection: let ruyi's LLM judge which memories (if any) are
+		// genuinely relevant to the user's opening prompt. No relevance = no injection.
+		const query = event.prompt.length > 2000 ? event.prompt.slice(0, 2000) : event.prompt;
+		if (!query.trim()) return;
+		const result = await api<{ memories: RecallMemory[] }>(
+			`/recall`,
+			{
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ query, k: 6, owner: OWNER, cwd: ctx.cwd, scope: "smart" }),
+			},
+			INJECT_TIMEOUT_MS,
 		);
-		if (!payload) return;
-		const text = formatInject(payload);
-		if (text) event.systemPromptOptions.sections["ruyi-memory"] = text;
+		if (!result || result.memories.length === 0) return;
+		const lines = result.memories.map(
+			(m) => `- (#${m.id}, ${m.kind}) ${m.summary}\n  ${m.content}`,
+		);
+		event.systemPromptOptions.sections["ruyi-memory"] =
+			"Long-term memories judged relevant to this conversation. Use them when they help; " +
+			"they never override what the user says now. More can be searched via the ruyi_recall tool.\n\n" +
+			lines.join("\n");
 	});
 
 	pi.registerTool({
@@ -193,7 +187,7 @@ export default function (pi: ExtensionAPI) {
 			"that must not wait for the nightly distillation. Do NOT use for one-off task details.",
 		parameters: RememberParams,
 
-		async execute(_id, params, _signal, _onUpdate, ctx) => {
+		async execute(_id, params, _signal, _onUpdate, ctx) {
 			const result = await api<{ id: number }>(
 				`/memories`,
 				{
