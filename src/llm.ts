@@ -16,6 +16,7 @@ export interface CompleteOptions {
 	runId?: string;
 	sessionFile?: string;
 	maxTokens?: number;
+	timeoutMs?: number;
 }
 
 /** Extract the first JSON value (object or array) from LLM output, tolerating code fences and prose. */
@@ -98,7 +99,7 @@ export async function complete(opts: CompleteOptions): Promise<LlmResult> {
 			system: opts.system,
 			messages: [{ role: "user", content: opts.user }],
 		}),
-		signal: AbortSignal.timeout(requestTimeoutMs),
+		signal: AbortSignal.timeout(opts.timeoutMs ?? requestTimeoutMs),
 	});
 
 	if (!res.ok) {

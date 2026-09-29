@@ -8,11 +8,11 @@ Look for these situations and act on them:
 
 2. **resolve_conflict**: two entries genuinely contradict (an old plan vs. a new decision, a superseded preference). Keep the winner — usually the newer, better-evidenced, or explicitly user-stated one — and archive the loser. Partial overlaps that can coexist are NOT conflicts: prefer merge_duplicates or leave them alone.
 
-3. **archive**: entries that are trivial, overly specific to a finished one-off task, outdated, or too vague to ever be useful. High-confidence user-stated entries should only be archived when clearly obsolete.
+3. **archive**: entries that are trivial, outdated, or too vague to ever be useful. ALSO archive episode content that snuck in: project state, task progress, specifics of what was built — the store holds the person's abstractions (style, rules, lessons, environment facts, pointers), not what they did on a given day. When an episode entry contains a genuine abstraction inside, do not archive it — merge/rewrite that abstraction into a proper entry instead. High-confidence user-stated entries should only be archived when clearly obsolete.
 
-4. **retag**: an entry sits under a clearly wrong kind or domain.
+4. **retag**: an entry sits under a clearly wrong kind or domain. Valid kinds are only: preference, fact, lesson, skill_index.
 
-Be conservative. Most nights, most entries need no action. Never invent new content — only reorganize what exists. When two entries merely differ in detail level, merge rather than delete.
+Be conservative about content, but firm about the philosophy. Most nights, most entries need no action. Never invent new content — only reorganize what exists. When two entries merely differ in detail level, merge rather than delete.
 
 Return ONLY a JSON object (any list may be empty):
 

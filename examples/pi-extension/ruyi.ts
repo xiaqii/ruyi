@@ -174,7 +174,6 @@ export default function (pi: ExtensionAPI) {
 			[
 				Type.Literal("preference"),
 				Type.Literal("fact"),
-				Type.Literal("project"),
 				Type.Literal("lesson"),
 				Type.Literal("skill_index"),
 			],

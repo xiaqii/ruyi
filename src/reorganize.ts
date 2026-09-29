@@ -43,7 +43,7 @@ export async function runReorganize(runId: string, owner: string): Promise<Reorg
 	const listing = memories
 		.map(
 			(m) =>
-				`[id ${m.id}] (${m.kind}${m.domain ? "/" + m.domain : ""}, seen ${m.last_seen_at.slice(0, 10)}, evidence ${m.evidence}, confidence ${m.confidence.toFixed(2)}, ${m.origin})\n  summary: ${m.summary}\n  content: ${m.content}`,
+				`[id ${m.id}] (${m.kind}${m.domain ? "/" + m.domain : ""}, seen ${m.last_seen_at.slice(0, 10)}, evidence ${m.evidence}, confidence ${m.confidence.toFixed(2)}, ${m.origin})\n  summary: ${m.summary}\n  content: ${m.content.length > 400 ? m.content.slice(0, 400) + "…" : m.content}`,
 		)
 		.join("\n\n");
 
@@ -55,6 +55,7 @@ export async function runReorganize(runId: string, owner: string): Promise<Reorg
 				: "") + `ACTIVE MEMORIES:\n${listing}`,
 		step: "reorganize",
 		runId,
+		timeoutMs: 600_000,
 	});
 
 	const valid = new Set(memories.map((m) => m.id));
@@ -111,8 +112,10 @@ export async function runReorganize(runId: string, owner: string): Promise<Reorg
 		report.archived++;
 	}
 
+	const VALID_KINDS = new Set(["preference", "fact", "lesson", "skill_index"]);
 	for (const r of plan.retag ?? []) {
 		if (!valid.has(r.id) || (!r.kind && !r.domain)) continue;
+		if (r.kind && !VALID_KINDS.has(r.kind)) r.kind = undefined;
 		db.prepare(`UPDATE memories SET kind = COALESCE(?, kind), domain = COALESCE(?, domain), updated_at = ? WHERE id = ?`).run(
 			r.kind ?? null,
 			r.domain ?? null,
