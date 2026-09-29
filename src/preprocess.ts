@@ -11,7 +11,7 @@ export function readSessionCwd(file: string): string | null {
 			if (!line.trim()) continue;
 			try {
 				const entry = JSON.parse(line) as { type?: string; cwd?: string };
-				if (entry.type === "session" && entry.cwd) return entry.cwd;
+				if ((entry.type === "session" || entry.cwd) && entry.cwd) return entry.cwd;
 			} catch {
 				// keep scanning
 			}
@@ -123,11 +123,72 @@ export function readPiSessionDelta(file: string, offset: number, maxChars: numbe
 	return { text, newOffset };
 }
 
-/** Pluggable per-agent session parsers. Add Claude Code / opencode parsers here. */
+/**
+ * Claude Code session format: entries with type "user"/"assistant",
+ * message.content as string or array of text/thinking/tool_use/tool_result parts.
+ */
+export function readClaudeCodeSessionDelta(file: string, offset: number, maxChars: number): SessionDelta {
+	const buf = readFileSync(file);
+	let slice = buf.subarray(offset);
+	const newOffset = buf.length;
+
+	if (offset > 0) {
+		const nl = slice.indexOf(0x0a);
+		if (nl === -1) return { text: "", newOffset };
+		slice = slice.subarray(nl + 1);
+	}
+
+	const lines: string[] = [];
+	for (const rawLine of slice.toString("utf8").split("\n")) {
+		const line = rawLine.trim();
+		if (!line) continue;
+		let entry: {
+			type?: string;
+			isMeta?: boolean;
+			message?: { role?: string; content?: ContentPart[] | string };
+		};
+		try {
+			entry = JSON.parse(line);
+		} catch {
+			continue;
+		}
+		if ((entry.type !== "user" && entry.type !== "assistant") || entry.isMeta || !entry.message) continue;
+		const role = entry.message.role ?? entry.type;
+		const content = entry.message.content;
+		if (typeof content === "string") {
+			// Skip command/system plumbing messages.
+			if (content.trim() && !content.startsWith("<command-") && !content.startsWith("<local-command"))
+				lines.push(`[${role}] ${content.trim()}`);
+			continue;
+		}
+		if (!Array.isArray(content)) continue;
+		for (const part of content) {
+			// Claude Code names its tool parts tool_use / tool_result
+			const mapped =
+				part.type === "tool_use"
+					? { ...part, type: "toolCall", arguments: part.input }
+					: part;
+			const out = partToLine(role, mapped);
+			if (out) lines.push(out);
+		}
+	}
+
+	let text = lines.join("\n");
+	if (text.length > maxChars) {
+		const head = Math.floor(maxChars * 0.3);
+		const tail = maxChars - head;
+		text = `${text.slice(0, head)}\n\n...[${text.length - maxChars} chars omitted from the middle]...\n\n${text.slice(-tail)}`;
+	}
+	return { text, newOffset };
+}
+
+/** Pluggable per-agent session parsers. Add opencode etc. here. */
 export function readSessionDelta(agent: string, file: string, offset: number, maxChars: number): SessionDelta {
 	switch (agent) {
 		case "pi":
 			return readPiSessionDelta(file, offset, maxChars);
+		case "claude-code":
+			return readClaudeCodeSessionDelta(file, offset, maxChars);
 		default:
 			throw new Error(`unsupported agent session format: ${agent}`);
 	}

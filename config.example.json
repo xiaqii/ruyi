@@ -3,7 +3,14 @@
   "port": 8899,
   "dbPath": "./data/ruyi.db",
   "sessions": [
-    { "agent": "pi", "dir": "~/.pi/agent/sessions" }
+    {
+      "agent": "pi",
+      "dir": "~/.pi/agent/sessions"
+    },
+    {
+      "agent": "claude-code",
+      "dir": "~/.claude/projects"
+    }
   ],
   "llm": {
     "baseUrl": "https://api.anthropic.com",

@@ -34,7 +34,11 @@ export async function runReorganize(runId: string, owner: string): Promise<Reorg
 		.all(owner) as unknown as MemoryRow[];
 	if (memories.length < 10) return report; // too small to need curation
 
-	const overBudget = memories.length > config.dream.targetSize;
+	// Pinned entries and graduated habits are untouchable and exempt from the budget.
+	const flexible = memories.filter(
+		(m) => !(m.pinned === 1 || (m.kind === "preference" && m.evidence >= 5 && m.confidence >= 0.8)),
+	);
+	const overBudget = flexible.length > config.dream.targetSize;
 
 	const listing = memories
 		.map(
@@ -47,7 +51,7 @@ export async function runReorganize(runId: string, owner: string): Promise<Reorg
 		system: loadPrompt("reorganize"),
 		user:
 			(overBudget
-				? `STORE SIZE NOTICE: there are ${memories.length} active entries, above the target of ~${config.dream.targetSize}. Be noticeably more aggressive with merge_duplicates and archive this run; the store should converge, not grow without bound.\n\n`
+				? `STORE SIZE NOTICE: there are ${flexible.length} flexible (unpinned, non-habit) entries, above the target of ~${config.dream.targetSize}. Be noticeably more aggressive with merge_duplicates and archive this run; the store should converge, not grow without bound. Pinned entries and high-evidence habits (evidence>=5) are OFF LIMITS — never merge, archive or retag them.\n\n`
 				: "") + `ACTIVE MEMORIES:\n${listing}`,
 		step: "reorganize",
 		runId,
