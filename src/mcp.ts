@@ -2,6 +2,7 @@ import { createInterface } from "node:readline";
 import { loadConfig } from "./config.ts";
 import { getDb, getMemory, listMemories } from "./db.ts";
 import { recall } from "./recall.ts";
+import { distillText } from "./distill.ts";
 
 /**
  * Minimal MCP (Model Context Protocol) stdio server exposing ruyi recall tools.
@@ -52,6 +53,20 @@ const TOOLS = [
 			required: ["id"],
 		},
 	},
+	{
+		name: "ruyi_ingest",
+		description:
+			"Submit raw conversation text or notes to the memory center; ruyi distills durable preferences/facts/lessons from it.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				text: { type: "string", description: "Raw text to distill" },
+				owner: { type: "string", description: "Memory owner namespace (default 'default')" },
+				cwd: { type: "string", description: "Working directory the content relates to" },
+			},
+			required: ["text"],
+		},
+	},
 ];
 
 function reply(id: number | string | undefined, result: unknown): void {
@@ -97,6 +112,12 @@ async function handleToolCall(
 			const m = getMemory(db, Number(args.id));
 			if (!m || m.owner !== owner) return reply(id, toolResult("Not found."));
 			return reply(id, toolResult(JSON.stringify(m, null, 2)));
+		}
+		case "ruyi_ingest": {
+			const text = String(args.text ?? "");
+			const cwd = typeof args.cwd === "string" ? args.cwd : null;
+			const result = await distillText(text, { owner, cwd }, "mcp-ingest");
+			return reply(id, toolResult(JSON.stringify(result)));
 		}
 		default:
 			return replyError(id, -32601, `unknown tool: ${name}`);

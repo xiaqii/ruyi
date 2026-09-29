@@ -15,7 +15,7 @@ import {
 	tokenUsage,
 } from "./db.ts";
 import type { Candidate } from "./types.ts";
-import { runDream, merge } from "./distill.ts";
+import { runDream, merge, distillText } from "./distill.ts";
 import { getInject, recall } from "./recall.ts";
 
 const MAX_BODY = 1024 * 1024;
@@ -158,6 +158,17 @@ export function startServer(): void {
 					archiveMemory(db, id);
 					return send(res, 200, { ok: true, id, status: "archived" });
 				}
+			}
+
+			// Generic ingestion: any agent submits raw conversation text,
+			// ruyi runs the full distillation pipeline on it.
+			if (req.method === "POST" && path === "/ingest") {
+				const body = await readBody(req);
+				const text = typeof body.text === "string" ? body.text.trim() : "";
+				if (text.length < 50) return send(res, 400, { error: "text too short (min 50 chars)" });
+				const source = typeof body.source === "string" ? body.source : "api-ingest";
+				const result = await distillText(text, { owner: ownerOf(url, body), cwd: cwdOf(url, body) }, source);
+				return send(res, 200, result);
 			}
 
 			if (req.method === "POST" && path === "/distill") {

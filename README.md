@@ -91,7 +91,12 @@ node /app/ruyi/src/cli.ts mcp
 
 Register it as an MCP stdio server; it exposes `ruyi_recall`, `ruyi_list`, `ruyi_get`.
 
-### Plain HTTP
+### Plain HTTP — the universal interface
+
+Any agent (or script) that can make an HTTP call can use ruyi: submit raw text
+to `/ingest` for distillation, query `/recall` for memories, poll `/inject`
+for the constitution+index block. This is what makes ruyi a memory *center*
+rather than a plugin.
 
 ```
 GET  /health
@@ -101,6 +106,7 @@ GET  /memories?owner=default&status=active
 GET  /memories/:id
 POST /memories/:id/pin  {"pinned": true}
 POST /memories/:id/forget
+POST /ingest            generic ingestion: {"text": "...", "cwd": "..."} → full distill pipeline
 POST /distill
 GET  /stats?days=7
 ```

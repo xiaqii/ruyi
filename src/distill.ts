@@ -361,6 +361,61 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 	return report;
 }
 
+export interface IngestResult {
+	triaged: boolean;
+	reason?: string;
+	actions: number;
+	new: number;
+	reinforced: number;
+	refined: number;
+	superseded: number;
+}
+
+/**
+ * Distill one raw text segment submitted over the API (agent-agnostic ingestion).
+ * Runs the full pipeline: triage -> extract -> verify -> merge -> apply.
+ */
+export async function distillText(
+	text: string,
+	scope: { owner: string; cwd: string | null },
+	source: string,
+): Promise<IngestResult> {
+	const config = loadConfig();
+	const db = getDb(config.dbPath);
+	const runId = `ingest-${crypto.randomUUID().slice(0, 8)}`;
+	const meta = { runId, sessionFile: source };
+	const report: DreamReport = {
+		runId, startedAt: new Date().toISOString(), finishedAt: "",
+		sessionsScanned: 0, sessionsDistilled: 0, triaged: 0,
+		new: 0, reinforced: 0, refined: 0, superseded: 0, archived: 0,
+		reorganize: [], inputTokens: 0, outputTokens: 0, errors: [],
+	};
+
+	const existing = activeCandidates(db, 3650, scope.owner).slice(0, config.dream.mergeSummaryLimit);
+	const verdict = await triage("", text, existing, meta);
+	if (!verdict.worth) {
+		logMemoryAction(db, runId, "TRIAGE_SKIP", { file: source, reason: verdict.reason });
+		return { triaged: true, reason: verdict.reason, actions: 0, new: 0, reinforced: 0, refined: 0, superseded: 0 };
+	}
+
+	const extracted = await extract(config.dream.pipeline, "", text, meta);
+	if (extracted.candidates.length === 0) {
+		return { triaged: false, actions: 0, new: 0, reinforced: 0, refined: 0, superseded: 0 };
+	}
+	const survivors =
+		config.dream.pipeline === "full" ? await verify(extracted.candidates, meta) : extracted.candidates;
+	const actions = await merge(survivors, existing, meta);
+	applyActions(db, actions, source, runId, report, scope);
+	return {
+		triaged: false,
+		actions: actions.length,
+		new: report.new,
+		reinforced: report.reinforced,
+		refined: report.refined,
+		superseded: report.superseded,
+	};
+}
+
 /** Human-readable nightly dream report appended to logs/dream-YYYY-MM-DD.md */
 function writeDreamReport(db: ReturnType<typeof getDb>, report: DreamReport): void {
 	try {
