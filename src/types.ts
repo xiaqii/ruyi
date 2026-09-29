@@ -62,6 +62,8 @@ export interface Config {
 		minDeltaChars: number;
 		maxSessionChars: number;
 		mergeSummaryLimit: number;
+		/** Soft store-size target; reorganize gets more aggressive above it. */
+		targetSize: number;
 	};
 	inject: {
 		constitutionMax: number;

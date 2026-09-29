@@ -34,6 +34,8 @@ export async function runReorganize(runId: string, owner: string): Promise<Reorg
 		.all(owner) as unknown as MemoryRow[];
 	if (memories.length < 10) return report; // too small to need curation
 
+	const overBudget = memories.length > config.dream.targetSize;
+
 	const listing = memories
 		.map(
 			(m) =>
@@ -43,7 +45,10 @@ export async function runReorganize(runId: string, owner: string): Promise<Reorg
 
 	const plan = await completeJson<ReorgPlan>({
 		system: loadPrompt("reorganize"),
-		user: `ACTIVE MEMORIES:\n${listing}`,
+		user:
+			(overBudget
+				? `STORE SIZE NOTICE: there are ${memories.length} active entries, above the target of ~${config.dream.targetSize}. Be noticeably more aggressive with merge_duplicates and archive this run; the store should converge, not grow without bound.\n\n`
+				: "") + `ACTIVE MEMORIES:\n${listing}`,
 		step: "reorganize",
 		runId,
 	});

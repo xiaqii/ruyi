@@ -145,7 +145,7 @@ interface RawMergeAction {
 	domain?: string;
 }
 
-async function merge(
+export async function merge(
 	candidates: Candidate[],
 	existing: MemoryRow[],
 	meta: { runId: string; sessionFile: string },

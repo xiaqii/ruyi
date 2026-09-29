@@ -16,7 +16,8 @@
     "pipeline": "full",
     "minDeltaChars": 300,
     "maxSessionChars": 120000,
-    "mergeSummaryLimit": 300
+    "mergeSummaryLimit": 300,
+    "targetSize": 300
   },
   "inject": {
     "constitutionMax": 5,

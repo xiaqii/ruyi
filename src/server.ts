@@ -1,7 +1,21 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { loadConfig } from "./config.ts";
-import { archiveMemory, getDb, getMemory, insertMemory, listMemories, logMemoryAction, memoryCounts, tokenUsage } from "./db.ts";
-import { runDream } from "./distill.ts";
+import {
+	activeCandidates,
+	archiveMemory,
+	getDb,
+	getMemory,
+	insertMemory,
+	listMemories,
+	logMemoryAction,
+	memoryCounts,
+	reinforceMemory,
+	refineMemory,
+	supersedeMemory,
+	tokenUsage,
+} from "./db.ts";
+import type { Candidate } from "./types.ts";
+import { runDream, merge } from "./distill.ts";
 import { getInject, recall } from "./recall.ts";
 
 const MAX_BODY = 1024 * 1024;
@@ -72,27 +86,54 @@ export function startServer(): void {
 			}
 
 			// Explicit write: conversation-independent entries (rules, specs, skill pointers).
+			// Goes through the same LLM merge judgement as nightly distillation, so
+			// repeated writes reinforce/refine instead of duplicating.
 			if (req.method === "POST" && path === "/memories") {
 				const body = await readBody(req);
 				const summary = typeof body.summary === "string" ? body.summary.trim() : "";
 				const content = typeof body.content === "string" ? body.content.trim() : "";
 				const kind = typeof body.kind === "string" ? body.kind : "fact";
 				if (!summary || !content) return send(res, 400, { error: "summary and content are required" });
-				const id = insertMemory(
-					db,
-					{
-						kind: kind as never,
-						domain: typeof body.domain === "string" ? body.domain : undefined,
-						summary,
-						content,
-						origin: "user_stated",
-						confidence: typeof body.confidence === "number" ? body.confidence : 0.9,
-						source: null,
-					},
-					{ owner: ownerOf(url, body), cwd: cwdOf(url, body) },
-				);
-				logMemoryAction(db, null, "MANUAL_ADD", { id, summary });
-				return send(res, 201, { id });
+				const owner = ownerOf(url, body);
+				const scope = { owner, cwd: cwdOf(url, body) };
+				const candidate: Candidate = {
+					kind: kind as never,
+					domain: typeof body.domain === "string" ? body.domain : undefined,
+					summary,
+					content,
+					origin: "user_stated",
+					confidence: typeof body.confidence === "number" ? body.confidence : 0.9,
+				};
+
+				const existing = activeCandidates(db, 3650, owner).slice(0, config.dream.mergeSummaryLimit);
+				const actions = await merge([candidate], existing, { runId: "manual", sessionFile: "(manual write)" });
+				const action = actions[0] ?? { action: "NEW" as const, candidate };
+
+				switch (action.action) {
+					case "REINFORCE":
+						reinforceMemory(db, action.id);
+						logMemoryAction(db, null, "MANUAL_REINFORCE", { id: action.id, summary });
+						return send(res, 200, { id: action.id, action: "reinforced" });
+					case "REFINE":
+						refineMemory(db, action.id, action.summary, action.content);
+						logMemoryAction(db, null, "MANUAL_REFINE", { id: action.id, summary: action.summary ?? summary });
+						return send(res, 200, { id: action.id, action: "refined" });
+					case "SUPERSEDE": {
+						const newId = supersedeMemory(
+							db,
+							action.id,
+							{ ...candidate, summary: action.summary, content: action.content },
+							scope,
+						);
+						logMemoryAction(db, null, "MANUAL_SUPERSEDE", { oldId: action.id, newId, summary: action.summary });
+						return send(res, 201, { id: newId, action: "superseded" });
+					}
+					default: {
+						const id = insertMemory(db, candidate, scope);
+						logMemoryAction(db, null, "MANUAL_ADD", { id, summary });
+						return send(res, 201, { id, action: "new" });
+					}
+				}
 			}
 
 			const idMatch = path.match(/^\/memories\/(\d+)(\/(pin|forget))?$/);
