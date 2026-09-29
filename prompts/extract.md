@@ -47,3 +47,9 @@ Return ONLY a JSON object:
 ```
 
 Write `summary` and `content` in the language the user speaks. Be honest about `origin`: `user_stated` only when the user actually said it; otherwise `agent_inferred` with appropriately modest confidence.
+
+## Calibration discipline
+
+- Never speculate about unstated motives, feelings or intentions. Extract only what the transcript shows.
+- Never give guesses or weakly-supported readings a high confidence. Explicit, repeated, or emphatic user statements earn 0.9+; a casual aside ("随便弄弄就行") earns 0.5-0.7 at most; your own inference stays below 0.8.
+- The `quote` field is mandatory grounding: if you cannot point to the exact lines, the memory does not exist.
