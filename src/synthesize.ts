@@ -42,7 +42,7 @@ export async function runSynthesize(owner: string): Promise<SynthesizeReport> {
 		user: `MEMORIES:\n${listing}\n\nReturn at most ${MAX_THEMES} themes.`,
 		runId: `synthesize-${Date.now()}`,
 		step: "synthesize-cluster",
-		maxTokens: 4096,
+		maxTokens: 16384,
 	});
 
 	const byId = new Map(memories.map((m) => [m.id, m]));
