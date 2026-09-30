@@ -33,6 +33,7 @@ Commands:
   pin <id> [0|1]               Pin/unpin a memory (pinned = always injected)
   add --kind=K --summary="S" <content>
                                Explicitly add a memory (rules, specs, skill pointers)
+  synthesize                   Re-synthesize theme profiles from the memory store
   stats [--days=7]             Memory counts and token usage
 `;
 
@@ -67,11 +68,14 @@ async function main(): Promise<void> {
 			}
 			const k = typeof flags.k === "string" ? Number(flags.k) : undefined;
 			const owner = typeof flags.owner === "string" ? flags.owner : "default";
-			const memories = await recall(query, k, owner);
-			for (const m of memories) {
+			const result = await recall(query, k, owner);
+			for (const p of result.profiles) {
+				console.log(`PROFILE【${p.title}】v${p.version}\n${p.content}\n`);
+			}
+			for (const m of result.memories) {
 				console.log(`#${m.id} [${m.kind}${m.domain ? "/" + m.domain : ""}] ${m.summary}\n  ${m.content}\n`);
 			}
-			if (memories.length === 0) console.log("(no relevant memories)");
+			if (result.memories.length === 0 && result.profiles.length === 0) console.log("(no relevant memories)");
 			break;
 		}
 
@@ -135,6 +139,17 @@ async function main(): Promise<void> {
 				{ owner: "default", cwd: process.cwd() },
 			);
 			console.log(`added #${id}`);
+			break;
+		}
+
+		case "synthesize": {
+			const owner = typeof flags.owner === "string" ? flags.owner : "default";
+			const { runSynthesize } = await import("./synthesize.ts");
+			const report = await runSynthesize(owner);
+			if (report.skipped) console.log("(store too small, skipped)");
+			for (const t of report.updated)
+				console.log(`${t.title} (${t.theme}) → v${t.version}, ${t.members} memories`);
+			console.log(`themes: ${report.themes}`);
 			break;
 		}
 

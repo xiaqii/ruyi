@@ -57,13 +57,26 @@ interface RecallMemory {
 	source: string | null;
 }
 
+interface RecallProfile {
+	id: number;
+	theme: string;
+	title: string;
+	content: string;
+	version: number;
+}
+
+interface RecallResponse {
+	memories: RecallMemory[];
+	profiles?: RecallProfile[];
+}
+
 export default function (pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event, ctx) => {
 		// Smart injection: let ruyi's LLM judge which memories (if any) are
 		// genuinely relevant to the user's opening prompt. No relevance = no injection.
 		const query = event.prompt.length > 2000 ? event.prompt.slice(0, 2000) : event.prompt;
 		if (!query.trim()) return;
-		const result = await api<{ memories: RecallMemory[] }>(
+		const result = await api<RecallResponse>(
 			`/recall`,
 			{
 				method: "POST",
@@ -72,14 +85,21 @@ export default function (pi: ExtensionAPI) {
 			},
 			INJECT_TIMEOUT_MS,
 		);
-		if (!result || result.memories.length === 0) return;
-		const lines = result.memories.map(
-			(m) => `- (#${m.id}, ${m.kind}) ${m.summary}\n  ${m.content}`,
-		);
+		if (!result || (result.memories.length === 0 && (result.profiles ?? []).length === 0)) return;
+		const parts: string[] = [];
+		for (const p of result.profiles ?? [])
+			parts.push(
+				`Synthesized profile chapter【${p.title}】(v${p.version}, distilled from the person's long-term memory):\n${p.content.slice(0, 3000)}`,
+			);
+		if (result.memories.length > 0) {
+			const lines = result.memories.map((m) => `- (#${m.id}, ${m.kind}) ${m.summary}\n  ${m.content}`);
+			parts.push(
+				"Long-term memories judged relevant to this conversation:\n\n" + lines.join("\n"),
+			);
+		}
 		event.systemPromptOptions.sections["ruyi-memory"] =
-			"Long-term memories judged relevant to this conversation. Use them when they help; " +
-			"they never override what the user says now. More can be searched via the ruyi_recall tool.\n\n" +
-			lines.join("\n");
+			parts.join("\n\n") +
+			"\n\nUse the above when it helps; it never overrides what the user says now. More can be searched via the ruyi_recall tool.";
 	});
 
 	pi.registerTool({
@@ -92,7 +112,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: RecallParams,
 
 		async execute(_id, params, _signal, _onUpdate, _ctx) {
-			const result = await api<{ memories: RecallMemory[] }>(
+			const result = await api<RecallResponse>(
 				`/recall`,
 				{
 					method: "POST",
@@ -113,19 +133,21 @@ export default function (pi: ExtensionAPI) {
 					details: { count: 0, unavailable: true },
 				};
 			}
-			if (result.memories.length === 0) {
+			if (result.memories.length === 0 && (result.profiles ?? []).length === 0) {
 				return {
 					content: [{ type: "text", text: "No relevant memories found." }],
 					details: { count: 0 },
 				};
 			}
-			const text = result.memories
-				.map((m) => {
-					const head = `#${m.id} [${m.kind}${m.domain ? "/" + m.domain : ""}] ${m.summary}`;
-					const src = m.source ? `\n   source: ${m.source}` : "";
-					return `${head}\n   ${m.content}${src}`;
-				})
-				.join("\n\n");
+			const parts: string[] = [];
+			for (const p of result.profiles ?? [])
+				parts.push(`PROFILE【${p.title}】v${p.version}\n${p.content}`);
+			for (const m of result.memories) {
+				const head = `#${m.id} [${m.kind}${m.domain ? "/" + m.domain : ""}] ${m.summary}`;
+				const src = m.source ? `\n   source: ${m.source}` : "";
+				parts.push(`${head}\n   ${m.content}${src}`);
+			}
+			const text = parts.join("\n\n");
 			return {
 				content: [{ type: "text", text }],
 				details: { count: result.memories.length },

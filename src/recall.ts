@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.ts";
-import { ftsSearch, getByIds, getDb, scopeFilter, type RecallScope } from "./db.ts";
+import { ftsSearch, getByIds, getDb, getProfile, listProfiles, scopeFilter, type ProfileRow, type RecallScope } from "./db.ts";
 import { completeJson } from "./llm.ts";
 import { loadPrompt } from "./prompts.ts";
 import type { MemoryRow } from "./types.ts";
@@ -51,10 +51,16 @@ export function getInject(owner: string, cwd: string | null, scope: RecallScope)
 	};
 }
 
+export interface RecallResult {
+	memories: MemoryRow[];
+	profiles: ProfileRow[];
+}
+
 /**
  * Layer 3: two-stage LLM recall. Stage 1 gathers candidates (recent + high-evidence,
  * FTS prefilter only when the store is large); stage 2 lets the LLM pick what is
- * genuinely relevant to the current context.
+ * genuinely relevant to the current context — memories and, when the conversation
+ * sits squarely inside one facet of the person, at most one profile chapter.
  */
 export async function recall(
 	query: string,
@@ -62,7 +68,7 @@ export async function recall(
 	owner: string,
 	cwd: string | null = null,
 	scope?: RecallScope,
-): Promise<MemoryRow[]> {
+): Promise<RecallResult> {
 	const config = loadConfig();
 	const db = getDb(config.dbPath);
 	const limit = Math.min(k ?? config.inject.recallK, 20);
@@ -80,17 +86,30 @@ export async function recall(
 	if (candidates.length > config.inject.recallCandidateMax) {
 		candidates = ftsSearch(db, query, 100, owner).filter((m) => candidates.some((c) => c.id === m.id));
 	}
-	if (candidates.length === 0) return [];
+	if (candidates.length === 0) return { memories: [], profiles: [] };
 
 	const listing = candidates
 		.map((m) => `[id ${m.id}] (${m.kind}, ${m.last_seen_at.slice(0, 10)}) ${m.summary}`)
 		.join("\n");
 
-	const { ids } = await completeJson<{ ids: number[] }>({
+	const profiles = listProfiles(db, owner);
+	const profileBlock =
+		profiles.length > 0
+			? "\n\nPROFILES:\n" + profiles.map((p) => `[id ${p.id}] (${p.title}) — synthesized portrait of this facet`).join("\n")
+			: "";
+
+	const picked = await completeJson<{ ids?: number[]; profile_ids?: number[] }>({
 		system: loadPrompt("rerank"),
-		user: `CONTEXT:\n${query}\n\nCANDIDATES:\n${listing}\n\nReturn at most ${limit} ids.`,
+		user: `CONTEXT:\n${query}\n\nCANDIDATES:\n${listing}${profileBlock}\n\nReturn at most ${limit} memory ids and at most 1 profile id.`,
 		step: "rerank",
 	});
-	if (!Array.isArray(ids) || ids.length === 0) return [];
-	return getByIds(db, ids.slice(0, limit)).filter((m) => m.owner === owner);
+	const ids = Array.isArray(picked.ids) ? picked.ids : [];
+	const profileIds = Array.isArray(picked.profile_ids) ? picked.profile_ids : [];
+	return {
+		memories: getByIds(db, ids.slice(0, limit)).filter((m) => m.owner === owner),
+		profiles: profileIds
+			.map((id) => getProfile(db, id))
+			.filter((p): p is ProfileRow => !!p && p.owner === owner)
+			.slice(0, 1),
+	};
 }

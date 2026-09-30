@@ -75,6 +75,21 @@ CREATE TABLE IF NOT EXISTS memory_log (
   action  TEXT NOT NULL,
   detail  TEXT
 );
+
+-- Second-level synthesis: theme profiles distilled FROM the memory store
+-- (the person's programming style, shopping taste, ... — not per-episode fragments).
+CREATE TABLE IF NOT EXISTS profiles (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner      TEXT NOT NULL DEFAULT 'default',
+  theme      TEXT NOT NULL,
+  title      TEXT NOT NULL,
+  content    TEXT NOT NULL,
+  memory_ids TEXT NOT NULL DEFAULT '[]',
+  version    INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(owner, theme)
+);
 `);
 	return db;
 }
@@ -256,6 +271,46 @@ export function tokenUsage(d: DatabaseSync, days: number): { day: string; step: 
 			 FROM token_log WHERE at >= ? GROUP BY day, step ORDER BY day DESC, step`,
 		)
 		.all(since) as unknown as { day: string; step: string; input: number; output: number }[];
+}
+
+export interface ProfileRow {
+	id: number;
+	owner: string;
+	theme: string;
+	title: string;
+	content: string;
+	memory_ids: string;
+	version: number;
+	created_at: string;
+	updated_at: string;
+}
+
+/** Insert or update (version-bump) the profile for (owner, theme). */
+export function upsertProfile(
+	d: DatabaseSync,
+	owner: string,
+	theme: string,
+	title: string,
+	content: string,
+	memoryIds: number[],
+): ProfileRow {
+	const now = new Date().toISOString();
+	d.prepare(
+		`INSERT INTO profiles (owner, theme, title, content, memory_ids, version, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+		 ON CONFLICT(owner, theme) DO UPDATE SET
+		   title = excluded.title, content = excluded.content, memory_ids = excluded.memory_ids,
+		   version = version + 1, updated_at = excluded.updated_at`,
+	).run(owner, theme, title, content, JSON.stringify(memoryIds), now, now);
+	return d.prepare(`SELECT * FROM profiles WHERE owner = ? AND theme = ?`).get(owner, theme) as unknown as ProfileRow;
+}
+
+export function listProfiles(d: DatabaseSync, owner: string): ProfileRow[] {
+	return d.prepare(`SELECT * FROM profiles WHERE owner = ? ORDER BY updated_at DESC`).all(owner) as unknown as ProfileRow[];
+}
+
+export function getProfile(d: DatabaseSync, id: number): ProfileRow | null {
+	return (d.prepare(`SELECT * FROM profiles WHERE id = ?`).get(id) as unknown as ProfileRow) ?? null;
 }
 
 export function memoryCounts(d: DatabaseSync, owner?: string): Record<string, number> {

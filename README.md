@@ -101,6 +101,8 @@ rather than a plugin.
 ```
 GET  /health
 GET  /inject?owner=default
+GET  /profiles            synthesized theme chapters; GET /profiles/:id for one
+POST /synthesize           re-run profile synthesis now
 POST /recall            {"query": "...", "k": 5, "owner": "default"}
 GET  /memories?owner=default&status=active
 GET  /memories/:id

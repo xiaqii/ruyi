@@ -5,18 +5,21 @@ import {
 	archiveMemory,
 	getDb,
 	getMemory,
+	getProfile,
 	insertMemory,
 	listMemories,
+	listProfiles,
 	logMemoryAction,
 	memoryCounts,
-	reinforceMemory,
 	refineMemory,
+	reinforceMemory,
 	supersedeMemory,
 	tokenUsage,
 } from "./db.ts";
 import type { Candidate } from "./types.ts";
 import { runDream, merge, distillText } from "./distill.ts";
 import { getInject, recall } from "./recall.ts";
+import { runSynthesize } from "./synthesize.ts";
 
 const MAX_BODY = 1024 * 1024;
 
@@ -75,8 +78,8 @@ export function startServer(): void {
 				const query = typeof body.query === "string" ? body.query : "";
 				if (!query.trim()) return send(res, 400, { error: "query is required" });
 				const k = typeof body.k === "number" ? body.k : undefined;
-				const memories = await recall(query, k, ownerOf(url, body), cwdOf(url, body), scopeOf(url, body));
-				return send(res, 200, { memories });
+				const result = await recall(query, k, ownerOf(url, body), cwdOf(url, body), scopeOf(url, body));
+				return send(res, 200, result);
 			}
 
 			if (req.method === "GET" && path === "/memories") {
@@ -169,6 +172,22 @@ export function startServer(): void {
 				const source = typeof body.source === "string" ? body.source : "api-ingest";
 				const result = await distillText(text, { owner: ownerOf(url, body), cwd: cwdOf(url, body) }, source);
 				return send(res, 200, result);
+			}
+
+			if (req.method === "GET" && path === "/profiles") {
+				return send(res, 200, { profiles: listProfiles(db, ownerOf(url)) });
+			}
+
+			const profileMatch = path.match(/^\/profiles\/(\d+)$/);
+			if (req.method === "GET" && profileMatch) {
+				const p = getProfile(db, Number(profileMatch[1]));
+				return p && p.owner === ownerOf(url) ? send(res, 200, p) : send(res, 404, { error: "not found" });
+			}
+
+			if (req.method === "POST" && path === "/synthesize") {
+				const body = await readBody(req);
+				const report = await runSynthesize(ownerOf(url, body));
+				return send(res, 200, report);
 			}
 
 			if (req.method === "POST" && path === "/distill") {

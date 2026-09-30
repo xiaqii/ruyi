@@ -95,12 +95,14 @@ async function handleToolCall(
 		case "ruyi_recall": {
 			const query = String(args.query ?? "");
 			const k = typeof args.k === "number" ? args.k : undefined;
-			const memories = await recall(query, k, owner);
-			if (memories.length === 0) return reply(id, toolResult("No relevant memories found."));
-			const text = memories
-				.map((m) => `#${m.id} [${m.kind}${m.domain ? "/" + m.domain : ""}] ${m.summary}\n${m.content}`)
-				.join("\n\n");
-			return reply(id, toolResult(text));
+			const result = await recall(query, k, owner);
+			if (result.memories.length === 0 && result.profiles.length === 0)
+				return reply(id, toolResult("No relevant memories found."));
+			const parts: string[] = [];
+			for (const p of result.profiles) parts.push(`PROFILE【${p.title}】v${p.version}\n${p.content}`);
+			for (const m of result.memories)
+				parts.push(`#${m.id} [${m.kind}${m.domain ? "/" + m.domain : ""}] ${m.summary}\n${m.content}`);
+			return reply(id, toolResult(parts.join("\n\n")));
 		}
 		case "ruyi_list": {
 			const limit = typeof args.limit === "number" ? args.limit : 30;
