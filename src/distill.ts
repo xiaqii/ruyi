@@ -296,16 +296,17 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 
 		for await (const { agent, file, owner } of stream) {
 			report.sessionsScanned++;
-			try {
-				const size = statSync(file).size;
-				const state = getDistillState(db, file);
-				if (!opts.fullReprocess && state && size === state.processed_bytes) continue;
-				let offset = opts.fullReprocess || !state || size < state.processed_bytes ? 0 : state.processed_bytes;
-				let gist = state?.gist ?? "";
+			const size = statSync(file).size;
+			const state = getDistillState(db, file);
+			if (!opts.fullReprocess && state && size === state.processed_bytes) continue;
+			let offset = opts.fullReprocess || !state || size < state.processed_bytes ? 0 : state.processed_bytes;
+			let gist = state?.gist ?? "";
 
-				// Process segment after segment until EOF; each iteration resumes
-				// from the previous segment's line-boundary offset.
-				for (let seg = 0; seg < 500; seg++) {
+			// Process segment after segment until EOF; each iteration resumes
+			// from the previous segment's line-boundary offset. A failing segment
+			// (e.g. LLM timeout) is retried once, then skipped — never aborts the file.
+			for (let seg = 0; seg < 500; seg++) {
+				try {
 					const delta = readSessionDelta(agent, file, offset, config.dream.maxSessionChars);
 					if (delta.newOffset <= offset) break;
 					if (delta.text.length < config.dream.minDeltaChars) {
@@ -354,9 +355,14 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 					offset = delta.newOffset;
 					report.sessionsDistilled++;
 					if (delta.newOffset >= size) break;
+				} catch (err) {
+					report.errors.push(`${file}@seg${seg}: ${err instanceof Error ? err.message : String(err)}`);
+					// Skip ahead one segment so a persistent failure cannot loop forever.
+					const delta = readSessionDelta(agent, file, offset, config.dream.maxSessionChars);
+					if (delta.newOffset <= offset) break;
+					if (!opts.dryRun) setDistillState(db, file, delta.newOffset, gist);
+					offset = delta.newOffset;
 				}
-			} catch (err) {
-				report.errors.push(`${file}: ${err instanceof Error ? err.message : String(err)}`);
 			}
 		}
 
