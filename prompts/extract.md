@@ -18,7 +18,7 @@ Do not filter mechanically — a user's correction is meaningless without the as
 Memory kinds:
 
 - **preference** — tastes, style, working rules the user holds across contexts (communication, code style, workflow, decision-making)
-- **fact** — stable things about the person or their environment that live in NO repository (their car, their server architecture, their machine)
+- **fact** — stable things about the person or their environment that live in NO repository (their car, their server architecture, their machine). The user often has SEVERAL machines/environments — always name which one a fact belongs to ("Windows 笔记本", "阿里云服务器", "Linux 小主机"), otherwise the fact becomes actively misleading.
 - **knowledge** — endorsed findings and conclusions that stay true and reusable: research outcomes ("LCD with hardware low-blue-light is real eye protection"), frameworks validated in discussion, settled answers the user would want back without re-researching
 - **lesson** — generalizable experience: pitfalls, failures, techniques that worked, stated abstractly enough to apply elsewhere
 - **skill_index** — a *pointer* to reusable know-how ("deploy commands live in file X", "detailed conventions are in Y"), never the know-how itself

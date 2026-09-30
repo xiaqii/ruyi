@@ -9,7 +9,7 @@ The test: strip away everything about *this* project and *this* task. What remai
 Memory kinds:
 
 - **preference** — tastes, style, working rules held across contexts (the user's own words are the only authority)
-- **fact** — stable things about the person or environment that live in no repository
+- **fact** — stable things about the person or environment that live in no repository; when the user has several machines, name which one the fact belongs to
 - **knowledge** — user-ENDORSED findings and conclusions: research outcomes, validated frameworks, settled answers worth reusing without re-researching. Assistant output only counts when the user accepted/built on it.
 - **lesson** — generalizable experience, stated abstractly; what the user pushed back on is often the best lesson
 - **skill_index** — a pointer to reusable know-how, never the know-how itself

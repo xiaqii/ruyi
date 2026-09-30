@@ -246,6 +246,12 @@ export interface DreamOptions {
 	pipeline?: "full" | "single";
 	/** Restrict to one session file (used by the A/B compare script). */
 	onlySession?: string;
+	/** Agent of onlySession (default "pi"). */
+	onlyAgent?: string;
+	/** Skip the end-of-run decay pass (batch import: run it once at the end). */
+	skipDecay?: boolean;
+	/** Skip the end-of-run reorganize pass (batch import: run it once at the end). */
+	skipReorganize?: boolean;
 	/** Ignore incremental state, distill the whole session. */
 	fullReprocess?: boolean;
 	/** Collect actions instead of applying them (used by the A/B compare script). */
@@ -278,7 +284,7 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 	const release = opts.dryRun ? () => {} : acquireLock();
 	try {
 		const sources = opts.onlySession
-			? [{ agent: "pi", file: opts.onlySession, owner: "default" }]
+			? [{ agent: opts.onlyAgent ?? "pi", file: opts.onlySession, owner: "default" }]
 			: null;
 		const stream = sources
 			? (async function* () {
@@ -294,55 +300,69 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 				const size = statSync(file).size;
 				const state = getDistillState(db, file);
 				if (!opts.fullReprocess && state && size === state.processed_bytes) continue;
-				const offset = opts.fullReprocess || !state || size < state.processed_bytes ? 0 : state.processed_bytes;
+				let offset = opts.fullReprocess || !state || size < state.processed_bytes ? 0 : state.processed_bytes;
+				let gist = state?.gist ?? "";
 
-				const delta = readSessionDelta(agent, file, offset, config.dream.maxSessionChars);
-				if (delta.text.length < config.dream.minDeltaChars) {
-					if (!opts.dryRun) setDistillState(db, file, delta.newOffset, state?.gist ?? "");
-					continue;
+				// Process segment after segment until EOF; each iteration resumes
+				// from the previous segment's line-boundary offset.
+				for (let seg = 0; seg < 500; seg++) {
+					const delta = readSessionDelta(agent, file, offset, config.dream.maxSessionChars);
+					if (delta.newOffset <= offset) break;
+					if (delta.text.length < config.dream.minDeltaChars) {
+						if (!opts.dryRun) setDistillState(db, file, delta.newOffset, gist);
+						if (delta.newOffset >= size) break;
+						offset = delta.newOffset;
+						continue;
+					}
+
+					const meta = { runId, sessionFile: file };
+					const existing = activeCandidates(db, 3650, owner).slice(0, config.dream.mergeSummaryLimit);
+
+					// Pre-distillation triage: skip segments with nothing new & durable.
+					const verdict = await triage(gist, delta.text, existing, meta);
+					if (!verdict.worth) {
+						report.triaged++;
+						logMemoryAction(db, runId, "TRIAGE_SKIP", { file, reason: verdict.reason });
+						if (!opts.dryRun) setDistillState(db, file, delta.newOffset, gist);
+						offset = delta.newOffset;
+						continue;
+					}
+
+					const extracted = await extract(pipeline, gist, delta.text, meta);
+					if (extracted.candidates.length === 0) {
+						if (!opts.dryRun) setDistillState(db, file, delta.newOffset, extracted.gist);
+						gist = extracted.gist;
+						offset = delta.newOffset;
+						continue;
+					}
+
+					const survivors =
+						pipeline === "full" && extracted.candidates.length > 0
+							? await verify(extracted.candidates, meta)
+							: extracted.candidates;
+
+					const actions = await merge(survivors, existing, meta);
+
+					if (opts.dryRun) {
+						opts.onActions?.(file, pipeline, actions);
+					} else {
+						const scope = { owner, cwd: readSessionCwd(file) };
+						applyActions(db, actions, file, runId, report, scope);
+						setDistillState(db, file, delta.newOffset, extracted.gist);
+					}
+					gist = extracted.gist;
+					offset = delta.newOffset;
+					report.sessionsDistilled++;
+					if (delta.newOffset >= size) break;
 				}
-
-				const meta = { runId, sessionFile: file };
-				const existing = activeCandidates(db, 3650, owner).slice(0, config.dream.mergeSummaryLimit);
-
-				// Pre-distillation triage: skip segments with nothing new & durable.
-				const verdict = await triage(state?.gist ?? "", delta.text, existing, meta);
-				if (!verdict.worth) {
-					report.triaged++;
-					logMemoryAction(db, runId, "TRIAGE_SKIP", { file, reason: verdict.reason });
-					if (!opts.dryRun) setDistillState(db, file, delta.newOffset, state?.gist ?? "");
-					continue;
-				}
-
-				const extracted = await extract(pipeline, state?.gist ?? "", delta.text, meta);
-				if (extracted.candidates.length === 0) {
-					if (!opts.dryRun) setDistillState(db, file, delta.newOffset, extracted.gist);
-					continue;
-				}
-
-				const survivors =
-					pipeline === "full" && extracted.candidates.length > 0
-						? await verify(extracted.candidates, meta)
-						: extracted.candidates;
-
-				const actions = await merge(survivors, existing, meta);
-
-				if (opts.dryRun) {
-					opts.onActions?.(file, pipeline, actions);
-				} else {
-					const scope = { owner, cwd: readSessionCwd(file) };
-					applyActions(db, actions, file, runId, report, scope);
-					setDistillState(db, file, delta.newOffset, extracted.gist);
-				}
-				report.sessionsDistilled++;
 			} catch (err) {
 				report.errors.push(`${file}: ${err instanceof Error ? err.message : String(err)}`);
 			}
 		}
 
 		if (!opts.dryRun) {
-			report.archived = runDecay(db, config);
-			for (const owner of storeOwners(db)) {
+			report.archived = opts.skipDecay ? 0 : runDecay(db, config);
+			if (!opts.skipReorganize) for (const owner of storeOwners(db)) {
 				try {
 					const r = await runReorganize(runId, owner);
 					report.reorganize.push({ owner, ...r });
