@@ -1,4 +1,4 @@
-import { openSync, readSync, closeSync, readFileSync } from "node:fs";
+import { openSync, readSync, closeSync, fstatSync } from "node:fs";
 
 /** Read the cwd recorded in the session header (first {"type":"session"} line). */
 export function readSessionCwd(file: string): string | null {
@@ -74,53 +74,102 @@ function partToLine(role: string, part: ContentPart): string | null {
 	}
 }
 
+/** Max characters kept from a single formatted transcript line (huge pastes, minified blobs). */
+const MAX_LINE_CHARS = 8192;
+
+/**
+ * Yield complete lines of a JSONL file as {line, end} where `end` is the byte
+ * offset just past the trailing newline. Reads in chunks (no whole-file
+ * string conversion), so multi-hundred-MB session files stay cheap per call.
+ * A non-zero `offset` may land mid-line; the first partial line is dropped.
+ * A trailing line without a newline is left for a future call (append-only files).
+ */
+function* iterLines(file: string, offset: number): Generator<{ line: string; end: number }> {
+	const fd = openSync(file, "r");
+	try {
+		const size = fstatSync(fd).size;
+		const CHUNK = 4 << 20;
+		const buf = Buffer.allocUnsafe(CHUNK);
+		let pos = offset;
+		let pending = Buffer.alloc(0);
+		let pendingStart = offset;
+		let skipFirst = offset > 0;
+		while (true) {
+			let idx: number;
+			while ((idx = pending.indexOf(0x0a)) !== -1) {
+				const line = pending.subarray(0, idx).toString("utf8");
+				const end = pendingStart + idx + 1;
+				pending = pending.subarray(idx + 1);
+				pendingStart = end;
+				if (skipFirst) {
+					skipFirst = false;
+					continue;
+				}
+				yield { line, end };
+			}
+			if (pos >= size) break;
+			const n = readSync(fd, buf, 0, Math.min(CHUNK, size - pos), pos);
+			if (n <= 0) break;
+			pos += n;
+			pending = Buffer.concat([pending, buf.subarray(0, n)]);
+		}
+	} finally {
+		closeSync(fd);
+	}
+}
+
+/**
+ * Shared delta-collecting loop: format each parsed entry into transcript lines
+ * and stop at a line boundary once `maxChars` of text has accumulated, so the
+ * next call resumes exactly where this one stopped. Never drops the middle of
+ * a file the way whole-file truncation did.
+ */
+function collectDelta(
+	file: string,
+	offset: number,
+	maxChars: number,
+	formatEntry: (entry: unknown) => string[],
+): SessionDelta {
+	const out: string[] = [];
+	let total = 0;
+	let newOffset = offset;
+	for (const { line, end } of iterLines(file, offset)) {
+		newOffset = end;
+		let entry: unknown;
+		try {
+			entry = JSON.parse(line.trim());
+		} catch {
+			continue;
+		}
+		for (const formatted of formatEntry(entry)) {
+			const t = formatted.length > MAX_LINE_CHARS ? `${formatted.slice(0, MAX_LINE_CHARS)}…` : formatted;
+			out.push(t);
+			total += t.length + 1;
+		}
+		if (total >= maxChars) return { text: out.join("\n"), newOffset };
+	}
+	return { text: out.join("\n"), newOffset };
+}
+
 /**
  * Read the unprocessed tail of a pi session JSONL file (append-only) and condense it
  * into clean transcript text. Tool noise is truncated; thinking blocks are dropped.
  */
 export function readPiSessionDelta(file: string, offset: number, maxChars: number): SessionDelta {
-	const buf = readFileSync(file);
-	let slice = buf.subarray(offset);
-	let newOffset = buf.length;
-
-	if (offset > 0) {
-		// The offset may land mid-line; drop the first partial line.
-		const nl = slice.indexOf(0x0a);
-		if (nl === -1) return { text: "", newOffset };
-		slice = slice.subarray(nl + 1);
-	}
-
-	const lines: string[] = [];
-	for (const rawLine of slice.toString("utf8").split("\n")) {
-		const line = rawLine.trim();
-		if (!line) continue;
-		let entry: { type?: string; message?: { role?: string; content?: ContentPart[] | string } };
-		try {
-			entry = JSON.parse(line);
-		} catch {
-			continue;
-		}
-		if (entry.type !== "message" || !entry.message) continue;
-		const role = entry.message.role ?? "?";
-		const content = entry.message.content;
-		if (typeof content === "string") {
-			if (content.trim()) lines.push(`[${role}] ${content.trim()}`);
-			continue;
-		}
-		if (!Array.isArray(content)) continue;
+	return collectDelta(file, offset, maxChars, (entry) => {
+		const e = entry as { type?: string; message?: { role?: string; content?: ContentPart[] | string } };
+		if (e.type !== "message" || !e.message) return [];
+		const role = e.message.role ?? "?";
+		const content = e.message.content;
+		if (typeof content === "string") return content.trim() ? [`[${role}] ${content.trim()}`] : [];
+		if (!Array.isArray(content)) return [];
+		const out: string[] = [];
 		for (const part of content) {
-			const out = partToLine(role, part);
-			if (out) lines.push(out);
+			const line = partToLine(role, part);
+			if (line) out.push(line);
 		}
-	}
-
-	let text = lines.join("\n");
-	if (text.length > maxChars) {
-		const head = Math.floor(maxChars * 0.3);
-		const tail = maxChars - head;
-		text = `${text.slice(0, head)}\n\n...[${text.length - maxChars} chars omitted from the middle]...\n\n${text.slice(-tail)}`;
-	}
-	return { text, newOffset };
+		return out;
+	});
 }
 
 /**
@@ -128,58 +177,31 @@ export function readPiSessionDelta(file: string, offset: number, maxChars: numbe
  * message.content as string or array of text/thinking/tool_use/tool_result parts.
  */
 export function readClaudeCodeSessionDelta(file: string, offset: number, maxChars: number): SessionDelta {
-	const buf = readFileSync(file);
-	let slice = buf.subarray(offset);
-	const newOffset = buf.length;
-
-	if (offset > 0) {
-		const nl = slice.indexOf(0x0a);
-		if (nl === -1) return { text: "", newOffset };
-		slice = slice.subarray(nl + 1);
-	}
-
-	const lines: string[] = [];
-	for (const rawLine of slice.toString("utf8").split("\n")) {
-		const line = rawLine.trim();
-		if (!line) continue;
-		let entry: {
+	return collectDelta(file, offset, maxChars, (entry) => {
+		const e = entry as {
 			type?: string;
 			isMeta?: boolean;
 			message?: { role?: string; content?: ContentPart[] | string };
 		};
-		try {
-			entry = JSON.parse(line);
-		} catch {
-			continue;
-		}
-		if ((entry.type !== "user" && entry.type !== "assistant") || entry.isMeta || !entry.message) continue;
-		const role = entry.message.role ?? entry.type;
-		const content = entry.message.content;
+		if ((e.type !== "user" && e.type !== "assistant") || e.isMeta || !e.message) return [];
+		const role = e.message.role ?? e.type;
+		const content = e.message.content;
 		if (typeof content === "string") {
 			// Skip command/system plumbing messages.
 			if (content.trim() && !content.startsWith("<command-") && !content.startsWith("<local-command"))
-				lines.push(`[${role}] ${content.trim()}`);
-			continue;
+				return [`[${role}] ${content.trim()}`];
+			return [];
 		}
-		if (!Array.isArray(content)) continue;
+		if (!Array.isArray(content)) return [];
+		const out: string[] = [];
 		for (const part of content) {
 			// Claude Code names its tool parts tool_use / tool_result
-			const mapped =
-				part.type === "tool_use"
-					? { ...part, type: "toolCall", arguments: part.input }
-					: part;
-			const out = partToLine(role, mapped);
-			if (out) lines.push(out);
+			const mapped = part.type === "tool_use" ? { ...part, type: "toolCall", arguments: part.input } : part;
+			const line = partToLine(role, mapped);
+			if (line) out.push(line);
 		}
-	}
-
-	let text = lines.join("\n");
-	if (text.length > maxChars) {
-		const head = Math.floor(maxChars * 0.3);
-		const tail = maxChars - head;
-		text = `${text.slice(0, head)}\n\n...[${text.length - maxChars} chars omitted from the middle]...\n\n${text.slice(-tail)}`;
-	}
-	return { text, newOffset };
+		return out;
+	});
 }
 
 /** Pluggable per-agent session parsers. Add opencode etc. here. */

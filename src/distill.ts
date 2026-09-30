@@ -50,7 +50,11 @@ async function* sessionFiles(dirs: { agent: string; dir: string; owner: string }
 			continue;
 		}
 		for (const e of entries) {
-			if (e.endsWith(".jsonl")) yield { agent: dir.agent, file: join(dir.dir, e), owner: dir.owner };
+			if (!e.endsWith(".jsonl")) continue;
+			// Subagent transcripts are execution detail (mostly tool output);
+			// the user signal lives in the main session files.
+			if (e.includes("subagents/") || e.includes("subagents\\")) continue;
+			yield { agent: dir.agent, file: join(dir.dir, e), owner: dir.owner };
 		}
 	}
 }
