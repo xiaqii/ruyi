@@ -3,6 +3,9 @@
 All notable changes to ruyi (如忆). Semver versioning; every release passes
 typecheck + zero-LLM smoke + LLM smoke before tagging.
 
+## [0.2.8] - 2026-10-08
+
+- 自动更新改为默认开启（--no-auto-update 退出）；README 英文区清除中文残留（cost report）
 ## [0.2.7] - 2026-10-08
 
 - fix: self-update 的 git describe 参数笔误（--exact-tags→--exact-match --tags）；克隆环境全路径实测通过
