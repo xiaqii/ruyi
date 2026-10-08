@@ -23,7 +23,8 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 const BASE = (process.env.RUYI_URL ?? "http://127.0.0.1:8899").replace(/\/+$/, "");
-const OWNER = process.env.RUYI_OWNER ?? "default"; // per-account namespace in multi-user pi-web
+const OWNER = process.env.RUYI_OWNER ?? "default";
+const TOKEN = process.env.RUYI_TOKEN ?? ""; // bearer token, only needed for remote/shared services // per-account namespace in multi-user pi-web
 const BREAKER_MS = 5 * 60_000;
 /** How long we wait for deep recall before falling back to async follow-up delivery. */
 const RECALL_SYNC_BUDGET_MS = 1200;
@@ -44,7 +45,9 @@ const breakers = new Map<Op, number>();
 async function api<T>(op: Op, path: string, init?: RequestInit, timeoutMs?: number): Promise<T | null> {
 	if (Date.now() < (breakers.get(op) ?? 0)) return null;
 	try {
-		const res = await fetch(`${BASE}${path}`, { ...init, signal: AbortSignal.timeout(timeoutMs ?? TIMEOUTS[op]) });
+		const headers: Record<string, string> = { ...((init?.headers as Record<string, string>) ?? {}) };
+		if (TOKEN) headers.authorization = `Bearer ${TOKEN}`;
+		const res = await fetch(`${BASE}${path}`, { ...init, headers, signal: AbortSignal.timeout(timeoutMs ?? TIMEOUTS[op]) });
 		if (!res.ok) throw new Error(`HTTP ${res.status}`);
 		return (await res.json()) as T;
 	} catch {

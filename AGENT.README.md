@@ -144,9 +144,15 @@ MCP 进程直接打开同一个 SQLite 库（WAL 模式，多进程安全），�
 需要隔离时（多人共用一台机器）：给不同客户端/账号设不同的 `RUYI_OWNER`，记忆互不串。
 做梦侧也要让所有客户端的会话都被读到：在 `config.local.json` 的 `sessions` 里加各 agent 的日志目录（pi 和 claude-code 的解析器内置；其他格式见 §7）。
 
+### 多机共享（同一人的多台主机）
+
+记忆主机侧（跑一次）：`config.local.json` 里设 `"host": "0.0.0.0"` + `"authToken": "<长随机串>"`，重启服务。**暴露了端口就必须设 authToken**，否则等于把全部记忆公开。
+
+其他机器上的 agent：全部改走 HTTP 接口（下节），请求头加 `Authorization: Bearer <authToken>`。pi 扩展设两个环境变量即可：`RUYI_URL=http://<主机>:8899`、`RUYI_TOKEN=<authToken>`（pi web 用户写进服务的环境）。MCP-stdio 是本机模式，远程机器不要用 MCP 接。
+
 ### 任何其他 agent
 
-直接 HTTP（这是通用接口）：
+直接 HTTP（这是通用接口）。服务端设了 authToken 时所有请求（/health 除外）都要带 `Authorization: Bearer <token>` 头：
 
 ```
 POST /recall   {"query": "...", "k": 5, "mode": "deep"}     # mode: fast(免费)/deep/excavate

@@ -64,6 +64,9 @@ export interface SessionSourceConfig {
 export interface Config {
 	host: string;
 	port: number;
+	/** Optional bearer token. Empty = no auth (safe for 127.0.0.1-only deploys).
+	 *  Set this when exposing the service beyond localhost. */
+	authToken: string;
 	dbPath: string;
 	sessions: SessionSourceConfig[];
 	llm: {

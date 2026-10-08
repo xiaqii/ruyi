@@ -36,6 +36,8 @@ Next session — next month, next agent — that experience is already loaded. Y
    │ (extension)  │   │    (MCP)     │   │    (MCP)     │
    └──────┬───────┘   └──────┬───────┘   └──────┬───────┘
           │ HTTP :8899       │ stdio            │ stdio
+          │ (bearer key if   │                  │
+          │  shared remotely)│                  │
           ▼                  ▼                  ▼
  ┌──────────────────────────────────────────────────────────┐
  │              ruyi — one small local service              │
@@ -57,7 +59,7 @@ Next session — next month, next agent — that experience is already loaded. Y
 
 Tell your agent:
 
-> 帮我安装 https://github.com/xiaqii/ruyi （想换目录就说：装到 /opt/ruyi）
+> Install https://github.com/xiaqii/ruyi for me. (Prefer a custom directory? Just say: install it to /opt/ruyi)
 
 That's it. Your agent reads [AGENT.README.md](AGENT.README.md) and does everything itself — dependencies, config, background service, and wiring itself up. It will ask you for exactly one thing: your LLM API key.
 
@@ -74,13 +76,11 @@ One process, one folder, one database file. Nothing hides anywhere else.
 
 **All of YOUR agents — yes.** pi on your desktop, Claude Code on your laptop, opencode on your server: that's the point. Your experience follows you across tools.
 
-**Multiple machines — yes.** Run ruyi on one host, tunnel the port from the others:
+**Multiple machines — yes.** Pick one machine as the memory host: in its `config.local.json` set `"host": "0.0.0.0"` and `"authToken": "<a-long-random-string>"`, restart the service. Then on every other machine just tell your agent:
 
-```
-ssh -N -L 8899:127.0.0.1:8899 your-ruyi-host
-```
+> My ruyi memory service runs at http://192.168.x.x:8899, the access key is xxx — use it as my memory backend.
 
-HTTP-based agents (pi) on the other machines then use it transparently. MCP-stdio agents are local-only for now (remote MCP is on the roadmap) — or just give each machine its own ruyi and accept they drift apart, like two notebooks.
+(For the pi extension that's two environment variables, `RUYI_URL` and `RUYI_TOKEN`; other agents — see [AGENT.README.md](AGENT.README.md).) All your machines now share one memory pool.
 
 **Multiple PEOPLE — no.** One ruyi = one person. Two people sharing one instance means your coding habits merge with theirs into one confused profile, and everything either of you remembers becomes visible to both. Unless you're close enough to share a diary — in which case, know that this is literally what you're doing.
 
@@ -124,7 +124,11 @@ rm -rf ~/ruyi        # 再删掉 agent 配置里的 ruyi 那几行
 
 你自己的多个 agent 共用一个如忆——可以，这正是设计目的：经验跟着你走，跨工具不丢。
 
-多台主机：在一台机器上跑服务，其他机器 SSH 隧道转发端口（`ssh -N -L 8899:127.0.0.1:8899 主机名`），走 HTTP 的 agent（pi）就能直接用；MCP-stdio 的 agent 目前只支持本机（远程 MCP 在路线图上）。
+多台主机——可以。挑一台当记忆主机：在它的 `config.local.json` 里把 `host` 改成 `"0.0.0.0"`、设置 `authToken`（一串长随机串），重启服务。然后在其他每台机器上告诉你的 agent：
+
+> 我的 ruyi 记忆服务在 http://192.168.x.x:8899，访问密钥是 xxx，把它当作我的记忆后端。
+
+（pi 扩展对应两个环境变量 `RUYI_URL`、`RUYI_TOKEN`；其他 agent 见 [AGENT.README.md](AGENT.README.md)。）所有机器共享同一个记忆池。
 
 **一个如忆只给一个人用。** 多人共用一个，画像会互相污染（你的编程习惯和他的揉成一锅），而且彼此的记忆互相可见——除非亲密到可以共用一本日记，那这就是字面意义上的共用日记。
 

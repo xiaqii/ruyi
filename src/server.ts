@@ -60,6 +60,8 @@ let dreamRunning = false;
 export function startServer(): void {
 	const config = loadConfig();
 	const db = getDb(config.dbPath);
+	// Optional bearer auth — required when the service is reachable beyond localhost.
+	const authToken = config.authToken ?? "";
 
 	const server = createServer(async (req, res) => {
 		const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -67,6 +69,10 @@ export function startServer(): void {
 		try {
 			if (req.method === "GET" && path === "/health") {
 				return send(res, 200, { ok: true, ...memoryCounts(db) });
+			}
+
+			if (authToken && req.headers.authorization !== `Bearer ${authToken}`) {
+				return send(res, 401, { error: "missing or invalid bearer token" });
 			}
 
 			if (req.method === "GET" && path === "/inject") {
