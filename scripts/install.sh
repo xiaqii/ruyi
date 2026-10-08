@@ -8,8 +8,8 @@ ROOT="$(pwd)"
 say() { printf '\033[1m[ruyi install]\033[0m %s\n' "$*"; }
 fail() { printf '\033[31m[ruyi install] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-DREAM=0; AUTO_UPDATE=0
-for a in "$@"; do case "$a" in --dream) DREAM=1;; --with-auto-update) AUTO_UPDATE=1;; esac; done
+DREAM=0; AUTO_UPDATE=1
+for a in "$@"; do case "$a" in --dream) DREAM=1;; --no-auto-update) AUTO_UPDATE=0;; --with-auto-update) AUTO_UPDATE=1;; esac; done
 
 # 1. Node >= 23.6 (native TS + node:sqlite)
 NODE_BIN="$(command -v node || true)"
@@ -59,13 +59,14 @@ else
 	mkdir -p logs
 fi
 
-# 5b. Optional daily self-update (release tags only, smoke-gated, auto-rollback)
+# 5b. Daily self-update — ON by default (release tags only, smoke-gated,
+# auto-rollback). Opt out with --no-auto-update.
 chmod +x scripts/self-update.sh
 if [ "$AUTO_UPDATE" = "1" ]; then
 	( crontab -l 2>/dev/null | grep -v "scripts/self-update.sh"; echo "40 4 * * * $ROOT/scripts/self-update.sh >/dev/null 2>&1" ) | crontab -
-	say "daily self-update cron installed (04:40; latest release tag only, tsc+smoke gated, auto-rollback)"
+	say "daily self-update cron installed (04:40; latest release tag only, tsc+smoke gated, auto-rollback; opt out: --no-auto-update)"
 else
-	say "optional: daily self-update → re-run with --with-auto-update"
+	say "daily self-update skipped (--no-auto-update). Enable later: re-run install.sh"
 fi
 
 # 6. First dream is opt-in (it costs LLM tokens): run only with --dream

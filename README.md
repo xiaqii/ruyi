@@ -24,7 +24,8 @@ Next session — next month, next agent — that experience is already loaded. Y
 
 - **Converges, never hoards.** Mature profile chapters absorb their source memories. A year in, you own a refined profile — not a landfill of 100,000 raw fragments.
 - **Cheap by design.** Keywords live in SQLite FTS (free), the LLM only ever sees ≤100 one-line summaries. No vector database, no embedding costs.
-- **Every token accounted.** Built-in token ledger — ask your agent "ruyi 用量报表" anytime.
+- **Every token accounted.** Built-in token ledger — ask your agent "ruyi cost report" anytime.
+- **Self-updating.** A daily cron (installed by default) upgrades only to fully-tested release tags, with automatic rollback if anything fails.
 - **Yours.** One SQLite file. One local process. Your own LLM key. Nothing leaves your machine except the distill calls you configured.
 
 ## Architecture
@@ -99,6 +100,7 @@ One process, one folder, one database file. Nothing hides anywhere else.
 - **收敛，不囤积**：成熟的画像章节会吸收源头记忆，活跃集合始终有界。用一年，你得到的是一份精炼画像，不是十万条碎片垃圾场。
 - **省钱设计**：关键词放在 SQLite 全文索引里（检索零 token），LLM 只看 ≤100 条一行摘要。没有向量库，没有 embedding 费用。
 - **每个 token 都有账**：内置账本，随时问你的 agent "ruyi 用量报表"。
+- **自动更新**：每日 cron（默认开启）只升到通过完整测试的正式发布版，失败自动回滚。
 - **是你的**：一个 SQLite 文件、一个本地进程、你自己的 LLM key。除了你自己配置的蒸馏调用，什么都不出你的机器。
 
 ### 挂了会怎样
