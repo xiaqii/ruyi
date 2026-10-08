@@ -106,10 +106,43 @@ cp examples/pi-extension/ruyi.ts ~/.pi/agent/extensions/ruyi.ts   # pi web 按�
 多账号 pi web：给每个账号的环境设 `RUYI_OWNER=<账号名>`，记忆互相隔离。
 重启 pi 后：系统提示里会出现记忆注入，`ruyi_recall` / `ruyi_remember` 工具可用，`/ruyi` 命令查状态。
 
-### 你是 Claude Code / 其他 MCP 客户端
+### 你是 Claude Code
 
-把 `node <仓库绝对路径>/src/cli.ts mcp` 注册为 stdio MCP server，
-它暴露 `ruyi_recall`（三模式）、`ruyi_list`、`ruyi_get`、`ruyi_ingest`。
+```bash
+claude mcp add ruyi -- node <仓库绝对路径>/src/cli.ts mcp
+```
+
+验证：`claude mcp list` 里能看到 ruyi；对话中试一次 `ruyi_recall`。
+
+### 你是 opencode
+
+在 `~/.config/opencode/opencode.jsonc` 加：
+
+```jsonc
+{
+  "mcp": {
+    "ruyi": {
+      "type": "local",
+      "command": ["node", "<仓库绝对路径>/src/cli.ts", "mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+重启 opencode 后工具列表里应出现 `ruyi_*`。
+
+### 你是 Hermes / 其他 MCP 客户端
+
+把 `node <仓库绝对路径>/src/cli.ts mcp` 注册为 stdio MCP server（具体注册入口查你所在客户端的 MCP 文档）。
+它暴露 `ruyi_recall`（fast/deep/excavate 三模式）、`ruyi_list`、`ruyi_get`、`ruyi_ingest`。
+MCP 进程直接打开同一个 SQLite 库（WAL 模式，多进程安全），与 HTTP 服务读写同一份记忆。
+
+### 多客户端共用（重要）
+
+一个 ruyi 实例就是全家的记忆中心：pi 走扩展、Claude Code/opencode 走 MCP、脚本走 HTTP，**默认共享同一个 owner=default 的记忆池**——Claude Code 里形成的经验，pi 也能回忆到，这正是设计目的。
+需要隔离时（多人共用一台机器）：给不同客户端/账号设不同的 `RUYI_OWNER`，记忆互不串。
+做梦侧也要让所有客户端的会话都被读到：在 `config.local.json` 的 `sessions` 里加各 agent 的日志目录（pi 和 claude-code 的解析器内置；其他格式见 §7）。
 
 ### 任何其他 agent
 

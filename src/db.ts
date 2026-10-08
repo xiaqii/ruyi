@@ -125,6 +125,9 @@ export function getDb(dbPath: string): DatabaseSync {
 	db = new DatabaseSync(dbPath);
 	db.exec("PRAGMA journal_mode = WAL");
 	db.exec("PRAGMA foreign_keys = ON");
+	// Multiple clients share one store (service + MCP stdio processes + CLI);
+	// WAL allows one writer at a time — wait briefly instead of failing.
+	db.exec("PRAGMA busy_timeout = 5000");
 	// Detect legacy DB before creating anything: a fresh install gets the latest
 	// schema directly and must NOT run migrations (its columns already exist).
 	const priorVersion = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
