@@ -3,6 +3,9 @@
 All notable changes to ruyi (如忆). Semver versioning; every release passes
 typecheck + zero-LLM smoke + LLM smoke before tagging.
 
+## [0.2.6] - 2026-10-08
+
+- 每日自更新脚本（只升到测试过的 release tag，tsc+smoke 门控，失败自动回滚，脏树拒绝）+ install.sh --with-auto-update 旗标 + 文档
 ## [0.2.5] - 2026-10-08
 
 - 可选 bearer 鉴权（authToken 配置 + RUYI_URL/RUYI_TOKEN 扩展支持）：多机共享一个 ruyi 的官方姿势；README 英文安装句修正、多机段落改为 HTTP+key 方案
