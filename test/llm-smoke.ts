@@ -1,12 +1,22 @@
 /**
  * ruyi LLM smoke — Level 2: minimal real-LLM round trip, run before each release.
  * Costs a few hundred tokens. Requires config.local.json with a working LLM.
+ * Without a local config there is no real key to test against, so the smoke
+ * skips cleanly (exit 0) instead of failing on the example config's fake key.
  *
  * Run: node test/llm-smoke.ts
  */
 
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { complete } from "../src/llm.ts";
 import { resolveLlm } from "../src/llm.ts";
+import { PROJECT_ROOT } from "../src/config.ts";
+
+if (!existsSync(resolve(PROJECT_ROOT, "config.local.json")) && !existsSync(resolve(PROJECT_ROOT, "config.json"))) {
+	console.log("llm-smoke: no config.local.json — no real LLM key to test against, skipping");
+	process.exit(0);
+}
 
 let failed = 0;
 

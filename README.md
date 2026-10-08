@@ -47,6 +47,19 @@ Your agent forgets you after every conversation. ruyi gives it a human-like memo
 - [AGENT.README.md](AGENT.README.md) — 给 agent 看的自安装手册（安装就看这个）
 - [docs/design-v2.md](docs/design-v2.md) — 完整设计文档
 
+## Repo map
+
+```
+src/            服务本体：server, recall, distill, synthesize, reorganize, decay, llm, db, mcp, doctor…
+prompts/        全部 LLM prompt（开放、原则式）
+examples/pi-extension/ruyi.ts   pi 客户端扩展
+systemd/        服务/定时器单元（含 install.sh 用的模板）
+scripts/        install.sh 安装、release.sh 发布管线、compare-distill.ts 提炼效果对比
+test/           smoke.ts 零 LLM 测试（34 项）、llm-smoke.ts LLM 链路冒烟
+docs/design-v2.md               完整 v2 设计文档
+AGENT.README.md                 给 agent 的自安装手册
+```
+
 ## License
 
 MIT
