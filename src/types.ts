@@ -84,6 +84,9 @@ export interface Config {
 		mergeSummaryLimit: number;
 		/** Soft store-size target; reorganize gets more aggressive above it. */
 		targetSize: number;
+		/** First-dream cost control: never-processed session files are only read
+		 *  this many bytes back from the tail (0 = read everything). */
+		initialMaxBytes: number;
 	};
 	inject: {
 		constitutionMax: number;

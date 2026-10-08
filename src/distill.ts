@@ -322,6 +322,12 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 			if (!opts.fullReprocess && state && size === state.processed_bytes) continue;
 			let offset = opts.fullReprocess || !state || size < state.processed_bytes ? 0 : state.processed_bytes;
 			let gist = state?.gist ?? "";
+			// First-dream cost control: for never-processed files, skip deep history
+			// beyond initialMaxBytes (the distant past is usually low-value episodes).
+			if (!state && !opts.fullReprocess && config.dream.initialMaxBytes > 0 && size > config.dream.initialMaxBytes) {
+				offset = size - config.dream.initialMaxBytes;
+				gist = "";
+			}
 
 			// Process segment after segment until EOF; each iteration resumes
 			// from the previous segment's line-boundary offset. A failing segment

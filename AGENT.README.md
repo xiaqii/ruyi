@@ -125,7 +125,7 @@ GET  /stats?days=7
 第一次做梦会通读历史会话日志，**消耗的 tokens 与日志量成正比，可能很多**。
 默认只处理最近 14 天（`dream.initialMaxDays`）。流程：
 
-1. `node src/cli.ts distill --dry-run` 无干跑模式下先评估……（直接看会话目录大小估算）
+1. 告诉用户预估规模（只看最近 200KB/文件的增量，老历史默认跳过，`dream.initialMaxBytes` 控制），征得同意
 2. 告诉用户预估规模，征得同意
 3. `node src/cli.ts distill`（前台跑，能看到进度；量大时放后台并定时检查）
 4. `node src/cli.ts list` 抽查记忆质量

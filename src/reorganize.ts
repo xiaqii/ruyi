@@ -55,6 +55,7 @@ export async function runReorganize(runId: string, owner: string): Promise<Reorg
 				: "") + `ACTIVE MEMORIES:\n${listing}`,
 		step: "reorganize",
 		runId,
+		maxTokens: 16384, // whole-store listing + thinking needs headroom
 		timeoutMs: 600_000,
 	});
 
