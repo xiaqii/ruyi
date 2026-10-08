@@ -28,6 +28,12 @@ const TOOLS = [
 			properties: {
 				query: { type: "string", description: "What you are working on / looking for" },
 				k: { type: "number", description: "Max memories to return (default 5)" },
+				mode: {
+					type: "string",
+					enum: ["fast", "deep", "excavate"],
+					description:
+						"fast: free keyword retrieval, no LLM, for tentative probing; deep (default): LLM semantic rerank; excavate: like fast but includes absorbed/archived memories (archaeology)",
+				},
 				owner: { type: "string", description: "Memory owner namespace (default 'default')" },
 			},
 			required: ["query"],
@@ -95,11 +101,12 @@ async function handleToolCall(
 		case "ruyi_recall": {
 			const query = String(args.query ?? "");
 			const k = typeof args.k === "number" ? args.k : undefined;
-			const result = await recall(query, k, owner);
+			const mode = args.mode === "fast" || args.mode === "excavate" ? args.mode : "deep";
+			const result = await recall(query, k, owner, null, undefined, mode);
 			if (result.memories.length === 0 && result.profiles.length === 0)
 				return reply(id, toolResult("No relevant memories found."));
 			const parts: string[] = [];
-			for (const p of result.profiles) parts.push(`PROFILE【${p.title}】v${p.version}\n${p.content}`);
+			for (const p of result.profiles) parts.push(`PROFILE【${p.title}】v${p.version} (${p.maturity})\n${p.content}`);
 			for (const m of result.memories)
 				parts.push(`#${m.id} [${m.kind}${m.domain ? "/" + m.domain : ""}] ${m.summary}\n${m.content}`);
 			return reply(id, toolResult(parts.join("\n\n")));

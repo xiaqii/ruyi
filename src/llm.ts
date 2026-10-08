@@ -2,6 +2,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { loadConfig, PROJECT_ROOT } from "./config.ts";
 import { getDb, logTokens } from "./db.ts";
+import type { LlmTierConfig } from "./types.ts";
 
 export interface LlmResult {
 	text: string;
@@ -81,69 +82,192 @@ function appendUsageLog(entry: Record<string, unknown>): void {
 	}
 }
 
-/** One Anthropic-compatible /v1/messages call with token accounting. Throws on HTTP/API errors. */
-export async function complete(opts: CompleteOptions): Promise<LlmResult> {
-	const config = loadConfig();
-	const { baseUrl, apiKey, model, maxTokens, requestTimeoutMs } = config.llm;
-	const startedAt = Date.now();
+/** Steps served by the (cheap, fast, thinking-off) "recall" tier; everything else is "dream". */
+const RECALL_STEPS = new Set(["understand", "rerank"]);
 
-	const res = await fetch(`${baseUrl}/v1/messages`, {
-		method: "POST",
+interface ResolvedLlm {
+	protocol: "anthropic" | "openai";
+	baseUrl: string;
+	apiKey: string;
+	model: string;
+	maxTokens: number;
+	requestTimeoutMs: number;
+	thinking: "off" | "default" | number;
+}
+
+/** Merge base llm config with the per-tier override for this step. */
+export function resolveLlm(step: string): ResolvedLlm {
+	const config = loadConfig();
+	const base = config.llm;
+	const tier = RECALL_STEPS.has(step) ? "recall" : "dream";
+	const override: LlmTierConfig | undefined = base.steps?.[tier];
+	return {
+		protocol: override?.protocol ?? base.protocol ?? "anthropic",
+		baseUrl: (override?.baseUrl ?? base.baseUrl).replace(/\/+$/, ""),
+		apiKey: override?.apiKey ?? base.apiKey,
+		model: override?.model ?? base.model,
+		maxTokens: override?.maxTokens ?? base.maxTokens,
+		requestTimeoutMs: override?.requestTimeoutMs ?? base.requestTimeoutMs,
+		thinking: override?.thinking ?? base.thinking ?? "default",
+	};
+}
+
+interface Attempt {
+	body: Record<string, unknown>;
+	fixes: string[];
+}
+
+/** Build provider request body; `fixes` records downgrades already applied (for 400-driven retry). */
+function buildBody(llm: ResolvedLlm, opts: CompleteOptions, fixes: Set<string>): Record<string, unknown> {
+	const maxTok = opts.maxTokens ?? llm.maxTokens;
+	if (llm.protocol === "openai") {
+		const body: Record<string, unknown> = {
+			model: llm.model,
+			messages: [
+				{ role: "system", content: opts.system },
+				{ role: "user", content: opts.user },
+			],
+		};
+		if (fixes.has("max_completion_tokens")) body.max_completion_tokens = maxTok;
+		else body.max_tokens = maxTok;
+		if (!fixes.has("response_format")) body.response_format = { type: "json_object" };
+		return body;
+	}
+	// anthropic protocol
+	const body: Record<string, unknown> = {
+		model: llm.model,
+		max_tokens: maxTok,
+		system: opts.system,
+		messages: [{ role: "user", content: opts.user }],
+	};
+	if (!fixes.has("thinking")) {
+		if (llm.thinking === "off") body.thinking = { type: "disabled" };
+		else if (typeof llm.thinking === "number") body.thinking = { type: "enabled", budget_tokens: llm.thinking };
+	}
+	return body;
+}
+
+function endpointOf(llm: ResolvedLlm): { url: string; headers: Record<string, string> } {
+	if (llm.protocol === "openai") {
+		const base = llm.baseUrl.endsWith("/v1") ? llm.baseUrl : `${llm.baseUrl}/v1`;
+		return {
+			url: `${base}/chat/completions`,
+			headers: { "content-type": "application/json", authorization: `Bearer ${llm.apiKey}` },
+		};
+	}
+	return {
+		url: `${llm.baseUrl}/v1/messages`,
 		headers: {
 			"content-type": "application/json",
-			"x-api-key": apiKey,
+			"x-api-key": llm.apiKey,
 			"anthropic-version": "2023-06-01",
 		},
-		body: JSON.stringify({
-			model,
-			max_tokens: opts.maxTokens ?? maxTokens,
-			system: opts.system,
-			messages: [{ role: "user", content: opts.user }],
-		}),
-		signal: AbortSignal.timeout(opts.timeoutMs ?? requestTimeoutMs),
-	});
-
-	if (!res.ok) {
-		const body = await res.text().catch(() => "");
-		throw new Error(`LLM request failed: HTTP ${res.status} ${body.slice(0, 300)}`);
-	}
-
-	const data = (await res.json()) as {
-		content?: { type: string; text?: string }[];
-		usage?: { input_tokens?: number; output_tokens?: number };
 	};
-	const text = (data.content ?? [])
-		.filter((b) => b.type === "text")
-		.map((b) => b.text ?? "")
-		.join("\n");
-	const inputTokens = data.usage?.input_tokens ?? 0;
-	const outputTokens = data.usage?.output_tokens ?? 0;
-	const latencyMs = Date.now() - startedAt;
+}
 
-	const at = new Date().toISOString();
-	try {
-		logTokens(getDb(config.dbPath), {
-			runId: opts.runId,
-			step: opts.step,
-			sessionFile: opts.sessionFile,
-			model,
-			input: inputTokens,
-			output: outputTokens,
-			latencyMs,
-		});
-	} catch {
-		// Token logging must never break a run.
+function parseResponse(
+	llm: ResolvedLlm,
+	data: Record<string, unknown>,
+): { text: string; inputTokens: number; outputTokens: number } {
+	if (llm.protocol === "openai") {
+		const choices = (data.choices ?? []) as { message?: { content?: string } }[];
+		const usage = (data.usage ?? {}) as { prompt_tokens?: number; completion_tokens?: number };
+		return {
+			text: choices[0]?.message?.content ?? "",
+			inputTokens: usage.prompt_tokens ?? 0,
+			outputTokens: usage.completion_tokens ?? 0,
+		};
 	}
-	appendUsageLog({
-		at,
-		run_id: opts.runId,
-		step: opts.step,
-		session_file: opts.sessionFile,
-		model,
-		input_tokens: inputTokens,
-		output_tokens: outputTokens,
-		latency_ms: latencyMs,
-	});
+	const content = (data.content ?? []) as { type: string; text?: string }[];
+	const usage = (data.usage ?? {}) as { input_tokens?: number; output_tokens?: number };
+	return {
+		text: content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n"),
+		inputTokens: usage.input_tokens ?? 0,
+		outputTokens: usage.output_tokens ?? 0,
+	};
+}
 
-	return { text, inputTokens, outputTokens };
+/** Pick a downgrade fix from a 400 error body; returns null when nothing applicable. */
+function pickFix(errorBody: string, fixes: Set<string>): string | null {
+	const rules: [RegExp, string][] = [
+		[/max_tokens|max completion/i, "max_completion_tokens"],
+		[/response_format|json_object/i, "response_format"],
+		[/thinking/i, "thinking"],
+	];
+	for (const [re, fix] of rules) {
+		if (re.test(errorBody) && !fixes.has(fix)) return fix;
+	}
+	return null;
+}
+
+/**
+ * One LLM call (Anthropic- or OpenAI-compatible) with token accounting and
+ * best-effort downgrade: unknown parameters (thinking, response_format,
+ * max_tokens vs max_completion_tokens) are retried without on HTTP 400.
+ * Throws on unrecoverable errors.
+ */
+export async function complete(opts: CompleteOptions): Promise<LlmResult> {
+	const config = loadConfig();
+	const llm = resolveLlm(opts.step);
+	const { url, headers } = endpointOf(llm);
+	const startedAt = Date.now();
+	const fixes = new Set<string>();
+
+	let lastError = "";
+	for (let attempt = 0; attempt < 3; attempt++) {
+		const body = buildBody(llm, opts, fixes);
+		const res = await fetch(url, {
+			method: "POST",
+			headers,
+			body: JSON.stringify(body),
+			signal: AbortSignal.timeout(opts.timeoutMs ?? llm.requestTimeoutMs),
+		});
+
+		if (!res.ok) {
+			const text = await res.text().catch(() => "");
+			lastError = `HTTP ${res.status} ${text.slice(0, 300)}`;
+			if (res.status === 400) {
+				const fix = pickFix(text, fixes);
+				if (fix) {
+					fixes.add(fix);
+					continue;
+				}
+			}
+			throw new Error(`LLM request failed: ${lastError}`);
+		}
+
+		const data = (await res.json()) as Record<string, unknown>;
+		const { text, inputTokens, outputTokens } = parseResponse(llm, data);
+		const latencyMs = Date.now() - startedAt;
+
+		const at = new Date().toISOString();
+		try {
+			logTokens(getDb(config.dbPath), {
+				runId: opts.runId,
+				step: opts.step,
+				sessionFile: opts.sessionFile,
+				model: llm.model,
+				input: inputTokens,
+				output: outputTokens,
+				latencyMs,
+			});
+		} catch {
+			// Token logging must never break a run.
+		}
+		appendUsageLog({
+			at,
+			run_id: opts.runId,
+			step: opts.step,
+			session_file: opts.sessionFile,
+			protocol: llm.protocol,
+			model: llm.model,
+			input_tokens: inputTokens,
+			output_tokens: outputTokens,
+			latency_ms: latencyMs,
+			downgrades: fixes.size > 0 ? [...fixes] : undefined,
+		});
+
+		return { text, inputTokens, outputTokens };
+	}
+	throw new Error(`LLM request failed after downgrades: ${lastError}`);
 }

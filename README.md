@@ -2,15 +2,19 @@
 
 **如忆** — "as remembered". An agent-agnostic long-term memory service for AI coding agents and assistants.
 
-Your agent forgets everything between conversations. ruyi gives it a human-like memory: it **dreams** — every night it re-reads the day's conversations, distills what's worth remembering, consolidates it against everything it already knows — and during the day it recalls precisely the few memories that matter for the task at hand.
+Your agent forgets everything between conversations. ruyi gives it a human-like memory: it **dreams** — every night it re-reads the day's conversations, distills what's worth remembering, consolidates it against everything it already knows, and periodically **reflects** scattered memories upward into abstract skill/experience profiles. During the day it recalls precisely the few memories that matter — at graded cost, from free keyword probes to deep semantic recall.
+
+> **安装 / Install**: 把这个仓库丢给你的 agent，让它读 [AGENT.README.md](AGENT.README.md) 并自主完成安装。
+> （Clone this repo and hand it to your agent — it installs itself from AGENT.README.md.）
 
 ## Design philosophy
 
-- **LLM all the way down.** Extraction, verification, consolidation and recall ranking are all done by an LLM, not string matching. Relevance is judged by meaning, not keywords.
-- **Memory is governed, not just stored.** Entries carry confidence, evidence counts and origin labels (`user_stated` vs `agent_inferred`). Repeated observations reinforce; contradictions supersede; stale inferences decay and archive. The store stays small and sharp no matter how long you use it.
-- **Bounded injection, always.** The agent gets a fixed-budget "constitution + index" block every session, plus an on-demand recall tool. Memory never floods the context or steers the conversation.
-- **Fully optional for the host agent.** ruyi is a separate local service. If it is down, slow, or returns garbage, the agent is completely unaffected (short timeouts + circuit breaker).
-- **Multi-user ready.** Every memory belongs to an `owner` (isolation boundary) and records its source `cwd`. One ruyi instance can serve many accounts on a shared host without leaking between them.
+- **Memory has altitude.** L3 constitution (pinned core) / L2 profile chapters (abstracted skills & experience, per-domain) / L1 atomic memories / L0 sediment (absorbed & archived, searchable but never auto-loaded). The active working set converges; the archive may grow forever.
+- **Cost is graded; tokens are spent only on judgement.** Retrieval runs on indexes (free); only the LLM judgement steps cost tokens. Tentative probes (`fast` mode) cost **zero** tokens and return sub-second.
+- **LLM all the way down.** Extraction, verification, consolidation, query understanding and recall ranking are done by an LLM, not string matching. Relevance is judged by meaning, not keywords.
+- **Memory is governed, not just stored.** Confidence, evidence counts, origin labels (`user_stated` vs `agent_inferred`). Repeated observations reinforce; contradictions supersede; absorbed knowledge retires upward into profiles; stale inferences decay.
+- **Fully optional for the host agent.** A separate local service with short timeouts + per-operation circuit breakers; if it's down, the agent behaves exactly as before.
+- **Demand-driven growth.** Recalls that find nothing register *demand signals*; nightly/weekly dreams prioritize filling those gaps (用进废退).
 
 ## Architecture
 
@@ -19,123 +23,53 @@ Your agent forgets everything between conversations. ruyi gives it a human-like 
             │              ruyi service                  │
             │         (127.0.0.1:8899, localhost)        │
             │                                            │
-  nightly   │   SQLite (WAL)                             │
+  nightly   │   SQLite (WAL, trigram FTS)                │
   dream ───▶│     ▲          ▲               ▲           │
-  (distill, │     │          │               │           │
-   verify,  │  HTTP API   MCP stdio        CLI           │
-   merge,   │     │          │               │           │
-   decay)   └─────┼──────────┼───────────────┼───────────┘
-                  │          │               │
-            pi extension   Claude Code,   humans (audit,
-            (~/.pi/agent/  opencode,      forget, pin)
-             extensions/    any MCP agent
-             ruyi.ts)
+  (triage,  │     │          │               │           │
+   extract, │  HTTP API   MCP stdio        CLI           │
+   verify,  │     │          │               │           │
+   merge,   └─────┼──────────┼───────────────┼───────────┘
+   decay)         │          │               │
+  weekly ───▶ pi extension   Claude Code,   humans (audit,
+  reflect       (~/.pi/agent/ opencode,      forget, pin,
+  (synthesize   extensions/   any MCP agent  doctor)
+   + absorb)    ruyi.ts)
 ```
 
-- **Zero runtime dependencies.** Plain Node ≥ 23.6 (native TypeScript + `node:sqlite` + `node:http`). `typescript`/`@types/node` are dev-only for `tsc --noEmit`.
-- **LLM**: any Anthropic-compatible `/v1/messages` endpoint (Anthropic, Kimi, ...). Configured in `config.local.json`.
+- **Zero runtime dependencies.** Plain Node ≥ 23.6 (native TypeScript + `node:sqlite` + `node:http`).
+- **LLM**: any Anthropic-compatible (`/v1/messages`) or OpenAI-compatible (`/v1/chat/completions`) endpoint — Anthropic, Kimi, DeepSeek, OpenAI, Qwen, Moonshot, vLLM, Ollama. Two tiers supported: a cheap/fast model for recall, a smart one for dreams (`llm.steps`).
 
-## Memory pipeline ("dreaming")
+## Recall (graded cost)
 
-Runs nightly via systemd timer (or `node src/cli.ts distill`):
-
-1. **Incremental scan** — session logs are append-only; only new bytes are processed. Each session keeps a rolling "gist" so new segments are distilled with context.
-2. **Extract** — the LLM pulls candidate memories (preference / fact / project / lesson / skill_index) with evidence quotes. Empty output is valid; most segments yield nothing.
-3. **Verify** — a second LLM pass drops hallucinated, one-off, or unsafe candidates and recalibrates confidence/origin. (`pipeline: "single"` does both in one pass; A/B script included: `scripts/compare-distill.ts`.)
-4. **Merge** — each candidate is judged against the existing store: `NEW` / `REINFORCE` (evidence+1) / `REFINE` (merge details) / `SUPERSEDE` (archive the contradicted old entry).
-5. **Decay** — low-confidence agent inferences untouched for 90 days are archived automatically.
-
-Every LLM call is token-accounted (`token_log` table + `logs/usage-*.jsonl`).
-
-## Recall (3 layers)
-
-| Layer | What | Budget | How |
+| Tier | What | Cost | Latency |
 |---|---|---|---|
-| Constitution | pinned core entries | ≤ 5 | injected every session |
-| Index | one-line summaries, recent + high-evidence | ≤ 20 | injected every session |
-| Recall | two-stage: candidate list → LLM picks the genuinely relevant few | ≤ 5 | agent calls `ruyi_recall` tool |
+| T0 inject | constitution + index + profile directory (every session) | 0 tokens | <50ms |
+| T1 fast | trigram FTS full-store BM25 ∪ recent ∪ pinned, fusion scoring | 0 tokens | <100ms |
+| T2 understand | query → domains/kinds/synonym keywords (only when T1 is sparse) | ~0.6k tokens | 1 LLM call |
+| T3 rerank | LLM picks the genuinely relevant few from ≤100 summaries | ~3-4k tokens | 1 LLM call |
+| T4 fallback | one more round when T3 came back thin | rare | 1 LLM call |
 
-## Install
+Modes: `fast` (T1 only — probe freely), `deep` (T1→T3, default), `excavate` (T1 incl. absorbed/archived — archaeology).
 
-```bash
-git clone <repo> /app/ruyi && cd /app/ruyi
-npm install            # dev-only deps (typescript)
-cp config.example.json config.local.json
-# edit config.local.json: llm.baseUrl / apiKey / model, session dirs
+Session start (pi extension) never blocks: T0 injects synchronously; deep recall races a 1.2s budget, otherwise lands as a silent follow-up message when ready.
 
-node src/cli.ts distill     # first dream over existing session logs
-node src/cli.ts serve       # start the API
-```
+## The dreams (how memory converges)
 
-systemd (service + nightly timer):
+- **Nightly**: incremental scan → triage (skip empty segments) → extract (candidates with evidence quotes + keywords) → verify (drop hallucinations) → merge (NEW/REINFORCE/REFINE/SUPERSEDE) → reorganize (global dedup/conflict curation) → decay (stale inferences archive).
+- **Weekly reflect**: cluster active memories into semantic themes → write/refresh profile chapters (编程习惯, 运维, 中医… — domains never co-load) → **absorb** covered members into the chapter (active set shrinks back). Chapters carry maturity tiers (seeding/mature) with matching advisory tone.
+- Every LLM call is token- and latency-accounted (`token_log`, `logs/usage-*.jsonl`); every recall is logged (`recall_log`) as demand signal.
 
-```bash
-sudo cp systemd/*.service systemd/*.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now ruyi.service ruyi-dream.timer
-```
-
-## Client integrations
-
-### pi (extension)
-
-Copy `examples/pi-extension/ruyi.ts` to `~/.pi/agent/extensions/ruyi.ts`. It injects the constitution+index into the system prompt and registers the `ruyi_recall` tool and `/ruyi` command. If ruyi is down, pi behaves exactly as if the extension weren't there.
-
-Env: `RUYI_URL` (default `http://127.0.0.1:8899`), `RUYI_OWNER` (default `default`).
-
-### Any MCP agent (Claude Code, opencode, ...)
-
-```bash
-node /app/ruyi/src/cli.ts mcp
-```
-
-Register it as an MCP stdio server; it exposes `ruyi_recall`, `ruyi_list`, `ruyi_get`.
-
-### Plain HTTP — the universal interface
-
-Any agent (or script) that can make an HTTP call can use ruyi: submit raw text
-to `/ingest` for distillation, query `/recall` for memories, poll `/inject`
-for the constitution+index block. This is what makes ruyi a memory *center*
-rather than a plugin.
+## Repo map
 
 ```
-GET  /health
-GET  /inject?owner=default
-GET  /profiles            synthesized theme chapters; GET /profiles/:id for one
-POST /synthesize           re-run profile synthesis now
-POST /recall            {"query": "...", "k": 5, "owner": "default"}
-GET  /memories?owner=default&status=active
-GET  /memories/:id
-POST /memories/:id/pin  {"pinned": true}
-POST /memories/:id/forget
-POST /ingest            generic ingestion: {"text": "...", "cwd": "..."} → full distill pipeline
-POST /distill
-GET  /stats?days=7
+src/            service: server, recall, distill, synthesize, reorganize, decay, llm, db, mcp, doctor
+prompts/        all LLM prompts (open, principle-style)
+examples/pi-extension/ruyi.ts   pi client extension
+systemd/        service/timer units (+ templates used by install.sh)
+scripts/        install.sh, import/A-B helpers
+docs/design-v2.md               the full v2 design document
+AGENT.README.md                 self-install manual FOR your agent
 ```
-
-## Session log parsers
-
-Currently supported: **pi** (`~/.pi/agent/sessions/**/*.jsonl`). Parsers are pluggable — add one in `src/preprocess.ts` and a source entry in `config.local.json`:
-
-```json
-"sessions": [{ "agent": "pi", "dir": "~/.pi/agent/sessions", "owner": "default" }]
-```
-
-## CLI
-
-```bash
-node src/cli.ts list                 # browse the store
-node src/cli.ts recall "query"       # test recall
-node src/cli.ts pin <id>             # pin = always injected
-node src/cli.ts forget <id>          # archive
-node src/cli.ts stats                # counts + token usage
-```
-
-## Privacy
-
-- Everything stays on your machine: SQLite file + your own LLM endpoint.
-- Secrets are excluded at distillation time (instructively and by verification), and the store is plain SQL you can audit and edit.
-- `config.local.json`, `data/` and `logs/` are gitignored. Never commit them.
 
 ## License
 

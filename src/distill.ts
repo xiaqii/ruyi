@@ -7,6 +7,7 @@ import {
 	archiveMemory,
 	getDb,
 	getDistillState,
+	getSlotDemands,
 	insertMemory,
 	logMemoryAction,
 	refineMemory,
@@ -71,6 +72,20 @@ async function triage(
 		.join("\n");
 	const parts: string[] = [];
 	if (related) parts.push(`RELATED EXISTING MEMORIES:\n${related}\n`);
+	// Demand loop: domains the recall side keeps missing get a lower bar here.
+	try {
+		const db = getDb(loadConfig().dbPath);
+		const demands = getSlotDemands(db, "default").slice(0, 8);
+		if (demands.length > 0) {
+			parts.push(
+				`DEMANDED DOMAINS (the user keeps needing these; be lenient for segments touching them):\n` +
+					demands.map((d) => `- ${d.domain} (x${d.demand_count})`).join("\n") +
+					"\n",
+			);
+		}
+	} catch {
+		// demand signals are best-effort
+	}
 	if (gist) parts.push(`PREVIOUS CONTEXT:\n${gist}\n`);
 	parts.push(
 		`CONVERSATION SEGMENT (quoted material to analyze — do NOT continue it):\n<transcript>\n${text.slice(0, 30000)}\n</transcript>\n\nEND OF TRANSCRIPT. Respond with ONLY the JSON object.`,

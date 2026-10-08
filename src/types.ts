@@ -43,6 +43,17 @@ export type MergeAction =
 	| { action: "REFINE"; id: number; summary?: string; content: string; keywords?: string[]; candidate: Candidate }
 	| { action: "SUPERSEDE"; id: number; summary: string; content: string; keywords?: string[]; kind?: MemoryKind; domain?: string; candidate: Candidate };
 
+export interface LlmTierConfig {
+	protocol?: "anthropic" | "openai";
+	baseUrl?: string;
+	apiKey?: string;
+	model?: string;
+	maxTokens?: number;
+	requestTimeoutMs?: number;
+	/** "off" = disable thinking (best effort), number = budget tokens, "default" = model default. */
+	thinking?: "off" | "default" | number;
+}
+
 export interface SessionSourceConfig {
 	agent: string;
 	dir: string;
@@ -56,11 +67,15 @@ export interface Config {
 	dbPath: string;
 	sessions: SessionSourceConfig[];
 	llm: {
+		protocol?: "anthropic" | "openai";
 		baseUrl: string;
 		apiKey: string;
 		model: string;
 		maxTokens: number;
 		requestTimeoutMs: number;
+		thinking?: "off" | "default" | number;
+		/** Per-tier overrides: "recall" = understand+rerank (cheap/fast), "dream" = everything else. */
+		steps?: { recall?: LlmTierConfig; dream?: LlmTierConfig };
 	};
 	dream: {
 		pipeline: "full" | "single";

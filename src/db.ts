@@ -10,8 +10,9 @@ let db: DatabaseSync | undefined;
  * v0 = original release (unicode61 FTS, no keywords/absorbed_by, no recall_log).
  * v1 = trigram FTS (summary+keywords+content), memories.keywords, memories.absorbed_by,
  *      token_log.latency_ms, recall_log table.
+ * v2 = profiles.maturity + profiles.status, slot_demands table (skill-slot demand loop).
  */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 function migrate(d: DatabaseSync, from: number): void {
 	if (from < 1) {
@@ -28,6 +29,13 @@ function migrate(d: DatabaseSync, from: number): void {
 		createFts(d);
 		createRecallLog(d);
 		d.exec(`INSERT INTO memories_fts(memories_fts) VALUES('rebuild')`);
+	}
+	if (from < 2) {
+		d.exec(`
+			ALTER TABLE profiles ADD COLUMN maturity TEXT NOT NULL DEFAULT 'mature';
+			ALTER TABLE profiles ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
+		`);
+		createSlotDemands(d);
 	}
 }
 
@@ -68,12 +76,59 @@ CREATE INDEX IF NOT EXISTS idx_recall_log_at ON recall_log(at);
 	`);
 }
 
+function createSlotDemands(d: DatabaseSync): void {
+	d.exec(`
+CREATE TABLE IF NOT EXISTS slot_demands (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  owner          TEXT NOT NULL DEFAULT 'default',
+  domain         TEXT NOT NULL,
+  demand_count   INTEGER NOT NULL DEFAULT 1,
+  last_demand_at TEXT NOT NULL,
+  UNIQUE(owner, domain)
+);
+	`);
+}
+
+/** Record demand for domains a recall could not satisfy (feeds the skill-slot loop). */
+export function bumpSlotDemand(d: DatabaseSync, owner: string, domains: string[]): void {
+	const t = now();
+	const stmt = d.prepare(
+		`INSERT INTO slot_demands (owner, domain, demand_count, last_demand_at) VALUES (?, ?, 1, ?)
+		 ON CONFLICT(owner, domain) DO UPDATE SET demand_count = demand_count + 1, last_demand_at = excluded.last_demand_at`,
+	);
+	for (const domain of domains.slice(0, 5)) {
+		const clean = domain.trim().slice(0, 60);
+		if (clean) {
+			try {
+				stmt.run(owner, clean, t);
+			} catch {
+				// best effort
+			}
+		}
+	}
+}
+
+export function getSlotDemands(
+	d: DatabaseSync,
+	owner: string,
+): { domain: string; demand_count: number; last_demand_at: string }[] {
+	return d
+		.prepare(
+			`SELECT domain, demand_count, last_demand_at FROM slot_demands WHERE owner = ? ORDER BY demand_count DESC, last_demand_at DESC`,
+		)
+		.all(owner) as unknown as { domain: string; demand_count: number; last_demand_at: string }[];
+}
+
 export function getDb(dbPath: string): DatabaseSync {
 	if (db) return db;
 	mkdirSync(dirname(dbPath), { recursive: true });
 	db = new DatabaseSync(dbPath);
 	db.exec("PRAGMA journal_mode = WAL");
 	db.exec("PRAGMA foreign_keys = ON");
+	// Detect legacy DB before creating anything: a fresh install gets the latest
+	// schema directly and must NOT run migrations (its columns already exist).
+	const priorVersion = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+	const hadMemories = !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='memories'").get();
 	db.exec(`
 CREATE TABLE IF NOT EXISTS memories (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,6 +192,8 @@ CREATE TABLE IF NOT EXISTS profiles (
   title      TEXT NOT NULL,
   content    TEXT NOT NULL,
   memory_ids TEXT NOT NULL DEFAULT '[]',
+  maturity   TEXT NOT NULL DEFAULT 'mature',
+  status     TEXT NOT NULL DEFAULT 'active',
   version    INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -145,10 +202,12 @@ CREATE TABLE IF NOT EXISTS profiles (
 `);
 	createFts(db);
 	createRecallLog(db);
+	createSlotDemands(db);
 
-	const row = db.prepare("PRAGMA user_version").get() as { user_version: number };
-	if (row.user_version < SCHEMA_VERSION) {
-		migrate(db, row.user_version);
+	if (!hadMemories) {
+		db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+	} else if (priorVersion < SCHEMA_VERSION) {
+		migrate(db, priorVersion);
 		db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 	}
 	return db;
@@ -285,19 +344,26 @@ export interface FtsHit {
  * 部署, 配置...), so 2-char terms go through a LIKE fallback and results are unioned.
  * Cost is proportional to matches, not store size — no recency/evidence gate.
  */
-export function ftsSearch(d: DatabaseSync, query: string, limit: number, owner: string): MemoryRow[] {
-	return ftsSearchScored(d, query, limit, owner).map((h) => h.row);
+export function ftsSearch(d: DatabaseSync, query: string, limit: number, owner: string, statuses?: string[]): MemoryRow[] {
+	return ftsSearchScored(d, query, limit, owner, statuses).map((h) => h.row);
 }
 
-export function ftsSearchScored(d: DatabaseSync, query: string, limit: number, owner: string): FtsHit[] {
+export function ftsSearchScored(
+	d: DatabaseSync,
+	query: string,
+	limit: number,
+	owner: string,
+	statuses: string[] = ["active"],
+): FtsHit[] {
 	const terms = query
 		.replace(/"/g, " ")
-		.split(/[\s,，。.!!？?：:;；、（）()\[\]{}「」""'']+/)
+		.split(/[\s,，。.!！?？：:；;、（）()\[\]{}「」""'']+/)
 		.map((t) => t.trim())
 		.filter((t) => t.length >= 2)
 		.slice(0, 12);
 	if (terms.length === 0) return [];
 
+	const statusIn = statuses.map(() => "?").join(",");
 	const ftsTerms = terms.filter((t) => t.length >= 3);
 	const likeTerms = terms.filter((t) => t.length === 2);
 	const hits = new Map<number, FtsHit>();
@@ -308,10 +374,10 @@ export function ftsSearchScored(d: DatabaseSync, query: string, limit: number, o
 			const rows = d
 				.prepare(
 					`SELECT m.*, rank FROM memories_fts f JOIN memories m ON m.id = f.rowid
-					 WHERE memories_fts MATCH ? AND m.status = 'active' AND m.owner = ?
+					 WHERE memories_fts MATCH ? AND m.status IN (${statusIn}) AND m.owner = ?
 					 ORDER BY rank LIMIT ?`,
 				)
-				.all(match, owner, limit) as unknown as (MemoryRow & { rank: number })[];
+				.all(match, ...statuses, owner, limit) as unknown as (MemoryRow & { rank: number })[];
 			for (const row of rows) hits.set(row.id, { row, hitScore: 1 });
 		} catch {
 			// FTS syntax errors must never break recall.
@@ -322,11 +388,11 @@ export function ftsSearchScored(d: DatabaseSync, query: string, limit: number, o
 		try {
 			const rows = d
 				.prepare(
-					`SELECT * FROM memories WHERE status = 'active' AND owner = ?
+					`SELECT * FROM memories WHERE status IN (${statusIn}) AND owner = ?
 					 AND (summary LIKE ? OR keywords LIKE ? OR content LIKE ?)
 					 ORDER BY last_seen_at DESC LIMIT ?`,
 				)
-				.all(owner, `%${t}%`, `%${t}%`, `%${t}%`, 20) as unknown as MemoryRow[];
+				.all(...statuses, owner, `%${t}%`, `%${t}%`, `%${t}%`, 20) as unknown as MemoryRow[];
 			for (const row of rows) if (!hits.has(row.id)) hits.set(row.id, { row, hitScore: 0.5 });
 		} catch {
 			// ignore
@@ -404,6 +470,8 @@ export interface ProfileRow {
 	title: string;
 	content: string;
 	memory_ids: string;
+	maturity: "seeding" | "mature" | string;
+	status: string;
 	version: number;
 	created_at: string;
 	updated_at: string;
@@ -417,15 +485,17 @@ export function upsertProfile(
 	title: string,
 	content: string,
 	memoryIds: number[],
+	maturity: "seeding" | "mature" = "mature",
 ): ProfileRow {
 	const now = new Date().toISOString();
 	d.prepare(
-		`INSERT INTO profiles (owner, theme, title, content, memory_ids, version, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+		`INSERT INTO profiles (owner, theme, title, content, memory_ids, maturity, version, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
 		 ON CONFLICT(owner, theme) DO UPDATE SET
 		   title = excluded.title, content = excluded.content, memory_ids = excluded.memory_ids,
+		   maturity = excluded.maturity,
 		   version = version + 1, updated_at = excluded.updated_at`,
-	).run(owner, theme, title, content, JSON.stringify(memoryIds), now, now);
+	).run(owner, theme, title, content, JSON.stringify(memoryIds), maturity, now, now);
 	return d.prepare(`SELECT * FROM profiles WHERE owner = ? AND theme = ?`).get(owner, theme) as unknown as ProfileRow;
 }
 

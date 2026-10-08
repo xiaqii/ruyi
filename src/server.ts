@@ -78,7 +78,8 @@ export function startServer(): void {
 				const query = typeof body.query === "string" ? body.query : "";
 				if (!query.trim()) return send(res, 400, { error: "query is required" });
 				const k = typeof body.k === "number" ? body.k : undefined;
-				const result = await recall(query, k, ownerOf(url, body), cwdOf(url, body), scopeOf(url, body));
+				const mode = body.mode === "fast" || body.mode === "excavate" ? body.mode : "deep";
+				const result = await recall(query, k, ownerOf(url, body), cwdOf(url, body), scopeOf(url, body), mode);
 				return send(res, 200, result);
 			}
 

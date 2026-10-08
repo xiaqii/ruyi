@@ -27,7 +27,8 @@ Commands:
   distill                      Run one dream pass (nightly memory distillation)
     --pipeline=full|single     Override distillation pipeline
     --dry-run                  Extract without writing to the store
-  recall <query> [--k=5]       Two-stage LLM recall (for testing)
+  recall <query> [--k=5] [--mode=fast|deep|excavate]
+                               Recall memories (deep = LLM rerank, fast = free keyword scan)
   list [--limit=30]            List active memories
   forget <id>                  Archive a memory
   pin <id> [0|1]               Pin/unpin a memory (pinned = always injected)
@@ -36,6 +37,7 @@ Commands:
   synthesize                   Re-synthesize theme profiles from the memory store
   backfill-keywords [--limit=N] [--owner=default]
                                Generate retrieval keywords for memories that lack them
+  doctor                       Self-diagnosis: DB, FTS, LLM tiers, service, extension
   stats [--days=7]             Memory counts and token usage
 `;
 
@@ -70,7 +72,10 @@ async function main(): Promise<void> {
 			}
 			const k = typeof flags.k === "string" ? Number(flags.k) : undefined;
 			const owner = typeof flags.owner === "string" ? flags.owner : "default";
-			const result = await recall(query, k, owner);
+			const mode = flags.mode === "fast" || flags.mode === "excavate" ? flags.mode : "deep";
+			const started = Date.now();
+			const result = await recall(query, k, owner, null, undefined, mode);
+			console.error(`[recall] mode=${mode} ${Date.now() - started}ms, ${result.memories.length} memories`);
 			for (const p of result.profiles) {
 				console.log(`PROFILE【${p.title}】v${p.version}\n${p.content}\n`);
 			}
@@ -161,6 +166,12 @@ async function main(): Promise<void> {
 			const { backfillKeywords } = await import("./backfill.ts");
 			const report = await backfillKeywords(owner, limit);
 			console.log(`updated ${report.updated} memories in ${report.batches} batches`);
+			break;
+		}
+
+		case "doctor": {
+			const { runDoctor } = await import("./doctor.ts");
+			await runDoctor();
 			break;
 		}
 

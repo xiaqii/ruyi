@@ -3,7 +3,14 @@
  *
  * Talks to the local ruyi service (default http://127.0.0.1:8899) over HTTP.
  * Fully optional: if the service is down or slow, pi works exactly as before
- * (1.5s timeout + 5-minute circuit breaker, all failures silent).
+ * (short timeouts + per-operation circuit breakers, all failures silent).
+ *
+ * Injection strategy (zero blocking on conversation start):
+ *   1. /inject (pure SQL, <50ms) — constitution + index + profile directory,
+ *      injected into the system prompt every turn.
+ *   2. /recall (LLM deep recall) raced against a small sync budget; if the
+ *      endpoint is fast it lands in the system prompt immediately, otherwise
+ *      it is delivered as a follow-up message when ready (no new turn triggered).
  *
  * Env:
  *   RUYI_URL    - service base URL (default http://127.0.0.1:8899)
@@ -16,22 +23,32 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 const BASE = (process.env.RUYI_URL ?? "http://127.0.0.1:8899").replace(/\/+$/, "");
-const OWNER = "default"; // single-user mode; the owner column stays for future multi-account use
-const TIMEOUT_MS = 1500;
-const RECALL_TIMEOUT_MS = 20000;
-const INJECT_TIMEOUT_MS = 12000;
+const OWNER = process.env.RUYI_OWNER ?? "default"; // per-account namespace in multi-user pi-web
 const BREAKER_MS = 5 * 60_000;
+/** How long we wait for deep recall before falling back to async follow-up delivery. */
+const RECALL_SYNC_BUDGET_MS = 1200;
 
-let circuitOpenUntil = 0;
+// Per-operation timeouts and circuit breakers: a slow/failed recall must not
+// block remember (and vice versa). Injection stays snappy or is skipped.
+const TIMEOUTS = {
+	inject: 2_000,
+	recall: 30_000,
+	remember: 45_000, // POST /memories runs LLM merge synchronously (~10s)
+	stats: 1_500,
+} as const;
 
-async function api<T>(path: string, init?: RequestInit, timeoutMs = TIMEOUT_MS): Promise<T | null> {
-	if (Date.now() < circuitOpenUntil) return null;
+type Op = keyof typeof TIMEOUTS;
+
+const breakers = new Map<Op, number>();
+
+async function api<T>(op: Op, path: string, init?: RequestInit, timeoutMs?: number): Promise<T | null> {
+	if (Date.now() < (breakers.get(op) ?? 0)) return null;
 	try {
-		const res = await fetch(`${BASE}${path}`, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+		const res = await fetch(`${BASE}${path}`, { ...init, signal: AbortSignal.timeout(timeoutMs ?? TIMEOUTS[op]) });
 		if (!res.ok) throw new Error(`HTTP ${res.status}`);
 		return (await res.json()) as T;
 	} catch {
-		circuitOpenUntil = Date.now() + BREAKER_MS;
+		breakers.set(op, Date.now() + BREAKER_MS);
 		return null;
 	}
 }
@@ -39,6 +56,14 @@ async function api<T>(path: string, init?: RequestInit, timeoutMs = TIMEOUT_MS):
 const RecallParams = Type.Object({
 	query: Type.String({ description: "What you are working on or looking for in long-term memory" }),
 	k: Type.Optional(Type.Number({ description: "Max memories to return (default 5)" })),
+	mode: Type.Optional(
+		Type.Union([Type.Literal("fast"), Type.Literal("deep"), Type.Literal("excavate")], {
+			description:
+				"fast: free keyword scan, no LLM, sub-second — use for tentative probing; " +
+				"deep (default): LLM semantic rerank of the best candidates — use when the answer matters; " +
+				"excavate: like fast but also searches absorbed/archived memories (archaeology)",
+		}),
+	),
 	scope: Type.Optional(
 		Type.Union([Type.Literal("smart"), Type.Literal("cwd"), Type.Literal("all")], {
 			description:
@@ -54,6 +79,7 @@ interface RecallMemory {
 	domain: string | null;
 	summary: string;
 	content: string;
+	keywords?: string;
 	source: string | null;
 }
 
@@ -62,6 +88,7 @@ interface RecallProfile {
 	theme: string;
 	title: string;
 	content: string;
+	maturity?: string;
 	version: number;
 }
 
@@ -70,57 +97,109 @@ interface RecallResponse {
 	profiles?: RecallProfile[];
 }
 
+interface InjectResponse {
+	constitution: { id: number; summary: string; content: string }[];
+	index: { id: number; date: string; kind: string; summary: string }[];
+	profileDirectory?: { id: number; title: string; maturity: string }[];
+}
+
+function profileIntro(p: RecallProfile): string {
+	return p.maturity === "seeding"
+		? `画像《${p.title}》（部分经验积累，仅供参考，不作为规则）`
+		: `画像《${p.title}》（长期形成的习惯与经验，默认遵循，除非与当前需求冲突）`;
+}
+
+function formatRecall(result: RecallResponse): string {
+	const parts: string[] = [];
+	for (const p of result.profiles ?? [])
+		parts.push(`${profileIntro(p)} (v${p.version}):\n${p.content.slice(0, 3000)}`);
+	if (result.memories.length > 0) {
+		const lines = result.memories.map((m) => `- (#${m.id}, ${m.kind}) ${m.summary}\n  ${m.content}`);
+		parts.push("Long-term memories judged relevant to this conversation:\n\n" + lines.join("\n"));
+	}
+	return parts.join("\n\n");
+}
+
+const ADVISORY =
+	"\n\nUse the above when it helps; it never overrides what the user says now. More can be searched via the ruyi_recall tool.";
+
 export default function (pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event, ctx) => {
-		// Smart injection: let ruyi's LLM judge which memories (if any) are
-		// genuinely relevant to the user's opening prompt. No relevance = no injection.
+		// 1. Free injection (pure SQL): constitution + index + profile directory.
+		const inject = await api<InjectResponse>(
+			"inject",
+			`/inject?owner=${encodeURIComponent(OWNER)}&cwd=${encodeURIComponent(ctx.cwd)}&scope=smart`,
+		);
+		if (inject) {
+			const parts: string[] = [];
+			if (inject.constitution.length > 0) {
+				parts.push(
+					"Core memory (constitution — always active):\n" +
+						inject.constitution.map((c) => `- ${c.summary}\n  ${c.content}`).join("\n"),
+				);
+			}
+			if (inject.index.length > 0) {
+				parts.push(
+					"Memory index (one-liners; fetch full text via ruyi_recall when one matters):\n" +
+						inject.index.map((m) => `- #${m.id} (${m.kind}, ${m.date}) ${m.summary}`).join("\n"),
+				);
+			}
+			if ((inject.profileDirectory ?? []).length > 0) {
+				parts.push(
+					"Profile chapters available (synthesized portraits; ruyi_recall can load at most one when the conversation is squarely in that facet):\n" +
+						inject.profileDirectory!.map((p) => `- 《${p.title}》(${p.maturity === "seeding" ? "部分经验" : "成熟"})`).join("\n"),
+				);
+			}
+			if (parts.length > 0) event.systemPromptOptions.sections["ruyi-memory"] = parts.join("\n\n") + ADVISORY;
+		}
+
+		// 2. Deep recall: race a small sync budget, else deliver as follow-up.
 		const query = event.prompt.length > 2000 ? event.prompt.slice(0, 2000) : event.prompt;
 		if (!query.trim()) return;
-		const result = await api<RecallResponse>(
-			`/recall`,
-			{
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ query, k: 6, owner: OWNER, cwd: ctx.cwd, scope: "smart" }),
-			},
-			INJECT_TIMEOUT_MS,
-		);
-		if (!result || (result.memories.length === 0 && (result.profiles ?? []).length === 0)) return;
-		const parts: string[] = [];
-		for (const p of result.profiles ?? [])
-			parts.push(
-				`Synthesized profile chapter【${p.title}】(v${p.version}, distilled from the person's long-term memory):\n${p.content.slice(0, 3000)}`,
-			);
-		if (result.memories.length > 0) {
-			const lines = result.memories.map((m) => `- (#${m.id}, ${m.kind}) ${m.summary}\n  ${m.content}`);
-			parts.push(
-				"Long-term memories judged relevant to this conversation:\n\n" + lines.join("\n"),
-			);
-		}
-		event.systemPromptOptions.sections["ruyi-memory"] =
-			parts.join("\n\n") +
-			"\n\nUse the above when it helps; it never overrides what the user says now. More can be searched via the ruyi_recall tool.";
-
-		// Visible audit card: what ruyi injected into this conversation.
-		try {
-			const card: string[] = [];
-			for (const p of result.profiles ?? []) card.push(`**注入画像**：《${p.title}》v${p.version}`);
-			if (result.memories.length > 0) {
-				card.push(`**注入记忆 ${result.memories.length} 条**：`);
-				for (const m of result.memories) card.push(`- #${m.id} (${m.kind}) ${m.summary}`);
+		const recallPromise = api<RecallResponse>("recall", `/recall`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ query, k: 6, owner: OWNER, cwd: ctx.cwd, scope: "smart", mode: "deep" }),
+		});
+		const fast = await Promise.race([
+			recallPromise.then((r) => ({ r, late: false as const })),
+			new Promise<{ r: null; late: true }>((resolve) =>
+				setTimeout(() => resolve({ r: null, late: true }), RECALL_SYNC_BUDGET_MS),
+			),
+		]);
+		if (!fast.late) {
+			// Endpoint was quick: inject straight into the system prompt this turn.
+			if (fast.r && (fast.r.memories.length > 0 || (fast.r.profiles ?? []).length > 0)) {
+				event.systemPromptOptions.sections["ruyi-recall"] = formatRecall(fast.r) + ADVISORY;
 			}
-			pi.sendMessage({
-				customType: "ruyi",
-				content: card.join("\n"),
-				display: true,
-				details: {
-					profiles: (result.profiles ?? []).map((p) => p.id),
-					memories: result.memories.map((m) => m.id),
-				},
-			});
-		} catch {
-			// Card is best-effort; injection itself already succeeded.
+			return;
 		}
+		// Slow endpoint: deliver whenever it completes, without triggering a turn.
+		recallPromise.then((result) => {
+			if (!result || (result.memories.length === 0 && (result.profiles ?? []).length === 0)) return;
+			try {
+				const card: string[] = [];
+				for (const p of result.profiles ?? []) card.push(`**注入画像**：《${p.title}》v${p.version}（${p.maturity === "seeding" ? "部分经验" : "成熟"}）`);
+				if (result.memories.length > 0) {
+					card.push(`**注入记忆 ${result.memories.length} 条**：`);
+					for (const m of result.memories) card.push(`- #${m.id} (${m.kind}) ${m.summary}`);
+				}
+				pi.sendMessage(
+					{
+						customType: "ruyi",
+						content: card.join("\n") + "\n\n" + formatRecall(result) + ADVISORY,
+						display: true,
+						details: {
+							profiles: (result.profiles ?? []).map((p) => p.id),
+							memories: result.memories.map((m) => m.id),
+						},
+					},
+					{ triggerTurn: false, deliverAs: "followUp" },
+				);
+			} catch {
+				// Delivery is best-effort; the next ruyi_recall can always fetch again.
+			}
+		});
 	});
 
 	pi.registerTool({
@@ -129,25 +208,24 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Search long-term memory (past conversations) for preferences, facts, project context and lessons " +
 			"relevant to the current task. Use proactively when the user's request might connect to earlier work: " +
-			"their tastes, their projects, past decisions, or pitfalls encountered before.",
+			"their tastes, their projects, past decisions, or pitfalls encountered before. " +
+			"Use mode=fast for cheap tentative probing (free, no LLM), mode=deep when the answer matters, " +
+			"mode=excavate to dig through absorbed/archived memories.",
 		parameters: RecallParams,
 
 		async execute(_id, params, _signal, _onUpdate, _ctx) {
-			const result = await api<RecallResponse>(
-				`/recall`,
-				{
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({
-						query: params.query,
-						k: params.k,
-						owner: OWNER,
-						cwd: _ctx.cwd,
-						scope: params.scope ?? "smart",
-					}),
-				},
-				RECALL_TIMEOUT_MS,
-			);
+			const result = await api<RecallResponse>("recall", `/recall`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					query: params.query,
+					k: params.k,
+					owner: OWNER,
+					cwd: _ctx.cwd,
+					scope: params.scope ?? "smart",
+					mode: params.mode ?? "deep",
+				}),
+			});
 			if (!result) {
 				return {
 					content: [{ type: "text", text: "Memory service is unavailable right now; continue without it." }],
@@ -161,8 +239,7 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 			const parts: string[] = [];
-			for (const p of result.profiles ?? [])
-				parts.push(`PROFILE【${p.title}】v${p.version}\n${p.content}`);
+			for (const p of result.profiles ?? []) parts.push(`${profileIntro(p)} v${p.version}\n${p.content}`);
 			for (const m of result.memories) {
 				const head = `#${m.id} [${m.kind}${m.domain ? "/" + m.domain : ""}] ${m.summary}`;
 				const src = m.source ? `\n   source: ${m.source}` : "";
@@ -176,8 +253,9 @@ export default function (pi: ExtensionAPI) {
 		},
 
 		renderCall(args, theme) {
+			const mode = args.mode && args.mode !== "deep" ? ` [${args.mode}]` : "";
 			return new Text(
-				theme.fg("toolTitle", theme.bold("ruyi_recall ")) + theme.fg("accent", `"${args.query}"`),
+				theme.fg("toolTitle", theme.bold("ruyi_recall ")) + theme.fg("accent", `"${args.query}"${mode}`),
 				0,
 				0,
 			);
@@ -194,7 +272,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("ruyi", {
 		description: "ruyi memory service status",
 		handler: async (_args, ctx) => {
-			const stats = await api<{ counts: Record<string, number> }>(`/stats`);
+			const stats = await api<{ counts: Record<string, number> }>("stats", `/stats`);
 			if (!stats) {
 				ctx.ui.notify("ruyi service unavailable (pi is unaffected)", "warning");
 				return;
@@ -232,15 +310,11 @@ export default function (pi: ExtensionAPI) {
 		parameters: RememberParams,
 
 		async execute(_id, params, _signal, _onUpdate, ctx) {
-			const result = await api<{ id: number }>(
-				"remember",
-				`/memories`,
-				{
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ ...params, owner: OWNER, cwd: ctx.cwd }),
-				},
-			);
+			const result = await api<{ id: number }>("remember", `/memories`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ ...params, owner: OWNER, cwd: ctx.cwd }),
+			});
 			if (!result) {
 				return {
 					content: [
