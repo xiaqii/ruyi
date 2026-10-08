@@ -3,6 +3,9 @@
 All notable changes to ruyi (如忆). Semver versioning; every release passes
 typecheck + zero-LLM smoke + LLM smoke before tagging.
 
+## [0.2.4] - 2026-10-08
+
+- README 重构：英上中下双语排版、架构示意图、崩溃隔离说明、多机共享指南、一人一实例警告、一句话安装
 ## [0.2.3] - 2026-10-08
 
 - chore: CHANGELOG 去除未实际发布的 0.2.1 幽灵条目（发布脚本中途失败残留）
