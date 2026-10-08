@@ -1,5 +1,8 @@
 # ruyi (如忆)
 
+> 🤖 本系统完全由 [pi agent](https://github.com/earendil-works/pi-coding-agent) + Kimi k3 构建，日常维护（issue 处理、bug 修复）也将由 pi 自动完成。
+> 🤖 Built entirely by pi agent + Kimi k3 — maintenance (issue triage, bug fixes) is automated by pi as well.
+
 **让你的 agent 拥有长期的、跨对话的、智能的、适应场景的记忆、经验、技能与认知。**
 **Give your agent long-term, cross-conversation, intelligent, context-aware memory, experience, skills and understanding.**
 
@@ -14,7 +17,7 @@ Easiest install: hand this repo to your agent and let it read [AGENT.README.md](
 你的 agent 每次对话结束就把你忘了。ruyi 给它一个像人一样的记忆：
 
 - **夜里"做梦"**：重读当天的会话，把值得记住的提炼出来，和已有的记忆合并、去重、纠错
-- **定期"反思"**：把散落的记忆向上抽象成分领域的经验画像（编程习惯、运维经验、中医知识……互不混在一起）
+- **定期"反思"**：把散落的记忆向上抽象成分领域的经验画像（编程习惯、运维经验、健康知识……互不混在一起）
 - **白天精准回忆**：只加载和当前任务相关的那几条，其余的一律不塞
 
 Your agent forgets you after every conversation. ruyi gives it a human-like memory: it dreams at night (distilling the day's conversations into memories), reflects periodically (condensing scattered memories into per-domain skill profiles), and recalls during the day (loading only the few memories relevant to the task at hand).
