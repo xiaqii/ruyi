@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Candidate, MemoryRow } from "./types.ts";
 
-let db: DatabaseSync | undefined;
+const dbs = new Map<string, DatabaseSync>();
 
 /**
  * Schema versioning via PRAGMA user_version.
@@ -120,9 +120,10 @@ export function getSlotDemands(
 }
 
 export function getDb(dbPath: string): DatabaseSync {
-	if (db) return db;
+	const cached = dbs.get(dbPath);
+	if (cached) return cached;
 	mkdirSync(dirname(dbPath), { recursive: true });
-	db = new DatabaseSync(dbPath);
+	const db = new DatabaseSync(dbPath);
 	db.exec("PRAGMA journal_mode = WAL");
 	db.exec("PRAGMA foreign_keys = ON");
 	// Multiple clients share one store (service + MCP stdio processes + CLI);
@@ -213,6 +214,7 @@ CREATE TABLE IF NOT EXISTS profiles (
 		migrate(db, priorVersion);
 		db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 	}
+	dbs.set(dbPath, db);
 	return db;
 }
 
@@ -276,6 +278,10 @@ export function supersedeMemory(
 
 export function archiveMemory(d: DatabaseSync, id: number): void {
 	d.prepare(`UPDATE memories SET status = 'archived', updated_at = ? WHERE id = ?`).run(now(), id);
+}
+
+export function pinMemory(d: DatabaseSync, id: number, pinned: 0 | 1): void {
+	d.prepare(`UPDATE memories SET pinned = ?, updated_at = ? WHERE id = ?`).run(pinned, now(), id);
 }
 
 export function getMemory(d: DatabaseSync, id: number): MemoryRow | undefined {

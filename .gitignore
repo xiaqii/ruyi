@@ -2,9 +2,9 @@ node_modules/
 data/
 logs/
 profiles/
-test/
 config.local.json
 config.json
 scripts/import-*.ts
 scripts/compare-prompt-styles.ts
+test/*.json
 *.tsbuildinfo
