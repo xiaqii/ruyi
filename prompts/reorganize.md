@@ -19,7 +19,7 @@ Return ONLY a JSON object (any list may be empty):
 ```json
 {
   "merge_duplicates": [
-    { "ids": [3, 9, 14], "summary": "consolidated one-liner", "content": "consolidated full content" }
+    { "ids": [3, 9, 14], "summary": "consolidated one-liner", "content": "consolidated full content", "keywords": ["3-6 retrieval keywords for the consolidated entry"] }
   ],
   "resolve_conflict": [
     { "keep_id": 21, "drop_id": 7, "reason": "newer decision supersedes old plan" }

@@ -1,6 +1,6 @@
 export type MemoryKind = "preference" | "fact" | "knowledge" | "lesson" | "skill_index";
 export type MemoryOrigin = "user_stated" | "agent_inferred" | "mixed";
-export type MemoryStatus = "active" | "superseded" | "archived";
+export type MemoryStatus = "active" | "absorbed" | "superseded" | "archived";
 
 export interface MemoryRow {
 	id: number;
@@ -10,6 +10,8 @@ export interface MemoryRow {
 	domain: string | null;
 	summary: string;
 	content: string;
+	/** 3-6 retrieval keywords, space-separated. Indexed in FTS; never shown to the LLM in bulk. */
+	keywords: string;
 	origin: MemoryOrigin;
 	confidence: number;
 	evidence: number;
@@ -17,6 +19,8 @@ export interface MemoryRow {
 	pinned: number;
 	status: MemoryStatus;
 	superseded_by: number | null;
+	/** Profile id that absorbed this memory (status='absorbed'). */
+	absorbed_by: number | null;
 	created_at: string;
 	updated_at: string;
 	last_seen_at: string;
@@ -27,6 +31,7 @@ export interface Candidate {
 	domain?: string;
 	summary: string;
 	content: string;
+	keywords?: string[];
 	origin: MemoryOrigin;
 	confidence: number;
 	quote?: string;
@@ -35,8 +40,8 @@ export interface Candidate {
 export type MergeAction =
 	| { action: "NEW"; candidate: Candidate }
 	| { action: "REINFORCE"; id: number; candidate: Candidate }
-	| { action: "REFINE"; id: number; summary?: string; content: string; candidate: Candidate }
-	| { action: "SUPERSEDE"; id: number; summary: string; content: string; kind?: MemoryKind; domain?: string; candidate: Candidate };
+	| { action: "REFINE"; id: number; summary?: string; content: string; keywords?: string[]; candidate: Candidate }
+	| { action: "SUPERSEDE"; id: number; summary: string; content: string; keywords?: string[]; kind?: MemoryKind; domain?: string; candidate: Candidate };
 
 export interface SessionSourceConfig {
 	agent: string;

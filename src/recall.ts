@@ -1,5 +1,5 @@
 import { loadConfig } from "./config.ts";
-import { ftsSearch, getByIds, getDb, getProfile, listProfiles, scopeFilter, type ProfileRow, type RecallScope } from "./db.ts";
+import { ftsSearch, getByIds, getDb, getProfile, listProfiles, logRecall, scopeFilter, type ProfileRow, type RecallScope } from "./db.ts";
 import { completeJson } from "./llm.ts";
 import { loadPrompt } from "./prompts.ts";
 import type { MemoryRow } from "./types.ts";
@@ -69,6 +69,7 @@ export async function recall(
 	cwd: string | null = null,
 	scope?: RecallScope,
 ): Promise<RecallResult> {
+	const startedAt = Date.now();
 	const config = loadConfig();
 	const db = getDb(config.dbPath);
 	const limit = Math.min(k ?? config.inject.recallK, 20);
@@ -84,7 +85,9 @@ export async function recall(
 		)
 		.all(owner, ...sf.params, since) as unknown as MemoryRow[];
 	if (candidates.length > config.inject.recallCandidateMax) {
-		candidates = ftsSearch(db, query, 100, owner).filter((m) => candidates.some((c) => c.id === m.id));
+		const ftsHits = ftsSearch(db, query, 100, owner);
+		const keep = new Set(candidates.map((c) => c.id));
+		candidates = ftsHits.filter((m) => keep.has(m.id));
 	}
 	if (candidates.length === 0) return { memories: [], profiles: [] };
 
@@ -105,11 +108,20 @@ export async function recall(
 	});
 	const ids = Array.isArray(picked.ids) ? picked.ids : [];
 	const profileIds = Array.isArray(picked.profile_ids) ? picked.profile_ids : [];
-	return {
+	const result = {
 		memories: getByIds(db, ids.slice(0, limit)).filter((m) => m.owner === owner),
 		profiles: profileIds
 			.map((id) => getProfile(db, id))
 			.filter((p): p is ProfileRow => !!p && p.owner === owner)
 			.slice(0, 1),
 	};
+	logRecall(db, {
+		owner,
+		query,
+		mode: "deep",
+		hits: result.memories.length,
+		latencyMs: Date.now() - startedAt,
+		detail: { k: limit, candidates: candidates.length, profiles: result.profiles.length },
+	});
+	return result;
 }

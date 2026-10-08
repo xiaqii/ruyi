@@ -118,14 +118,14 @@ export function startServer(): void {
 						logMemoryAction(db, null, "MANUAL_REINFORCE", { id: action.id, summary });
 						return send(res, 200, { id: action.id, action: "reinforced" });
 					case "REFINE":
-						refineMemory(db, action.id, action.summary, action.content);
+						refineMemory(db, action.id, action.summary, action.content, action.keywords);
 						logMemoryAction(db, null, "MANUAL_REFINE", { id: action.id, summary: action.summary ?? summary });
 						return send(res, 200, { id: action.id, action: "refined" });
 					case "SUPERSEDE": {
 						const newId = supersedeMemory(
 							db,
 							action.id,
-							{ ...candidate, summary: action.summary, content: action.content },
+							{ ...candidate, summary: action.summary, content: action.content, keywords: action.keywords ?? candidate.keywords },
 							scope,
 						);
 						logMemoryAction(db, null, "MANUAL_SUPERSEDE", { oldId: action.id, newId, summary: action.summary });

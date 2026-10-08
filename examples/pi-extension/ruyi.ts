@@ -100,6 +100,27 @@ export default function (pi: ExtensionAPI) {
 		event.systemPromptOptions.sections["ruyi-memory"] =
 			parts.join("\n\n") +
 			"\n\nUse the above when it helps; it never overrides what the user says now. More can be searched via the ruyi_recall tool.";
+
+		// Visible audit card: what ruyi injected into this conversation.
+		try {
+			const card: string[] = [];
+			for (const p of result.profiles ?? []) card.push(`**注入画像**：《${p.title}》v${p.version}`);
+			if (result.memories.length > 0) {
+				card.push(`**注入记忆 ${result.memories.length} 条**：`);
+				for (const m of result.memories) card.push(`- #${m.id} (${m.kind}) ${m.summary}`);
+			}
+			pi.sendMessage({
+				customType: "ruyi",
+				content: card.join("\n"),
+				display: true,
+				details: {
+					profiles: (result.profiles ?? []).map((p) => p.id),
+					memories: result.memories.map((m) => m.id),
+				},
+			});
+		} catch {
+			// Card is best-effort; injection itself already succeeded.
+		}
 	});
 
 	pi.registerTool({
@@ -212,6 +233,7 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			const result = await api<{ id: number }>(
+				"remember",
 				`/memories`,
 				{
 					method: "POST",

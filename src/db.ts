@@ -5,6 +5,69 @@ import type { Candidate, MemoryRow } from "./types.ts";
 
 let db: DatabaseSync | undefined;
 
+/**
+ * Schema versioning via PRAGMA user_version.
+ * v0 = original release (unicode61 FTS, no keywords/absorbed_by, no recall_log).
+ * v1 = trigram FTS (summary+keywords+content), memories.keywords, memories.absorbed_by,
+ *      token_log.latency_ms, recall_log table.
+ */
+const SCHEMA_VERSION = 1;
+
+function migrate(d: DatabaseSync, from: number): void {
+	if (from < 1) {
+		// FTS rebuild with trigram tokenizer + keywords column.
+		d.exec(`
+			ALTER TABLE memories ADD COLUMN keywords TEXT NOT NULL DEFAULT '';
+			ALTER TABLE memories ADD COLUMN absorbed_by INTEGER;
+			ALTER TABLE token_log ADD COLUMN latency_ms INTEGER NOT NULL DEFAULT 0;
+			DROP TRIGGER IF EXISTS memories_ai;
+			DROP TRIGGER IF EXISTS memories_ad;
+			DROP TRIGGER IF EXISTS memories_au;
+			DROP TABLE IF EXISTS memories_fts;
+		`);
+		createFts(d);
+		createRecallLog(d);
+		d.exec(`INSERT INTO memories_fts(memories_fts) VALUES('rebuild')`);
+	}
+}
+
+const FTS_SCHEMA = `
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+  summary, keywords, content, content='memories', content_rowid='id',
+  tokenize='trigram'
+);
+CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+  INSERT INTO memories_fts(rowid, summary, keywords, content) VALUES (new.id, new.summary, new.keywords, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+  INSERT INTO memories_fts(memories_fts, rowid, summary, keywords, content) VALUES('delete', old.id, old.summary, old.keywords, old.content);
+END;
+CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+  INSERT INTO memories_fts(memories_fts, rowid, summary, keywords, content) VALUES('delete', old.id, old.summary, old.keywords, old.content);
+  INSERT INTO memories_fts(rowid, summary, keywords, content) VALUES (new.id, new.summary, new.keywords, new.content);
+END;
+`;
+
+function createFts(d: DatabaseSync): void {
+	d.exec(FTS_SCHEMA);
+}
+
+function createRecallLog(d: DatabaseSync): void {
+	d.exec(`
+CREATE TABLE IF NOT EXISTS recall_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  at         TEXT NOT NULL,
+  owner      TEXT NOT NULL DEFAULT 'default',
+  query      TEXT NOT NULL,
+  mode       TEXT NOT NULL DEFAULT 'deep',
+  hits       INTEGER NOT NULL DEFAULT 0,
+  latency_ms INTEGER NOT NULL DEFAULT 0,
+  detail     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_recall_log_at ON recall_log(at);
+	`);
+}
+
 export function getDb(dbPath: string): DatabaseSync {
 	if (db) return db;
 	mkdirSync(dirname(dbPath), { recursive: true });
@@ -20,6 +83,7 @@ CREATE TABLE IF NOT EXISTS memories (
   domain        TEXT,
   summary       TEXT NOT NULL,
   content       TEXT NOT NULL,
+  keywords      TEXT NOT NULL DEFAULT '',
   origin        TEXT NOT NULL DEFAULT 'agent_inferred',
   confidence    REAL NOT NULL DEFAULT 0.5,
   evidence      INTEGER NOT NULL DEFAULT 1,
@@ -27,6 +91,7 @@ CREATE TABLE IF NOT EXISTS memories (
   pinned        INTEGER NOT NULL DEFAULT 0,
   status        TEXT NOT NULL DEFAULT 'active',
   superseded_by INTEGER,
+  absorbed_by   INTEGER,
   created_at    TEXT NOT NULL,
   updated_at    TEXT NOT NULL,
   last_seen_at  TEXT NOT NULL
@@ -34,20 +99,6 @@ CREATE TABLE IF NOT EXISTS memories (
 CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status, last_seen_at);
 CREATE INDEX IF NOT EXISTS idx_memories_pinned ON memories(pinned, status);
 CREATE INDEX IF NOT EXISTS idx_memories_owner ON memories(owner, status);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
-  summary, content, content='memories', content_rowid='id'
-);
-CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-  INSERT INTO memories_fts(rowid, summary, content) VALUES (new.id, new.summary, new.content);
-END;
-CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-  INSERT INTO memories_fts(memories_fts, rowid, summary, content) VALUES('delete', old.id, old.summary, old.content);
-END;
-CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-  INSERT INTO memories_fts(memories_fts, rowid, summary, content) VALUES('delete', old.id, old.summary, old.content);
-  INSERT INTO memories_fts(rowid, summary, content) VALUES (new.id, new.summary, new.content);
-END;
 
 CREATE TABLE IF NOT EXISTS distill_state (
   session_file    TEXT PRIMARY KEY,
@@ -64,7 +115,8 @@ CREATE TABLE IF NOT EXISTS token_log (
   session_file   TEXT,
   model          TEXT NOT NULL,
   input_tokens   INTEGER NOT NULL,
-  output_tokens  INTEGER NOT NULL
+  output_tokens  INTEGER NOT NULL,
+  latency_ms     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_token_log_at ON token_log(at);
 
@@ -91,6 +143,14 @@ CREATE TABLE IF NOT EXISTS profiles (
   UNIQUE(owner, theme)
 );
 `);
+	createFts(db);
+	createRecallLog(db);
+
+	const row = db.prepare("PRAGMA user_version").get() as { user_version: number };
+	if (row.user_version < SCHEMA_VERSION) {
+		migrate(db, row.user_version);
+		db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+	}
 	return db;
 }
 
@@ -104,10 +164,10 @@ export function insertMemory(
 	const t = now();
 	const r = d
 		.prepare(
-			`INSERT INTO memories (owner, cwd, kind, domain, summary, content, origin, confidence, evidence, source, created_at, updated_at, last_seen_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+			`INSERT INTO memories (owner, cwd, kind, domain, summary, content, keywords, origin, confidence, evidence, source, created_at, updated_at, last_seen_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
 		)
-		.run(scope.owner, scope.cwd, c.kind, c.domain ?? null, c.summary, c.content, c.origin, c.confidence, c.source ?? null, t, t, t);
+		.run(scope.owner, scope.cwd, c.kind, c.domain ?? null, c.summary, c.content, (c.keywords ?? []).join(" "), c.origin, c.confidence, c.source ?? null, t, t, t);
 	return Number(r.lastInsertRowid);
 }
 
@@ -118,15 +178,22 @@ export function reinforceMemory(d: DatabaseSync, id: number): void {
 	).run(now(), now(), id);
 }
 
-export function refineMemory(d: DatabaseSync, id: number, summary: string | undefined, content: string): void {
+export function refineMemory(
+	d: DatabaseSync,
+	id: number,
+	summary: string | undefined,
+	content: string,
+	keywords?: string[],
+): void {
+	const kw = keywords && keywords.length > 0 ? keywords.join(" ") : null;
 	if (summary) {
 		d.prepare(
-			`UPDATE memories SET summary = ?, content = ?, evidence = evidence + 1, updated_at = ?, last_seen_at = ? WHERE id = ?`,
-		).run(summary, content, now(), now(), id);
+			`UPDATE memories SET summary = ?, content = ?, keywords = COALESCE(?, keywords), evidence = evidence + 1, updated_at = ?, last_seen_at = ? WHERE id = ?`,
+		).run(summary, content, kw, now(), now(), id);
 	} else {
 		d.prepare(
-			`UPDATE memories SET content = ?, evidence = evidence + 1, updated_at = ?, last_seen_at = ? WHERE id = ?`,
-		).run(content, now(), now(), id);
+			`UPDATE memories SET content = ?, keywords = COALESCE(?, keywords), evidence = evidence + 1, updated_at = ?, last_seen_at = ? WHERE id = ?`,
+		).run(content, kw, now(), now(), id);
 	}
 }
 
@@ -206,26 +273,69 @@ export function scopeFilter(scope: RecallScope, cwd: string | null): { where: st
 	};
 }
 
+export interface FtsHit {
+	row: MemoryRow;
+	/** 1.0 = FTS BM25 hit, 0.5 = short-term LIKE fallback hit. P2 fusion scoring refines this. */
+	hitScore: number;
+}
+
+/**
+ * Hybrid full-store retrieval over the trigram FTS index.
+ * Trigram silently misses terms shorter than 3 chars (very common in Chinese:
+ * 部署, 配置...), so 2-char terms go through a LIKE fallback and results are unioned.
+ * Cost is proportional to matches, not store size — no recency/evidence gate.
+ */
 export function ftsSearch(d: DatabaseSync, query: string, limit: number, owner: string): MemoryRow[] {
-	// Escape double quotes for FTS5; OR-join terms for broad candidate generation.
+	return ftsSearchScored(d, query, limit, owner).map((h) => h.row);
+}
+
+export function ftsSearchScored(d: DatabaseSync, query: string, limit: number, owner: string): FtsHit[] {
 	const terms = query
 		.replace(/"/g, " ")
-		.split(/[\s,，。.!！?？:：;；]+/)
+		.split(/[\s,，。.!!？?：:;；、（）()\[\]{}「」""'']+/)
+		.map((t) => t.trim())
 		.filter((t) => t.length >= 2)
 		.slice(0, 12);
 	if (terms.length === 0) return [];
-	const match = terms.map((t) => `"${t}"`).join(" OR ");
-	try {
-		return d
-			.prepare(
-				`SELECT m.* FROM memories_fts f JOIN memories m ON m.id = f.rowid
-				 WHERE memories_fts MATCH ? AND m.status = 'active' AND m.owner = ?
-				 ORDER BY rank LIMIT ?`,
-			)
-			.all(match, owner, limit) as unknown as MemoryRow[];
-	} catch {
-		return [];
+
+	const ftsTerms = terms.filter((t) => t.length >= 3);
+	const likeTerms = terms.filter((t) => t.length === 2);
+	const hits = new Map<number, FtsHit>();
+
+	if (ftsTerms.length > 0) {
+		const match = ftsTerms.map((t) => `"${t}"`).join(" OR ");
+		try {
+			const rows = d
+				.prepare(
+					`SELECT m.*, rank FROM memories_fts f JOIN memories m ON m.id = f.rowid
+					 WHERE memories_fts MATCH ? AND m.status = 'active' AND m.owner = ?
+					 ORDER BY rank LIMIT ?`,
+				)
+				.all(match, owner, limit) as unknown as (MemoryRow & { rank: number })[];
+			for (const row of rows) hits.set(row.id, { row, hitScore: 1 });
+		} catch {
+			// FTS syntax errors must never break recall.
+		}
 	}
+
+	for (const t of likeTerms) {
+		try {
+			const rows = d
+				.prepare(
+					`SELECT * FROM memories WHERE status = 'active' AND owner = ?
+					 AND (summary LIKE ? OR keywords LIKE ? OR content LIKE ?)
+					 ORDER BY last_seen_at DESC LIMIT ?`,
+				)
+				.all(owner, `%${t}%`, `%${t}%`, `%${t}%`, 20) as unknown as MemoryRow[];
+			for (const row of rows) if (!hits.has(row.id)) hits.set(row.id, { row, hitScore: 0.5 });
+		} catch {
+			// ignore
+		}
+	}
+
+	return [...hits.values()]
+		.sort((a, b) => b.hitScore - a.hitScore || b.row.last_seen_at.localeCompare(a.row.last_seen_at))
+		.slice(0, limit);
 }
 
 export function setDistillState(d: DatabaseSync, file: string, bytes: number, gist: string): void {
@@ -247,11 +357,25 @@ export function getDistillState(
 
 export function logTokens(
 	d: DatabaseSync,
-	entry: { runId?: string; step: string; sessionFile?: string; model: string; input: number; output: number },
+	entry: { runId?: string; step: string; sessionFile?: string; model: string; input: number; output: number; latencyMs?: number },
 ): void {
 	d.prepare(
-		`INSERT INTO token_log (at, run_id, step, session_file, model, input_tokens, output_tokens) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-	).run(now(), entry.runId ?? null, entry.step, entry.sessionFile ?? null, entry.model, entry.input, entry.output);
+		`INSERT INTO token_log (at, run_id, step, session_file, model, input_tokens, output_tokens, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+	).run(now(), entry.runId ?? null, entry.step, entry.sessionFile ?? null, entry.model, entry.input, entry.output, entry.latencyMs ?? 0);
+}
+
+/** Every recall call, for demand-signal analysis (P3 槽位需求闭环) and latency observability. */
+export function logRecall(
+	d: DatabaseSync,
+	entry: { owner: string; query: string; mode?: string; hits: number; latencyMs: number; detail?: unknown },
+): void {
+	try {
+		d.prepare(
+			`INSERT INTO recall_log (at, owner, query, mode, hits, latency_ms, detail) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		).run(now(), entry.owner, entry.query.slice(0, 500), entry.mode ?? "deep", entry.hits, entry.latencyMs, entry.detail ? JSON.stringify(entry.detail) : null);
+	} catch {
+		// Recall logging must never break a request.
+	}
 }
 
 export function logMemoryAction(d: DatabaseSync, runId: string | null, action: string, detail: unknown): void {

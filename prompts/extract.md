@@ -40,13 +40,14 @@ Return ONLY a JSON object:
       "content": "the full memory: concrete, self-contained, abstracted from the episode",
       "origin": "user_stated | agent_inferred | mixed",
       "confidence": 0.0-1.0,
+      "keywords": ["3-6 retrieval keywords: the exact words someone would search with to find this memory, mixed Chinese/English, include synonyms and tool/product names"],
       "quote": "the exact transcript line(s) this memory is grounded in"
     }
   ]
 }
 ```
 
-Write `summary` and `content` in the language the user speaks. Be honest about `origin`: `user_stated` only when the user actually said it; otherwise `agent_inferred` with appropriately modest confidence.
+Write `summary` and `content` in the language the user speaks. `keywords` are for full-text retrieval: think "what would I type to find this again" — include both Chinese and English forms when both are natural (e.g. ["部署", "docker", "frp"]). Be honest about `origin`: `user_stated` only when the user actually said it; otherwise `agent_inferred` with appropriately modest confidence.
 
 ## Calibration discipline
 

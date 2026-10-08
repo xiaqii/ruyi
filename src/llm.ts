@@ -85,6 +85,7 @@ function appendUsageLog(entry: Record<string, unknown>): void {
 export async function complete(opts: CompleteOptions): Promise<LlmResult> {
 	const config = loadConfig();
 	const { baseUrl, apiKey, model, maxTokens, requestTimeoutMs } = config.llm;
+	const startedAt = Date.now();
 
 	const res = await fetch(`${baseUrl}/v1/messages`, {
 		method: "POST",
@@ -117,6 +118,7 @@ export async function complete(opts: CompleteOptions): Promise<LlmResult> {
 		.join("\n");
 	const inputTokens = data.usage?.input_tokens ?? 0;
 	const outputTokens = data.usage?.output_tokens ?? 0;
+	const latencyMs = Date.now() - startedAt;
 
 	const at = new Date().toISOString();
 	try {
@@ -127,6 +129,7 @@ export async function complete(opts: CompleteOptions): Promise<LlmResult> {
 			model,
 			input: inputTokens,
 			output: outputTokens,
+			latencyMs,
 		});
 	} catch {
 		// Token logging must never break a run.
@@ -139,6 +142,7 @@ export async function complete(opts: CompleteOptions): Promise<LlmResult> {
 		model,
 		input_tokens: inputTokens,
 		output_tokens: outputTokens,
+		latency_ms: latencyMs,
 	});
 
 	return { text, inputTokens, outputTokens };

@@ -1,6 +1,7 @@
 node_modules/
 data/
 logs/
+profiles/
 config.local.json
 config.json
 *.tsbuildinfo

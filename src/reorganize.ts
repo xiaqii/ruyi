@@ -6,7 +6,7 @@ import { loadConfig } from "./config.ts";
 import type { MemoryRow } from "./types.ts";
 
 interface ReorgPlan {
-	merge_duplicates?: { ids: number[]; summary: string; content: string }[];
+	merge_duplicates?: { ids: number[]; summary: string; content: string; keywords?: string[] }[];
 	resolve_conflict?: { keep_id: number; drop_id: number; reason?: string }[];
 	archive?: { id: number; reason?: string }[];
 	retag?: { id: number; kind?: MemoryRow["kind"]; domain?: string }[];
@@ -72,6 +72,7 @@ export async function runReorganize(runId: string, owner: string): Promise<Reorg
 				domain: best.domain ?? undefined,
 				summary: merge.summary,
 				content: merge.content,
+				keywords: merge.keywords,
 				origin: best.origin,
 				confidence: Math.max(...sources.map((s) => s.confidence)),
 				source: sources.find((s) => s.source)?.source ?? null,

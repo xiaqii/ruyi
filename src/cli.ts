@@ -34,6 +34,8 @@ Commands:
   add --kind=K --summary="S" <content>
                                Explicitly add a memory (rules, specs, skill pointers)
   synthesize                   Re-synthesize theme profiles from the memory store
+  backfill-keywords [--limit=N] [--owner=default]
+                               Generate retrieval keywords for memories that lack them
   stats [--days=7]             Memory counts and token usage
 `;
 
@@ -150,6 +152,15 @@ async function main(): Promise<void> {
 			for (const t of report.updated)
 				console.log(`${t.title} (${t.theme}) → v${t.version}, ${t.members} memories`);
 			console.log(`themes: ${report.themes}`);
+			break;
+		}
+
+		case "backfill-keywords": {
+			const owner = typeof flags.owner === "string" ? flags.owner : "default";
+			const limit = typeof flags.limit === "string" ? Number(flags.limit) : undefined;
+			const { backfillKeywords } = await import("./backfill.ts");
+			const report = await backfillKeywords(owner, limit);
+			console.log(`updated ${report.updated} memories in ${report.batches} batches`);
 			break;
 		}
 

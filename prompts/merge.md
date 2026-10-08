@@ -9,13 +9,15 @@ You receive NEW candidate memories and the EXISTING store (id, date, kind, summa
 
 When torn between NEW and REINFORCE, choose REINFORCE: near-duplicates are the main way this store decays in quality.
 
-Return ONLY a JSON array, one entry per new candidate, in the same order:
+Return ONLY a JSON array, one entry per new candidate, in the same order. Every entry may carry `keywords` (3-6 retrieval keywords for the resulting entry — required for NEW, REFINE and SUPERSEDE, optional for REINFORCE):
 
 ```json
 [
-  { "index": 0, "action": "NEW" },
+  { "index": 0, "action": "NEW", "keywords": ["部署", "docker", "frp"] },
   { "index": 1, "action": "REINFORCE", "id": 42 },
-  { "index": 2, "action": "REFINE", "id": 17, "summary": "merged one-liner", "content": "merged full content" },
-  { "index": 3, "action": "SUPERSEDE", "id": 8, "summary": "new one-liner", "content": "new full content" }
+  { "index": 2, "action": "REFINE", "id": 17, "summary": "merged one-liner", "content": "merged full content", "keywords": ["代码风格", "模块划分"] },
+  { "index": 3, "action": "SUPERSEDE", "id": 8, "summary": "new one-liner", "content": "new full content", "keywords": ["编辑器", "cursor"] }
 ]
 ```
+
+Keywords are for full-text retrieval: the exact words someone would search with to find this memory — include both Chinese and English forms when both are natural.

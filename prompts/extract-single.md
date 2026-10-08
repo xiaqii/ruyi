@@ -31,10 +31,11 @@ Return ONLY a JSON object:
       "content": "full memory, self-contained, abstracted from the episode",
       "origin": "user_stated|agent_inferred|mixed",
       "confidence": 0.0-1.0,
+      "keywords": ["3-6 retrieval keywords: exact words someone would search with, mixed Chinese/English, synonyms and tool/product names"],
       "quote": "exact grounding transcript line(s)"
     }
   ]
 }
 ```
 
-Write `summary` and `content` in the language the user speaks.
+Write `summary` and `content` in the language the user speaks. `keywords` are for full-text retrieval: think "what would I type to find this again" — include both Chinese and English forms when both are natural.

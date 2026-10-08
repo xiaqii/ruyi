@@ -145,6 +145,7 @@ interface RawMergeAction {
 	id?: number;
 	summary?: string;
 	content?: string;
+	keywords?: string[];
 	kind?: Candidate["kind"];
 	domain?: string;
 }
@@ -173,6 +174,9 @@ export async function merge(
 	for (const a of raw) {
 		const candidate = candidates[a.index];
 		if (!candidate) continue;
+		if (Array.isArray(a.keywords) && a.keywords.length > 0 && (!candidate.keywords || candidate.keywords.length === 0)) {
+			candidate.keywords = a.keywords.map((k) => String(k)).slice(0, 8);
+		}
 		switch (a.action) {
 			case "NEW":
 				actions.push({ action: "NEW", candidate });
@@ -181,11 +185,12 @@ export async function merge(
 				if (a.id != null) actions.push({ action: "REINFORCE", id: a.id, candidate });
 				break;
 			case "REFINE":
-				if (a.id != null && a.content) actions.push({ action: "REFINE", id: a.id, summary: a.summary, content: a.content, candidate });
+				if (a.id != null && a.content)
+					actions.push({ action: "REFINE", id: a.id, summary: a.summary, content: a.content, keywords: a.keywords, candidate });
 				break;
 			case "SUPERSEDE":
 				if (a.id != null && a.content && a.summary)
-					actions.push({ action: "SUPERSEDE", id: a.id, summary: a.summary, content: a.content, kind: a.kind, domain: a.domain, candidate });
+					actions.push({ action: "SUPERSEDE", id: a.id, summary: a.summary, content: a.content, keywords: a.keywords, kind: a.kind, domain: a.domain, candidate });
 				break;
 		}
 	}
@@ -214,7 +219,7 @@ function applyActions(
 				logMemoryAction(db, runId, "REINFORCE", { id: a.id, summary: a.candidate.summary });
 				break;
 			case "REFINE":
-				refineMemory(db, a.id, a.summary, a.content);
+				refineMemory(db, a.id, a.summary, a.content, a.keywords);
 				report.refined++;
 				logMemoryAction(db, runId, "REFINE", { id: a.id, summary: a.summary ?? a.candidate.summary });
 				break;
@@ -227,6 +232,7 @@ function applyActions(
 						domain: a.domain ?? a.candidate.domain,
 						summary: a.summary,
 						content: a.content,
+						keywords: a.keywords ?? a.candidate.keywords,
 						origin: a.candidate.origin,
 						confidence: a.candidate.confidence,
 						source,
