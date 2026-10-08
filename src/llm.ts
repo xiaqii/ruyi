@@ -179,10 +179,21 @@ function parseResponse(
 		};
 	}
 	const content = (data.content ?? []) as { type: string; text?: string }[];
-	const usage = (data.usage ?? {}) as { input_tokens?: number; output_tokens?: number };
+	const usage = (data.usage ?? {}) as {
+		input_tokens?: number;
+		output_tokens?: number;
+		cache_creation_input_tokens?: number;
+		cache_read_input_tokens?: number;
+	};
+	// Anthropic-compatible endpoints may report cached prefixes separately
+	// (Kimi: input_tokens=0 + cache_read_input_tokens=N on cache hits).
+	const inputTokens =
+		(usage.input_tokens ?? 0) +
+		(usage.cache_creation_input_tokens ?? 0) +
+		(usage.cache_read_input_tokens ?? 0);
 	return {
 		text: content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n"),
-		inputTokens: usage.input_tokens ?? 0,
+		inputTokens,
 		outputTokens: usage.output_tokens ?? 0,
 	};
 }

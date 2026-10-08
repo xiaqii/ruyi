@@ -22,7 +22,9 @@ async function check(step: string): Promise<void> {
 			timeoutMs: 90_000,
 		});
 		const ms = Date.now() - started;
-		const good = r.text.includes("ok");
+		// Smoke = connectivity + latency, not instruction-following: any non-empty
+		// reply with real usage counts as pass (models occasionally chat instead of JSON).
+		const good = r.text.trim().length > 0 && r.outputTokens > 0;
 		console.log(`${good ? "✓" : "✗"} ${step} tier (${llm.protocol}/${llm.model}) — ${ms}ms, ${r.inputTokens}+${r.outputTokens} tokens`);
 		if (!good) failed++;
 	} catch (err) {
