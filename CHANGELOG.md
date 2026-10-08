@@ -3,6 +3,9 @@
 All notable changes to ruyi (如忆). Semver versioning; every release passes
 typecheck + zero-LLM smoke + LLM smoke before tagging.
 
+## [0.2.5] - 2026-10-08
+
+- 可选 bearer 鉴权（authToken 配置 + RUYI_URL/RUYI_TOKEN 扩展支持）：多机共享一个 ruyi 的官方姿势；README 英文安装句修正、多机段落改为 HTTP+key 方案
 ## [0.2.4] - 2026-10-08
 
 - README 重构：英上中下双语排版、架构示意图、崩溃隔离说明、多机共享指南、一人一实例警告、一句话安装
