@@ -1,65 +1,133 @@
-# ruyi (如忆)
+<div align="center">
 
-> 🤖 本系统完全由 [pi agent](https://github.com/earendil-works/pi-coding-agent) + Kimi k3 构建，日常维护（issue 处理、bug 修复）也将由 pi 自动完成。
-> 🤖 Built entirely by pi agent + Kimi k3 — maintenance (issue triage, bug fixes) is automated by pi as well.
+# 如忆 Ruyi — Long-term Memory for AI Agents
 
-**让你的 agent 拥有长期的、跨对话的、智能的、适应场景的记忆、经验、技能与认知。**
-**Give your agent long-term, cross-conversation, intelligent, context-aware memory, experience, skills and understanding.**
+**It doesn't remember what you said. It learns how you work.**
 
-## 安装 / Install
+🤖 built & maintained by [pi](https://github.com/badlogic/pi-mono) agent + Kimi k3 · MIT · zero dependencies
 
-最简单的安装方式：把这个仓库丢给你的 agent，让它读 [AGENT.README.md](AGENT.README.md)，它会自动完成安装（你可以告诉它装在哪里，否则默认装到 `~/ruyi`）。
+**✅ Verified with: pi agent · pi web · Claude Code · opencode**
 
-Easiest install: hand this repo to your agent and let it read [AGENT.README.md](AGENT.README.md) — it installs itself (tell it where to clone, or it defaults to `~/ruyi`).
+[中文说明往下看](#中文说明) · [Full agent manual → AGENT.README.md](AGENT.README.md) · [Changelog](CHANGELOG.md)
 
-## 这是什么 / What it is
+</div>
 
-你的 agent 每次对话结束就把你忘了。ruyi 给它一个像人一样的记忆：
+---
 
-- **夜里"做梦"**：重读当天的会话，把值得记住的提炼出来，和已有的记忆合并、去重、纠错
-- **定期"反思"**：把散落的记忆向上抽象成分领域的经验画像（编程习惯、运维经验、健康知识……互不混在一起）
-- **白天精准回忆**：只加载和当前任务相关的那几条，其余的一律不塞
+## What makes it different
 
-Your agent forgets you after every conversation. ruyi gives it a human-like memory: it dreams at night (distilling the day's conversations into memories), reflects periodically (condensing scattered memories into per-domain skill profiles), and recalls during the day (loading only the few memories relevant to the task at hand).
+Most "memory" tools are conversation loggers — they extract facts from what you said and pile them up forever.
 
-## 特点 / Why ruyi
+Ruyi builds a living **profile of how you work**. Example: you ship a feature. Ruyi doesn't memorize your code — it learns that you prefer integration tests over mocks, that you habitually forget error handling on async paths, that your architecture taste runs toward boring-and-explicit. Every lesson merges into a few stable chapters about *you*.
 
-- **查找分级，便宜的免费**：试探性查找走数据库索引，零 token、毫秒返回；只有需要 LLM 判断时才花 token
-- **记忆会长大也会收敛**：重复出现的偏好会变强，过时的会被取代，被画像吸收的旧记忆自动退出活跃集——库不会无限膨胀
-- **缺什么补什么**：查不到的领域会记下"需求信号"，夜梦优先补这些短板
-- **挂了不拖累 agent**：独立本地服务，超时和熔断都有，服务停了 agent 照常工作
-- **随便什么模型**：Anthropic 协议、OpenAI 协议都支持（DeepSeek、Kimi、Claude、通义、本地 vLLM/Ollama……）；可以"做梦用聪明模型、回忆用便宜快模型"
-- **零依赖**：Node ≥ 23.6 + SQLite，没有别的
+Next session — next month, next agent — that experience is already loaded. You stop paying for the same mistake twice.
 
-## 它是怎么工作的 / How it works
+- **Converges, never hoards.** Mature profile chapters absorb their source memories. A year in, you own a refined profile — not a landfill of 100,000 raw fragments.
+- **Cheap by design.** Keywords live in SQLite FTS (free), the LLM only ever sees ≤100 one-line summaries. No vector database, no embedding costs.
+- **Every token accounted.** Built-in token ledger — ask your agent "ruyi 用量报表" anytime.
+- **Yours.** One SQLite file. One local process. Your own LLM key. Nothing leaves your machine except the distill calls you configured.
+
+## Architecture
 
 ```
-白天  你干活 ──► 会话日志
-夜里  做梦 ──► 提炼 → 验证 → 合并 → 去重 → 归档     （记忆库治理）
-每周  反思 ──► 聚类 → 写成画像章 → 吸收底层记忆      （经验向上抽象）
-白天  回忆 ──► 免费索引初筛 → 稀疏时扩展查询 → LLM 精选  （分级成本）
+   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+   │ pi agent /   │   │ Claude Code  │   │   opencode   │
+   │   pi web     │   │              │   │              │
+   │ (extension)  │   │    (MCP)     │   │    (MCP)     │
+   └──────┬───────┘   └──────┬───────┘   └──────┬───────┘
+          │ HTTP :8899       │ stdio            │ stdio
+          ▼                  ▼                  ▼
+ ┌──────────────────────────────────────────────────────────┐
+ │              ruyi — one small local service              │
+ │                                                          │
+ │   recall engine (SQLite FTS · no vector DB)              │
+ │   nightly "dream": distill sessions → profile chapters   │
+ │   token ledger: every LLM call logged                    │
+ │                                                          │
+ │   storage = ONE file: data/ruyi.db                       │
+ └──────────────────────────┬───────────────────────────────┘
+                            │ LLM API only for dreaming / deep recall
+                            ▼
+                  your own LLM key (any provider)
 ```
 
-记忆分四层：宪法层（核心规则，每次必带）→ 画像层（分领域经验，按场景至多加载一章）→ 原子记忆（检索主力）→ 沉积层（被吸收/归档的，只在考古时翻）。活跃集始终收敛，装得再久也不乱。
+**If ruyi crashes, nothing happens.** It's a sidecar, not a dependency — your agent keeps working exactly as before, just without long-term memory for that session. Restart ruyi and everything, memories included, is back. Your agent never blocks on it.
 
-## 文档 / Docs
+## Install — one sentence
 
-- [AGENT.README.md](AGENT.README.md) — 给 agent 看的自安装手册（安装就看这个）
-- [docs/design-v2.md](docs/design-v2.md) — 完整设计文档
+Tell your agent:
 
-## Repo map
+> 帮我安装 https://github.com/xiaqii/ruyi （想换目录就说：装到 /opt/ruyi）
+
+That's it. Your agent reads [AGENT.README.md](AGENT.README.md) and does everything itself — dependencies, config, background service, and wiring itself up. It will ask you for exactly one thing: your LLM API key.
+
+## Uninstall — equally boring
 
 ```
-src/            服务本体：server, recall, distill, synthesize, reorganize, decay, llm, db, mcp, doctor…
-prompts/        全部 LLM prompt（开放、原则式）
-examples/pi-extension/ruyi.ts   pi 客户端扩展
-systemd/        服务/定时器单元（含 install.sh 用的模板）
-scripts/        install.sh 安装、release.sh 发布管线、compare-distill.ts 提炼效果对比
-test/           smoke.ts 零 LLM 测试（34 项）、llm-smoke.ts LLM 链路冒烟
-docs/design-v2.md               完整 v2 设计文档
-AGENT.README.md                 给 agent 的自安装手册
+systemctl disable --now ruyi ruyi-dream.timer ruyi-synthesize.timer 2>/dev/null
+rm -rf ~/ruyi        # and the ruyi lines in your agent's config
 ```
 
-## License
+One process, one folder, one database file. Nothing hides anywhere else.
 
-MIT
+## Who can share one ruyi
+
+**All of YOUR agents — yes.** pi on your desktop, Claude Code on your laptop, opencode on your server: that's the point. Your experience follows you across tools.
+
+**Multiple machines — yes.** Run ruyi on one host, tunnel the port from the others:
+
+```
+ssh -N -L 8899:127.0.0.1:8899 your-ruyi-host
+```
+
+HTTP-based agents (pi) on the other machines then use it transparently. MCP-stdio agents are local-only for now (remote MCP is on the roadmap) — or just give each machine its own ruyi and accept they drift apart, like two notebooks.
+
+**Multiple PEOPLE — no.** One ruyi = one person. Two people sharing one instance means your coding habits merge with theirs into one confused profile, and everything either of you remembers becomes visible to both. Unless you're close enough to share a diary — in which case, know that this is literally what you're doing.
+
+---
+
+## 中文说明
+
+### 它到底干什么
+
+大多数"记忆"工具是对话记录员——从你说的话里抠事实，越堆越多。
+
+如忆沉淀的是**你这个人怎么干活**。举个例子：你写了一段程序，如忆不会去记代码是什么——它记住的是你的编程习惯、你的架构偏好、你常犯的错误、你为某个坑付过的学费。这些经验不断合并，最终收敛成几个关于你的稳定章节。
+
+下次会话、下个月、换了个 agent——这些经验已经预装好了。同样的坑，不用交第二次学费。
+
+- **收敛，不囤积**：成熟的画像章节会吸收源头记忆，活跃集合始终有界。用一年，你得到的是一份精炼画像，不是十万条碎片垃圾场。
+- **省钱设计**：关键词放在 SQLite 全文索引里（检索零 token），LLM 只看 ≤100 条一行摘要。没有向量库，没有 embedding 费用。
+- **每个 token 都有账**：内置账本，随时问你的 agent "ruyi 用量报表"。
+- **是你的**：一个 SQLite 文件、一个本地进程、你自己的 LLM key。除了你自己配置的蒸馏调用，什么都不出你的机器。
+
+### 挂了会怎样
+
+什么都不会发生。如忆是挂件，不是依赖——服务挂了，你的 agent 照常工作，只是那次会话暂时没有长期记忆。重启服务，记忆全都在。agent 永远不会被它卡住。
+
+### 安装——一句话
+
+把项目地址给你的 agent：
+
+> 帮我安装 https://github.com/xiaqii/ruyi （可以自定义目录：装到 /opt/ruyi）
+
+完事。agent 自己会读 [AGENT.README.md](AGENT.README.md)，装依赖、写配置、起服务、把自己接好。它只会问你要一样东西：你的 LLM API key。
+
+### 卸载
+
+```
+systemctl disable --now ruyi ruyi-dream.timer ruyi-synthesize.timer 2>/dev/null
+rm -rf ~/ruyi        # 再删掉 agent 配置里的 ruyi 那几行
+```
+
+### 多台主机 / 多个 agent
+
+你自己的多个 agent 共用一个如忆——可以，这正是设计目的：经验跟着你走，跨工具不丢。
+
+多台主机：在一台机器上跑服务，其他机器 SSH 隧道转发端口（`ssh -N -L 8899:127.0.0.1:8899 主机名`），走 HTTP 的 agent（pi）就能直接用；MCP-stdio 的 agent 目前只支持本机（远程 MCP 在路线图上）。
+
+**一个如忆只给一个人用。** 多人共用一个，画像会互相污染（你的编程习惯和他的揉成一锅），而且彼此的记忆互相可见——除非亲密到可以共用一本日记，那这就是字面意义上的共用日记。
+
+### 更多
+
+安装排障、配置项、多客户端接入、目录结构、开发说明：**[AGENT.README.md](AGENT.README.md)**
