@@ -3,6 +3,9 @@
 All notable changes to ruyi (如忆). Semver versioning; every release passes
 typecheck + zero-LLM smoke + LLM smoke before tagging.
 
+## [0.2.9] - 2026-10-08
+
+- pi 扩展新增 ruyi_admin 合并管理工具（forget/pin/unpin/stats/profile 五合一，省每轮工具 schema token）
 ## [0.2.8] - 2026-10-08
 
 - 自动更新改为默认开启（--no-auto-update 退出）；README 英文区清除中文残留（cost report）

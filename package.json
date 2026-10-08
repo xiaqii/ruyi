@@ -1,6 +1,6 @@
 {
   "name": "ruyi",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "如忆 (ruyi) - an agent-agnostic long-term memory service: nightly LLM distillation, precise recall, graceful degradation",
   "type": "module",
   "license": "MIT",
