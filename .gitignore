@@ -6,4 +6,5 @@ test/
 config.local.json
 config.json
 scripts/import-*.ts
+scripts/compare-prompt-styles.ts
 *.tsbuildinfo
