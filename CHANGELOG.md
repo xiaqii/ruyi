@@ -3,6 +3,9 @@
 All notable changes to ruyi (如忆). Semver versioning; every release passes
 typecheck + zero-LLM smoke + LLM smoke before tagging.
 
+## [0.2.3] - 2026-10-08
+
+- chore: CHANGELOG 去除未实际发布的 0.2.1 幽灵条目（发布脚本中途失败残留）
 ## [0.2.2] - 2026-10-08
 
 - docs: README 恢复并更新 Repo map，补全 scripts/(release.sh, compare-distill.ts) 与 test/ 测试入口说明（关联 issue #1）；llm-smoke 在无本地配置时优雅跳过而非拿示例假 key 必败
