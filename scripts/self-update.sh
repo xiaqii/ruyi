@@ -52,7 +52,7 @@ CURRENT="$(git describe --tags 2>/dev/null || echo none)"
 # safety: main must point exactly at the latest tag (release discipline:
 # every push to main is a tagged release). Otherwise someone pushed
 # unreleased commits — don't auto-eat them.
-MAIN_TAG="$(git describe --exact-tags origin/main 2>/dev/null || echo none)"
+MAIN_TAG="$(git describe --exact-match --tags origin/main 2>/dev/null || echo none)"
 [ "$MAIN_TAG" = "$LATEST" ] || { finish skipped "origin/main ($MAIN_TAG) is not the latest tag ($LATEST) — unreleased commits on main, refusing"; exit 0; }
 
 OLD_REF="$(git rev-parse HEAD)"
