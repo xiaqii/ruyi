@@ -352,4 +352,124 @@ export default function (pi: ExtensionAPI) {
 				: new Text(theme.fg("warning", "not saved (service unavailable)"), 0, 0);
 		},
 	});
+
+	// One consolidated admin tool instead of four flat ones: management ops are
+	// rare, and every registered tool costs system-prompt tokens every turn.
+	const AdminParams = Type.Object({
+		action: Type.Union(
+			[
+				Type.Literal("forget"),
+				Type.Literal("pin"),
+				Type.Literal("unpin"),
+				Type.Literal("stats"),
+				Type.Literal("profile"),
+			],
+			{
+				description:
+					"forget = archive a memory (needs id); pin/unpin = add/remove a memory from the always-injected constitution tier (needs id); " +
+					"stats = token usage report; profile = list synthesized profile chapters, or show one chapter's content (needs profileId)",
+			},
+		),
+		id: Type.Optional(Type.Number({ description: "Memory id — required for forget/pin/unpin" })),
+		days: Type.Optional(Type.Number({ description: "Report window in days for stats (default 7)" })),
+		profileId: Type.Optional(Type.Number({ description: "Profile chapter id — omit to list all chapters" })),
+	});
+
+	pi.registerTool({
+		name: "ruyi_admin",
+		label: "Memory Admin",
+		description:
+			"Manage long-term memory. Use when the user asks to forget/delete something (action=forget with the memory id), " +
+			"to always remember something (pin), to undo that (unpin), for a token cost report (stats), " +
+			"or to inspect synthesized profile chapters (profile; pass profileId for full content). " +
+			"Forgetting archives — the memory stays recoverable via ruyi_recall mode=excavate.",
+		parameters: AdminParams,
+
+		async execute(_id, params, _signal, _onUpdate, _ctx) {
+			const text = (t: string, ok = true) => ({ content: [{ type: "text" as const, text: t }], details: { ok } });
+			switch (params.action) {
+				case "forget": {
+					if (typeof params.id !== "number") return text("forget requires a memory id.", false);
+					const r = await api<{ ok: boolean }>("remember", `/memories/${params.id}/forget`, {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: "{}",
+					});
+					return text(
+						r
+							? `Memory #${params.id} archived — no longer injected or recalled (recoverable via excavate).`
+							: "Memory service unavailable; nothing was changed.",
+						!!r,
+					);
+				}
+				case "pin":
+				case "unpin": {
+					if (typeof params.id !== "number") return text(`${params.action} requires a memory id.`, false);
+					const pinned = params.action === "pin" ? 1 : 0;
+					const r = await api<{ ok: boolean; pinned: number }>("remember", `/memories/${params.id}/pin`, {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({ pinned }),
+					});
+					if (!r) return text("Memory service unavailable; nothing was changed.", false);
+					return text(
+						r.pinned
+							? `Memory #${params.id} pinned into the constitution tier — injected at the start of every turn.`
+							: `Memory #${params.id} unpinned — back to normal recall.`,
+					);
+				}
+				case "stats": {
+					const days = params.days ?? 7;
+					const r = await api<{
+						counts: Record<string, number>;
+						tokenUsage: { day: string; step: string; input: number; output: number }[];
+					}>("stats", `/stats?days=${days}&owner=${encodeURIComponent(OWNER)}`);
+					if (!r) return text("Memory service unavailable.", false);
+					const lines = [`Memory counts: ${JSON.stringify(r.counts)}`, `Token usage, last ${days} day(s):`];
+					let ti = 0;
+					let to = 0;
+					for (const u of r.tokenUsage) {
+						ti += u.input;
+						to += u.output;
+						lines.push(`- ${u.day} ${u.step}: in ${u.input} / out ${u.output}`);
+					}
+					lines.push(`Total: in ${ti} / out ${to}`);
+					return text(lines.join("\n"));
+				}
+				case "profile": {
+					if (typeof params.profileId === "number") {
+						const p = await api<{ title: string; version: number; maturity: string; content: string }>(
+							"stats",
+							`/profiles/${params.profileId}?owner=${encodeURIComponent(OWNER)}`,
+						);
+						return p
+							? text(`《${p.title}》v${p.version} (${p.maturity})\n\n${p.content}`)
+							: text(`Profile #${params.profileId} not found (or service unavailable).`, false);
+					}
+					const r = await api<{ profiles: { id: number; title: string; theme: string; version: number; maturity: string; updated_at: string }[] }>(
+						"stats",
+						`/profiles?owner=${encodeURIComponent(OWNER)}`,
+					);
+					if (!r) return text("Memory service unavailable.", false);
+					if (r.profiles.length === 0) return text("No profile chapters yet — they emerge from nightly dreams.");
+					return text(
+						["Profile chapters:", ...r.profiles.map((p) => `- #${p.id} 《${p.title}》(${p.theme}) v${p.version} ${p.maturity}, updated ${p.updated_at.slice(0, 10)}`)].join("\n"),
+					);
+				}
+			}
+		},
+
+		renderCall(args, theme) {
+			const target = args.id != null ? ` #${args.id}` : args.profileId != null ? ` #${args.profileId}` : "";
+			return new Text(theme.fg("toolTitle", theme.bold("ruyi_admin ")) + theme.fg("accent", args.action + target), 0, 0);
+		},
+
+		renderResult(result, { isPartial }, theme) {
+			if (isPartial) return new Text(theme.fg("warning", "Working..."), 0, 0);
+			const d = result.details as { ok?: boolean } | undefined;
+			return d?.ok === false
+				? new Text(theme.fg("warning", "failed"), 0, 0)
+				: new Text(theme.fg("success", "done"), 0, 0);
+		},
+	});
 }
