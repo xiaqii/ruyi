@@ -43,6 +43,8 @@ bash scripts/install.sh
 install.sh 会：检查 node → `npm install`（仅 dev 依赖）→ 生成 `config.local.json` →
 （有 root + systemd 时）装 systemd 服务和夜间定时器，否则打印 nohup/cron 备选方案 → 跑 doctor。
 
+可选旗标：`--dream`（装完立刻做首次梦，要花 token，先问用户）、`--with-auto-update`（装每日自动更新 cron，见 §5b）。
+
 没有 root/systemd 时，按 install.sh 输出的备选方案执行（nohup 常驻 + cron 夜梦）。
 
 ## 3. 配置 `config.local.json`
@@ -161,6 +163,18 @@ POST /ingest   {"text": "..."}                               # 提交文本做�
 GET  /stats?days=7
 ```
 
+## 5b. 每日自动更新（推荐开启）
+
+`scripts/self-update.sh`：每天检查一次，**只升级到打了 tag 的正式发布版**（每个 tag 发布前已过 tsc + 34 项零 LLM 测试 + LLM 冒烟）；拉取后本地再过一遍 tsc + smoke，任何一关失败自动回滚到原版本。不碰 `config.local.json`/`data/`/`profiles/`，工作区不干净时拒绝执行。
+开启方式（装的时候忘了开，随时可补）：
+
+```bash
+bash scripts/install.sh --with-auto-update
+# 或手动加 cron：40 4 * * * <本仓库目录>/scripts/self-update.sh >/dev/null 2>&1
+```
+
+是否开启由你和用户决定——用户没表态就推荐开启（默认安全）；结果写在 `logs/self-update.status`（updated/skipped/rolled-back/error），排障看 `logs/self-update.log`。
+
 ## 6. 首次做梦（必须先问用户！）
 
 第一次做梦会通读历史会话日志，**消耗的 tokens 与日志量成正比，可能很多**。
@@ -185,6 +199,6 @@ GET  /stats?days=7
 
 ## 8. 装完之后
 
-告诉用户：安装完成 + doctor 结果 + 记忆条数 + 夜梦时间（systemd timer 或 cron）。
+告诉用户：安装完成 + doctor 结果 + 记忆条数 + 夜梦时间（systemd timer 或 cron）+ 是否开了每日自动更新。
 日常使用你什么都不用管：白天正常干活，需要回忆时用 `ruyi_recall`（试探用 fast，重要用 deep），
 用户说"记住……"时用 `ruyi_remember`，夜间它自己做梦成长。

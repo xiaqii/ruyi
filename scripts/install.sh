@@ -8,6 +8,9 @@ ROOT="$(pwd)"
 say() { printf '\033[1m[ruyi install]\033[0m %s\n' "$*"; }
 fail() { printf '\033[31m[ruyi install] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
+DREAM=0; AUTO_UPDATE=0
+for a in "$@"; do case "$a" in --dream) DREAM=1;; --with-auto-update) AUTO_UPDATE=1;; esac; done
+
 # 1. Node >= 23.6 (native TS + node:sqlite)
 NODE_BIN="$(command -v node || true)"
 [ -n "$NODE_BIN" ] || fail "node not found. Install Node.js >= 23.6 first."
@@ -56,8 +59,17 @@ else
 	mkdir -p logs
 fi
 
+# 5b. Optional daily self-update (release tags only, smoke-gated, auto-rollback)
+chmod +x scripts/self-update.sh
+if [ "$AUTO_UPDATE" = "1" ]; then
+	( crontab -l 2>/dev/null | grep -v "scripts/self-update.sh"; echo "40 4 * * * $ROOT/scripts/self-update.sh >/dev/null 2>&1" ) | crontab -
+	say "daily self-update cron installed (04:40; latest release tag only, tsc+smoke gated, auto-rollback)"
+else
+	say "optional: daily self-update → re-run with --with-auto-update"
+fi
+
 # 6. First dream is opt-in (it costs LLM tokens): run only with --dream
-if [ "${1:-}" = "--dream" ]; then
+if [ "$DREAM" = "1" ]; then
 	say "running first dream (initialMaxDays applies)..."
 	"$NODE_BIN" src/cli.ts distill || true
 fi
