@@ -37,6 +37,7 @@ Commands:
   synthesize                   Re-synthesize theme profiles from the memory store
   backfill-keywords [--limit=N] [--owner=default]
                                Generate retrieval keywords for memories that lack them
+  token [--rotate]             Show the access token for connecting remote agents (--rotate: new one)
   doctor                       Self-diagnosis: DB, FTS, LLM tiers, service, extension
   stats [--days=7]             Memory counts and token usage
 `;
@@ -210,6 +211,35 @@ async function main(): Promise<void> {
 				}
 			}
 			console.log(`sync-index: ${added} registered, ${known} already known`);
+			break;
+		}
+
+		case "token": {
+			// Local-operator command: print (or rotate) the bearer token used to
+			// connect agents from other machines. Never exposed over HTTP.
+			const { randomBytes } = await import("node:crypto");
+			const { readFileSync, writeFileSync, existsSync } = await import("node:fs");
+			const { resolve } = await import("node:path");
+			const { PROJECT_ROOT } = await import("./config.ts");
+			const file = resolve(PROJECT_ROOT, "config.local.json");
+			if (!existsSync(file)) {
+				console.error("no config.local.json — run scripts/install.sh first");
+				process.exitCode = 1;
+				break;
+			}
+			const local = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+			if (flags.rotate !== undefined) {
+				local.authToken = randomBytes(24).toString("hex");
+				writeFileSync(file, JSON.stringify(local, null, 2) + "\n", { mode: 0o600 });
+				console.log(`rotated. new token:\n\n  ${local.authToken}\n\nRestart the service to apply: systemctl restart ruyi`);
+				break;
+			}
+			const token = (local.authToken as string) || "";
+			if (!token) {
+				console.log("no token set — run: node src/cli.ts token --rotate");
+				break;
+			}
+			console.log(`${token}\n\nGive an agent on another machine:\n  "My ruyi memory service runs at https://<your-host>, the access key is ${token} — use it as my memory backend."`);
 			break;
 		}
 

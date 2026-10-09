@@ -32,6 +32,14 @@ fi
 # 3. Config
 if [ ! -f config.local.json ]; then
 	cp config.example.json config.local.json
+	# generate the access token up front — needed later to connect other machines
+	"$NODE_BIN" --no-warnings --input-type=module -e "
+	import { randomBytes } from 'node:crypto';
+	import { readFileSync, writeFileSync } from 'node:fs';
+	const c = JSON.parse(readFileSync('config.local.json', 'utf8'));
+	c.authToken = randomBytes(24).toString('hex');
+	writeFileSync('config.local.json', JSON.stringify(c, null, 2) + '\\n');
+	"
 	say "created config.local.json from example — EDIT IT: llm.baseUrl / apiKey / model, sessions dirs"
 	CONFIG_FRESH=1
 else
@@ -84,4 +92,17 @@ say "running doctor..."
 "$NODE_BIN" src/cli.ts doctor
 
 [ "$CONFIG_FRESH" = "0" ] || say "REMINDER: config.local.json still has the example API key — edit it, then: node src/cli.ts doctor"
+
+# Access token — generated at install, shown here once; retrievable anytime via CLI
+TOKEN=$("$NODE_BIN" src/cli.ts token 2>/dev/null | grep -m1 -E '^[a-f0-9]{48}$')
+echo
+echo "  ┌──────────────────────────────────────────────────────────────"
+echo "  │ Your ruyi access token (needed to connect other machines):"
+echo "  │"
+echo "  │   $TOKEN"
+echo "  │"
+echo "  │ Show it again anytime:   node src/cli.ts token"
+echo "  │ Rotate it:               node src/cli.ts token --rotate"
+echo "  └──────────────────────────────────────────────────────────────"
+echo
 say "done."

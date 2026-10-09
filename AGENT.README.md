@@ -254,7 +254,7 @@ MCP 进程直接打开同一个 SQLite 库（WAL 模式，多进程安全），�
 
 ### 多机共享（同一人的多台主机）
 
-记忆主机侧（跑一次）：`config.local.json` 里设 `"host": "0.0.0.0"` + `"authToken": "<长随机串>"`，重启服务。**暴露了端口就必须设 authToken**，否则等于把全部记忆公开。
+记忆主机侧（跑一次）：安装时已自动生成随机 `authToken`（写在 `config.local.json`，权限 600）。查看：`node src/cli.ts token`；换新：`node src/cli.ts token --rotate`（换完 `systemctl restart ruyi`，旧 token 立即失效）。对外暴露还需 `"host": "0.0.0.0"` 或反向代理/隧道，重启服务。**暴露了端口就必须有 authToken**，否则等于把全部记忆公开。
 
 其他机器上的 agent：全部改走 HTTP 接口（下节），请求头加 `Authorization: Bearer <authToken>`。pi 扩展设两个环境变量即可：`RUYI_URL=http://<主机>:8899`、`RUYI_TOKEN=<authToken>`（pi web 用户写进服务的环境）。MCP-stdio 是本机模式，远程机器不要用 MCP 接。
 
