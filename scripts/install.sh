@@ -11,12 +11,16 @@ fail() { printf '\033[31m[ruyi install] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 DREAM=0; AUTO_UPDATE=1
 for a in "$@"; do case "$a" in --dream) DREAM=1;; --no-auto-update) AUTO_UPDATE=0;; --with-auto-update) AUTO_UPDATE=1;; esac; done
 
-# 1. Node >= 23.6 (native TS + node:sqlite)
+# 1. Node >= 23.6 (native TS type-stripping + unflagged node:sqlite)
 NODE_BIN="$(command -v node || true)"
 [ -n "$NODE_BIN" ] || fail "node not found. Install Node.js >= 23.6 first."
 NODE_VER="$("$NODE_BIN" -e 'console.log(process.versions.node)')"
 NODE_MAJOR="${NODE_VER%%.*}"
-[ "$NODE_MAJOR" -ge 23 ] || fail "node $NODE_VER too old (need >= 23.6). Upgrade Node.js."
+NODE_MINOR="$(echo "$NODE_VER" | cut -d. -f2)"
+# Precise check: 23.0-23.5 lack default type-stripping / unflagged node:sqlite.
+if [ "$NODE_MAJOR" -lt 24 ] && { [ "$NODE_MAJOR" -lt 23 ] || [ "$NODE_MINOR" -lt 6 ]; }; then
+	fail "node $NODE_VER too old (need >= 23.6). Upgrade Node.js."
+fi
 say "node $NODE_VER OK"
 
 # 2. Dependencies (dev-only: typescript)
