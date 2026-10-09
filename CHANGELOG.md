@@ -3,6 +3,9 @@
 All notable changes to ruyi (如忆). Semver versioning; every release passes
 typecheck + zero-LLM smoke + LLM smoke before tagging.
 
+## [0.6.0] - 2026-10-09
+
+- 同步层 v2：gzip 压缩传输（5-10x）+ 内容寻址去重（sessionUid 注册表，跨渠道同会话零传输/只补增量，继承做梦断点）+ sync-index 回填命令 + 提炼 prompt 强化代码任务抽象规则
 ## [0.5.0] - 2026-10-09
 
 - 会话同步层：POST /sync/session（偏移量追加+409续传+路径消毒）+ GET /sync/state 对账 + data/synced/<machine>/ 自动成为做梦源；发送端 examples/sync-sessions.mjs（增量、进度、续传、UTF-8 字节边界安全）
