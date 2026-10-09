@@ -156,9 +156,47 @@ const tmpId = insertMemory(
 	ok(r4.status === 200 && (r4.json.sessions as Record<string, number>)["t/s.jsonl"] === 16, "sync state reports bytes");
 	const r5 = await call("POST", "/sync/session", { machine: "../evil", agent: "x", sessionKey: "x", offset: 0, data: "x" });
 	ok(r5.status === 400, "sync rejects path traversal");
+
+	// content-addressed dedup: same sessionUid from a different channel short-circuits
+	const uid = "contract-uid-0001";
+	const p1 = await call("POST", "/sync/session", {
+		machine, agent: "claude-code", sessionKey: "a/first.jsonl", sessionUid: uid, totalSize: 20,
+		offset: 0, data: "1234567890",
+	});
+	ok(p1.status === 200 && p1.json.receivedBytes === 10, "uid first push (partial)");
+	// same uid arrives again from offset 0 claiming totalSize 10 → already complete
+	const p2 = await call("POST", "/sync/session", {
+		machine, agent: "claude-code", sessionKey: "b/copy.jsonl", sessionUid: uid, totalSize: 10,
+		offset: 0, data: "1234567890",
+	});
+	ok(p2.status === 200 && p2.json.already === true, "uid already-complete short-circuit");
+	// same uid, larger totalSize → 409 tells client where the real resume point is
+	const p3 = await call("POST", "/sync/session", {
+		machine, agent: "claude-code", sessionKey: "b/copy.jsonl", sessionUid: uid, totalSize: 20,
+		offset: 0, data: "1234567890ABCDEFGHIJ",
+	});
+	ok(p3.status === 409 && p3.json.receivedBytes === 10, "uid grown session → 409 resume point");
+	const p4 = await call("POST", "/sync/session", {
+		machine, agent: "claude-code", sessionKey: "b/copy.jsonl", sessionUid: uid, totalSize: 20,
+		offset: 10, data: "ABCDEFGHIJ",
+	});
+	ok(p4.status === 200 && p4.json.receivedBytes === 20, "uid delta append completes at 20");
+
+	// gzip-compressed push (content-encoding: gzip)
+	{
+		const { gzipSync } = await import("node:zlib");
+		const headers: Record<string, string> = { "content-type": "application/json", "content-encoding": "gzip" };
+		if (TOKEN) headers.authorization = `Bearer ${TOKEN}`;
+		const body = gzipSync(JSON.stringify({ machine, agent: "pi", sessionKey: "gz/s.jsonl", offset: 0, data: "压缩测试数据\n".repeat(100) }));
+		const res = await fetch(`${BASE}/sync/session`, { method: "POST", headers, body, signal: AbortSignal.timeout(10_000) });
+		const j = (await res.json()) as { receivedBytes?: number };
+		ok(res.status === 200 && j.receivedBytes === Buffer.byteLength("压缩测试数据\n".repeat(100)), "gzip push decompresses correctly");
+	}
+
 	// cleanup
 	const { rmSync } = await import("node:fs");
 	rmSync(new URL("../data/synced/contract-test", import.meta.url).pathname, { recursive: true, force: true });
+	db.prepare(`DELETE FROM session_registry WHERE session_uid = ?`).run(uid);
 }
 
 // MCP tools list matches the documented six

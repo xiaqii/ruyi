@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { gunzipSync } from "node:zlib";
 import { loadConfig } from "./config.ts";
 import {
 	archiveMemory,
@@ -17,7 +18,8 @@ import { getInject, recall } from "./recall.ts";
 import { runSynthesize } from "./synthesize.ts";
 import { landingPage } from "./landing.ts";
 
-const MAX_BODY = 1024 * 1024;
+const MAX_BODY = 8 * 1024 * 1024; // compressed or plain
+const MAX_BODY_GUNZIPPED = 32 * 1024 * 1024; // zip-bomb guard
 
 async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
 	const chunks: Buffer[] = [];
@@ -28,7 +30,11 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
 		chunks.push(chunk as Buffer);
 	}
 	if (chunks.length === 0) return {};
-	return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+	let buf = Buffer.concat(chunks);
+	if (req.headers["content-encoding"] === "gzip") {
+		buf = gunzipSync(buf, { maxOutputLength: MAX_BODY_GUNZIPPED });
+	}
+	return JSON.parse(buf.toString("utf8")) as Record<string, unknown>;
 }
 
 function send(res: ServerResponse, status: number, data: unknown): void {

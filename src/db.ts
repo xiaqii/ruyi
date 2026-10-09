@@ -12,7 +12,7 @@ const dbs = new Map<string, DatabaseSync>();
  *      token_log.latency_ms, recall_log table.
  * v2 = profiles.maturity + profiles.status, slot_demands table (skill-slot demand loop).
  */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 function migrate(d: DatabaseSync, from: number): void {
 	if (from < 1) {
@@ -37,6 +37,48 @@ function migrate(d: DatabaseSync, from: number): void {
 		`);
 		createSlotDemands(d);
 	}
+	if (from < 3) {
+		createSessionRegistry(d);
+	}
+}
+
+/** Content-addressed registry of known session logs (dedup across sync channels). */
+function createSessionRegistry(d: DatabaseSync): void {
+	d.exec(`
+CREATE TABLE IF NOT EXISTS session_registry (
+  session_uid TEXT PRIMARY KEY,
+  agent       TEXT NOT NULL,
+  machine     TEXT NOT NULL DEFAULT '',
+  path        TEXT NOT NULL,
+  bytes       INTEGER NOT NULL DEFAULT 0,
+  updated_at  TEXT NOT NULL
+);
+	`);
+}
+
+export interface SessionRegistryRow {
+	session_uid: string;
+	agent: string;
+	machine: string;
+	path: string;
+	bytes: number;
+	updated_at: string;
+}
+
+export function getSessionRegistry(d: DatabaseSync, uid: string): SessionRegistryRow | undefined {
+	return d.prepare(`SELECT * FROM session_registry WHERE session_uid = ?`).get(uid) as SessionRegistryRow | undefined;
+}
+
+export function upsertSessionRegistry(
+	d: DatabaseSync,
+	uid: string,
+	fields: { agent: string; machine: string; path: string; bytes: number },
+): void {
+	d.prepare(
+		`INSERT INTO session_registry (session_uid, agent, machine, path, bytes, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(session_uid) DO UPDATE SET machine = excluded.machine, path = excluded.path,
+		   bytes = excluded.bytes, updated_at = excluded.updated_at`,
+	).run(uid, fields.agent, fields.machine, fields.path, fields.bytes, now());
 }
 
 const FTS_SCHEMA = `
@@ -207,6 +249,7 @@ CREATE TABLE IF NOT EXISTS profiles (
 	createFts(db);
 	createRecallLog(db);
 	createSlotDemands(db);
+	createSessionRegistry(db);
 
 	if (!hadMemories) {
 		db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);

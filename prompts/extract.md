@@ -25,6 +25,8 @@ Memory kinds:
 
 Naturally leave out: project state and progress, task mechanics, anything readable from a codebase, secrets, small talk. Empty output is a perfectly good answer — most segments contain nothing worth keeping, and a clean store beats a full one.
 
+A long coding session is the canonical trap: hundreds of kilobytes of tool output and code, but what deserves memory is only the abstract residue — the user's programming habits and tastes, error patterns they keep hitting, language/framework pitfalls they paid for, project conventions they enforce. Never the code itself, never what the feature does, never task progress.
+
 ## Output
 
 Return ONLY a JSON object:

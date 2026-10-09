@@ -46,9 +46,9 @@ const tmp = mkdtempSync(join(tmpdir(), "ruyi-test-"));
 console.log("1. fresh schema");
 const fresh = getDb(join(tmp, "fresh.db"));
 const version = (fresh.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
-ok(version === 2, "user_version = 2 on fresh DB", `got ${version}`);
+ok(version === 3, "user_version = 3 on fresh DB", `got ${version}`);
 const tables = (fresh.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map((t) => t.name);
-for (const t of ["memories", "memories_fts", "profiles", "token_log", "recall_log", "slot_demands", "distill_state", "memory_log"])
+for (const t of ["memories", "memories_fts", "profiles", "token_log", "recall_log", "slot_demands", "distill_state", "memory_log", "session_registry"])
 	ok(tables.includes(t), `table ${t} exists`);
 const ftsSql = (fresh.prepare("SELECT sql FROM sqlite_master WHERE name='memories_fts'").get() as { sql: string }).sql;
 ok(ftsSql.includes("trigram"), "FTS uses trigram tokenizer");
@@ -80,7 +80,7 @@ INSERT INTO memories (kind, summary, content, created_at, updated_at, last_seen_
 legacy.close();
 const migrated = getDb(legacyPath);
 const mv = (migrated.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
-ok(mv === 2, "legacy DB migrated to v2", `got ${mv}`);
+ok(mv === 3, "legacy DB migrated to v3", `got ${mv}`);
 const mcols = (migrated.prepare("PRAGMA table_info(memories)").all() as { name: string }[]).map((c) => c.name);
 ok(mcols.includes("keywords") && mcols.includes("absorbed_by"), "memories gained keywords + absorbed_by");
 const pcols = (migrated.prepare("PRAGMA table_info(profiles)").all() as { name: string }[]).map((c) => c.name);

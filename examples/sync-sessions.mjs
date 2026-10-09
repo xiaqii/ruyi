@@ -24,6 +24,8 @@
 import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, relative, basename } from "node:path";
 import { hostname } from "node:os";
+import { gzipSync } from "node:zlib";
+import { createHash } from "node:crypto";
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => {
@@ -52,14 +54,36 @@ const saveState = () => writeFileSync(STATE_FILE, JSON.stringify(state, null, 2)
 async function api(path, body) {
 	const headers = { "content-type": "application/json" };
 	if (TOKEN) headers.authorization = `Bearer ${TOKEN}`;
+	let payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body), "utf8");
+	if (payload && payload.length > 50_000) {
+		payload = gzipSync(payload); // session text compresses ~5-10x
+		headers["content-encoding"] = "gzip";
+	}
 	const res = await fetch(`${BASE}${path}`, {
 		method: body === undefined ? "GET" : "POST",
 		headers,
-		body: body === undefined ? undefined : JSON.stringify(body),
+		body: payload,
 		signal: AbortSignal.timeout(120_000),
 	});
 	const json = await res.json().catch(() => ({}));
 	return { status: res.status, json };
+}
+
+/** Content-derived session identity: same session → same uid across channels. */
+function sessionUid(rel) {
+	const file = join(DIR, rel);
+	const fd = readFileSync(file);
+	const head = fd.subarray(0, 16384);
+	if (AGENT === "claude-code") {
+		try {
+			const first = head.subarray(0, head.indexOf(10)).toString("utf8");
+			const sid = JSON.parse(first).sessionId;
+			if (typeof sid === "string" && sid.length >= 8) return sid;
+		} catch { /* fall through */ }
+	}
+	const stem = basename(rel).replace(/\.jsonl$/, "");
+	if (stem.length >= 12) return stem;
+	return createHash("sha256").update(head.subarray(0, 4096)).digest("hex").slice(0, 32);
 }
 
 function* walk(dir, rel = "") {
@@ -86,15 +110,24 @@ async function syncFile(rel) {
 	if (sent === size) return { rel, skipped: true };
 
 	const buf = readFileSync(file); // Buffer; offsets are BYTES (server counts bytes)
+	const uid = sessionUid(rel);
 	while (sent < size) {
 		const end = utf8SafeEnd(buf, sent, CHUNK);
 		const chunk = buf.subarray(sent, end).toString("utf8");
-		const r = await api("/sync/session", { machine: MACHINE, agent: AGENT, sessionKey: key, offset: sent, data: chunk });
+		const r = await api("/sync/session", {
+			machine: MACHINE, agent: AGENT, sessionKey: key, sessionUid: uid, totalSize: size,
+			offset: sent, data: chunk,
+		});
 		if (r.status === 409) {
 			sent = r.json.receivedBytes; // server knows the truth — resume from there
 			continue;
 		}
 		if (r.status !== 200) throw new Error(`sync ${key}: HTTP ${r.status} ${r.json.error ?? ""}`);
+		if (r.json.already) {
+			state.files[key] = size;
+			saveState();
+			return { rel, skipped: true, already: true };
+		}
 		sent = r.json.receivedBytes;
 		process.stdout.write(`\r  ${basename(rel)} ${(sent / 1024).toFixed(0)}/${(size / 1024).toFixed(0)} KB   `);
 	}
@@ -118,10 +151,10 @@ if (STATUS) {
 const files = ONLY_FILE ? [relative(DIR, ONLY_FILE).replace(/\\/g, "/")] : [...walk(DIR)];
 let done = 0, skipped = 0, failed = 0;
 console.log(`ruyi sync: ${files.length} session file(s) from ${DIR} → ${BASE} (machine: ${MACHINE})`);
-for (const rel of files) {
+	for (const rel of files) {
 	try {
 		const r = await syncFile(rel);
-		if (r.skipped) skipped++;
+		if (r.skipped) { skipped++; if (r.already) console.log(`≡ ${rel}（服务端已有完整内容，零传输）`); }
 		else {
 			done++;
 			console.log(`\r✓ ${rel} (${((r.bytes ?? 0) / 1024).toFixed(0)} KB)                    `);

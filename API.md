@@ -178,18 +178,27 @@ pinned=1 的记忆进入宪法层，每次 `/inject` 都带全文。**只钉真�
 
 ### POST /sync/session —— 会话日志增量同步
 
-远程机器把 agent 会话日志推给 ruyi（夜间做梦提炼的原料）。偏移量追加协议：
+远程机器把 agent 会话日志推给 ruyi（夜间做梦提炼的原料）。偏移量追加 + 内容寻址去重：
 
 ```json
 { "machine": "win11-laptop", "agent": "claude-code", "sessionKey": "proj-a/abc.jsonl",
+  "sessionUid": "从内容提取的会话唯一 ID", "totalSize": 23245,
   "offset": 12345, "data": "新增的字节" }
 ```
 
 - `machine`：来源机器标识（稳定不变，提炼出的环境事实会标注它）；`agent`：日志格式（`claude-code`/`pi`）；
   `sessionKey`：会话文件的相对路径
+- `sessionUid`：内容寻址的会话身份（claude-code 取首行 `sessionId`，pi 取文件名 uuid）。同一 uid
+  无论从哪条渠道到来都指向同一份服务端存储——手工导入过的会话再经同步协议推送时**零传输跳过**
+  （`{"already": true}`）或只补真实增量
 - `offset` 必须等于服务端已存字节数，否则 `409 {"receivedBytes": <真实值>}`——客户端从该处续传
 - 响应 `200 {"receivedBytes": <新总量>}`；字节必须按 UTF-8 字符边界切分（参考 `examples/sync-sessions.mjs`）
-- 数据落在服务端 `data/synced/<machine>/` 下，自动成为夜间做梦的会话源
+- **压缩**：请求体 >50KB 时应 gzip（`content-encoding: gzip`），会话文本压缩率约 5-10 倍；
+  服务端解压上限 32MB（防压缩炸弹）
+- 数据落在服务端 `data/synced/<machine>/` 下，自动成为夜间做梦的会话源；已被其他渠道提炼过的
+  重叠部分会继承原字节断点，不会被 LLM 重复提炼
+- 一次性回填：换了新同步机制的机器，先在服务端跑一次 `node src/cli.ts sync-index`
+  把已有会话源注册进 UID 表
 
 ### GET /sync/state —— 对账
 

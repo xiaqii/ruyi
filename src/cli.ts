@@ -169,6 +169,50 @@ async function main(): Promise<void> {
 			break;
 		}
 
+		case "sync-index": {
+			// One-time backfill: register content-derived uids of every session log
+			// already on disk (configured sources + synced inboxes), so the sync
+			// protocol recognises previously-imported sessions and skips them.
+			const { extractSessionUid, syncRoot } = await import("./sync.ts");
+			const { upsertSessionRegistry, getSessionRegistry } = await import("./db.ts");
+			const { readdirSync, statSync, readFileSync, existsSync } = await import("node:fs");
+			const { join } = await import("node:path");
+			const walk = function* (dir: string, rel = ""): Generator<string> {
+				for (const e of readdirSync(join(dir, rel), { withFileTypes: true })) {
+					const r = rel ? `${rel}/${e.name}` : e.name;
+					if (e.isDirectory()) yield* walk(dir, r);
+					else if (e.name.endsWith(".jsonl") && !r.includes("subagents/")) yield r;
+				}
+			};
+			const dirs = [...config.sessions.map((s) => ({ agent: s.agent, dir: s.dir }))];
+			const synced = syncRoot(config);
+			if (existsSync(synced)) {
+				for (const m of readdirSync(synced, { withFileTypes: true })) {
+					if (!m.isDirectory()) continue;
+					try {
+						const meta = JSON.parse(readFileSync(join(synced, m.name, "_meta.json"), "utf8"));
+						dirs.push({ agent: meta.agent ?? "pi", dir: join(synced, m.name) });
+					} catch { /* no meta */ }
+				}
+			}
+			let added = 0, known = 0;
+			for (const d of dirs) {
+				let rels: string[] = [];
+				try { rels = [...walk(d.dir)]; } catch { continue; }
+				for (const rel of rels) {
+					const file = join(d.dir, rel);
+					try {
+						const uid = extractSessionUid(d.agent, readFileSync(file).subarray(0, 16384), rel);
+						if (getSessionRegistry(db, uid)) { known++; continue; }
+						upsertSessionRegistry(db, uid, { agent: d.agent, machine: "", path: file, bytes: statSync(file).size });
+						added++;
+					} catch { /* unreadable file */ }
+				}
+			}
+			console.log(`sync-index: ${added} registered, ${known} already known`);
+			break;
+		}
+
 		case "doctor": {
 			const { runDoctor } = await import("./doctor.ts");
 			await runDoctor();
