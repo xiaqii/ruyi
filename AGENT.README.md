@@ -154,7 +154,7 @@ claude mcp add ruyi -- node <仓库绝对路径>/src/cli.ts mcp
 ```
 
 （项目级配置可参考 `examples/claude-code/.mcp.json`。）
-验证：`claude mcp list` 里能看到 ruyi；对话中试一次 `ruyi_recall`。
+验证：`claude mcp list` 里能看到 ruyi；对话中试一次 recall（显示为 `mcp__ruyi__recall`）。
 
 ### 你是 opencode
 
@@ -173,13 +173,14 @@ claude mcp add ruyi -- node <仓库绝对路径>/src/cli.ts mcp
 }
 ```
 
-重启 opencode 后工具列表里应出现 `ruyi_*`（调用时显示为 `ruyi_ruyi_recall` 这种带前缀的形式，正常）。
+重启 opencode 后工具列表里应出现 `ruyi_recall` 等六个工具（opencode 自动加 `ruyi_` 前缀）。
 
 ### 你是 Hermes / 其他 MCP 客户端
 
 把 `node <仓库绝对路径>/src/cli.ts mcp` 注册为 stdio MCP server（具体注册入口查你所在客户端的 MCP 文档）。
-它暴露六个工具：`ruyi_recall`（fast/deep/excavate 三模式）、`ruyi_list`、`ruyi_get`、`ruyi_ingest`、
-`ruyi_remember`（显式即写，走 LLM 合并裁决）、`ruyi_admin`（forget/pin/unpin/stats/profile 五合一）。
+它暴露六个工具：`recall`（fast/deep/excavate 三模式）、`list`、`get`、`ingest`、
+`remember`（显式即写，走 LLM 合并裁决）、`admin`（forget/pin/unpin/stats/profile 五合一）——
+客户端会自动加服务器名前缀（opencode 显示 `ruyi_recall`，Claude Code 显示 `mcp__ruyi__recall`）。
 MCP 进程直接打开同一个 SQLite 库（WAL 模式，多进程安全），与 HTTP 服务读写同一份记忆。
 
 ### 多客户端共用（重要）

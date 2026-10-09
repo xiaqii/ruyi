@@ -30,7 +30,7 @@ const PROTOCOL_VERSION = "2024-11-05";
 
 const TOOLS = [
 	{
-		name: "ruyi_recall",
+		name: "recall",
 		description:
 			"Search long-term memory for preferences, facts, project context and lessons relevant to the current task. Returns full memory entries.",
 		inputSchema: {
@@ -50,7 +50,7 @@ const TOOLS = [
 		},
 	},
 	{
-		name: "ruyi_list",
+		name: "list",
 		description: "List recent long-term memory entries (one-line summaries with ids).",
 		inputSchema: {
 			type: "object",
@@ -61,7 +61,7 @@ const TOOLS = [
 		},
 	},
 	{
-		name: "ruyi_get",
+		name: "get",
 		description: "Get a memory entry by id.",
 		inputSchema: {
 			type: "object",
@@ -70,7 +70,7 @@ const TOOLS = [
 		},
 	},
 	{
-		name: "ruyi_ingest",
+		name: "ingest",
 		description:
 			"Submit raw conversation text or notes to the memory center; ruyi distills durable preferences/facts/lessons from it.",
 		inputSchema: {
@@ -84,7 +84,7 @@ const TOOLS = [
 		},
 	},
 	{
-		name: "ruyi_remember",
+		name: "remember",
 		description:
 			"Explicitly save something to long-term memory RIGHT NOW when the user asks you to remember it, or when you identify a durable rule/convention that must not wait for the nightly distillation. Goes through the same LLM merge judgement as nightly dreams — duplicates become reinforcement. Do NOT use for one-off task details.",
 		inputSchema: {
@@ -100,7 +100,7 @@ const TOOLS = [
 		},
 	},
 	{
-		name: "ruyi_admin",
+		name: "admin",
 		description:
 			"Manage long-term memory. action=forget archives a memory by id (recoverable via recall mode=excavate); pin/unpin adds/removes a memory from the always-injected constitution tier; stats returns the token usage report; profile lists synthesized profile chapters or shows one chapter (pass profileId).",
 		inputSchema: {
@@ -140,7 +140,7 @@ async function handleToolCall(
 	const owner = typeof args.owner === "string" ? args.owner : "default";
 
 	switch (name) {
-		case "ruyi_recall": {
+		case "recall": {
 			const query = String(args.query ?? "");
 			const k = typeof args.k === "number" ? args.k : undefined;
 			const mode = args.mode === "fast" || args.mode === "excavate" ? args.mode : "deep";
@@ -153,24 +153,24 @@ async function handleToolCall(
 				parts.push(`#${m.id} [${m.kind}${m.domain ? "/" + m.domain : ""}] ${m.summary}\n${m.content}`);
 			return reply(id, toolResult(parts.join("\n\n")));
 		}
-		case "ruyi_list": {
+		case "list": {
 			const limit = typeof args.limit === "number" ? args.limit : 30;
 			const memories = listMemories(db, { status: "active", limit, owner });
 			const text = memories.map((m) => `#${m.id} (${m.kind}, ${m.last_seen_at.slice(0, 10)}) ${m.summary}`).join("\n");
 			return reply(id, toolResult(text || "(memory store is empty)"));
 		}
-		case "ruyi_get": {
+		case "get": {
 			const m = getMemory(db, Number(args.id));
 			if (!m || m.owner !== owner) return reply(id, toolResult("Not found."));
 			return reply(id, toolResult(JSON.stringify(m, null, 2)));
 		}
-		case "ruyi_ingest": {
+		case "ingest": {
 			const text = String(args.text ?? "");
 			const cwd = typeof args.cwd === "string" ? args.cwd : null;
 			const result = await distillText(text, { owner, cwd }, "mcp-ingest");
 			return reply(id, toolResult(JSON.stringify(result)));
 		}
-		case "ruyi_remember": {
+		case "remember": {
 			const summary = String(args.summary ?? "").trim();
 			const content = String(args.content ?? "").trim();
 			if (!summary || !content) return replyError(id, -32602, "summary and content are required");
@@ -188,7 +188,7 @@ async function handleToolCall(
 			);
 			return reply(id, toolResult(`Saved to long-term memory as #${result.id} (${result.action}): ${summary}`));
 		}
-		case "ruyi_admin": {
+		case "admin": {
 			const action = String(args.action ?? "");
 			switch (action) {
 				case "forget": {

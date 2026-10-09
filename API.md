@@ -179,16 +179,16 @@ pinned=1 的记忆进入宪法层，每次 `/inject` 都带全文。**只钉真�
 ## MCP 工具（stdio）
 
 启动：`node <repo>/src/cli.ts mcp`。协议版本 `2024-11-05`，标准 JSON-RPC 行式 stdio。
-六个工具，参数与 HTTP 语义一一对应：
+六个工具，参数与 HTTP 语义一一对应（工具名不含前缀——客户端会自动拼上服务器名，opencode 里显示为 `ruyi_recall`，Claude Code 里为 `mcp__ruyi__recall`）：
 
 | 工具 | 对应 HTTP | 参数（* 必填） |
 |---|---|---|
-| `ruyi_recall` | POST /recall | `query`*, `k`, `mode`(fast/deep/excavate), `owner` |
-| `ruyi_list` | GET /memories | `limit`, `owner` |
-| `ruyi_get` | GET /memories/:id | `id`* |
-| `ruyi_ingest` | POST /ingest | `text`*, `owner`, `cwd` |
-| `ruyi_remember` | POST /memories | `summary`*, `content`*, `kind`, `domain`, `owner` |
-| `ruyi_admin` | pin/forget/stats/profiles | `action`*(forget/pin/unpin/stats/profile), `id`, `days`, `profileId`, `owner` |
+| `recall` | POST /recall | `query`*, `k`, `mode`(fast/deep/excavate), `owner` |
+| `list` | GET /memories | `limit`, `owner` |
+| `get` | GET /memories/:id | `id`* |
+| `ingest` | POST /ingest | `text`*, `owner`, `cwd` |
+| `remember` | POST /memories | `summary`*, `content`*, `kind`, `domain`, `owner` |
+| `admin` | pin/forget/stats/profiles | `action`*(forget/pin/unpin/stats/profile), `id`, `days`, `profileId`, `owner` |
 
 客户端配置示例（Claude Code：`claude mcp add ruyi -- node <repo>/src/cli.ts mcp`；
 opencode/其他 MCP 客户端同理，见各自文档）。

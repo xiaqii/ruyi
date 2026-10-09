@@ -145,7 +145,7 @@ const tmpId = insertMemory(
 	child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) + "\n");
 	await new Promise((r) => setTimeout(r, 4000));
 	child.kill("SIGKILL");
-	const documented = ["ruyi_recall", "ruyi_list", "ruyi_get", "ruyi_ingest", "ruyi_remember", "ruyi_admin"];
+	const documented = ["recall", "list", "get", "ingest", "remember", "admin"];
 	ok(documented.every((t) => buf.includes(`"${t}"`)), "MCP exposes all six documented tools");
 }
 
