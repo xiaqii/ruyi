@@ -10,6 +10,23 @@
 ruyi 是一个长期记忆服务：它在夜间重读你的会话日志，把值得记住的东西蒸馏成记忆，
 白天你通过 HTTP API / pi 扩展 / MCP 查询它。装上它，你就有了跨会话的记忆。
 
+## 安装总览：就两步
+
+**第 1 步：安装并启动 ruyi 服务**（§0–§4：拿配置 → 检查环境 → 安装 → 写配置 → 启动）。
+完成后 ruyi 是一个常驻 HTTP 服务，谁都能连。
+
+**第 2 步：把你（agent）接上 ruyi**（§5）。常用客户端的接入文件**已经写好在 `examples/` 里**：
+
+| 客户端 | 接入方式 | 预制文件 |
+|---|---|---|
+| pi / pi web | 扩展（功能最全：自动注入+工具+熔断降级） | `examples/pi-extension/ruyi.ts` |
+| Claude Code | MCP | `claude mcp add` 一条命令，或 `examples/claude-code/.mcp.json` |
+| opencode | MCP | `examples/opencode/opencode.jsonc` |
+| 其他 agent / 自写脚本 | HTTP 或 MCP | `examples/http-client.mjs`（20 行参考实现）+ [API.md](API.md) |
+
+**Windows 用户注意**：install.sh 是 Unix 脚本（systemd/nohup/cron），Windows 上不要硬跑它，
+直接走 §4b 的 Windows 手动路径，比折腾 bash 快得多。
+
 ## 0. 你需要从用户那里拿到的信息
 
 开始之前，向用户确认（缺一不可）：
@@ -97,16 +114,38 @@ nohup node src/cli.ts serve >> logs/serve.log 2>&1 &
 curl -s http://127.0.0.1:8899/health    # {"ok":true,...}
 ```
 
+## 4b. Windows 手动路径（不要跑 install.sh）
+
+ruyi 本体是纯 Node，跨平台没问题；但 install.sh 是 Unix 脚本（依赖 systemd/nohup/cron），
+在 Windows 上硬跑只会浪费时间。Windows 直接手动四步：
+
+```powershell
+# 0. 确认 node --version >= 23.6
+git clone https://github.com/xiaqii/ruyi.git; cd ruyi
+npm install                          # 仅 dev 依赖（typescript）
+copy config.example.json config.local.json
+notepad config.local.json            # 填 llm.baseUrl/apiKey/model + sessions 目录
+node src/cli.ts doctor               # 全 PASS 再继续
+node src/cli.ts serve                # 前台跑；挂后台用 pm2 或“任务计划程序”
+```
+
+夜间做梦：Windows「任务计划程序」加一条每日任务跑 `node <仓库>\src\cli.ts distill`。
+自更新：没有 cron，就偶尔手动 `git pull --tags && git checkout <最新tag>`，或装个 WSL/Git Bash 的 cron。
+客户端接入（§5）与平台无关——MCP 配置在 Windows 上完全一样。
+
 ## 5. 接入你的客户端
 
 ### 你是 pi（或 pi web）
+
+预制扩展文件就是 `examples/pi-extension/ruyi.ts`：
 
 ```bash
 cp examples/pi-extension/ruyi.ts ~/.pi/agent/extensions/ruyi.ts   # pi web 按实际扩展目录
 ```
 
 多账号 pi web：给每个账号的环境设 `RUYI_OWNER=<账号名>`，记忆互相隔离。
-重启 pi 后：系统提示里会出现记忆注入，`ruyi_recall` / `ruyi_remember` 工具可用，`/ruyi` 命令查状态。
+远程 ruyi 服务：设 `RUYI_URL=http://<主机>:8899` 和 `RUYI_TOKEN=<authToken>`。
+重启 pi 后：系统提示里会出现记忆注入，`ruyi_recall` / `ruyi_remember` / `ruyi_admin` 工具可用。
 
 ### 你是 Claude Code
 
@@ -114,11 +153,13 @@ cp examples/pi-extension/ruyi.ts ~/.pi/agent/extensions/ruyi.ts   # pi web 按�
 claude mcp add ruyi -- node <仓库绝对路径>/src/cli.ts mcp
 ```
 
+（项目级配置可参考 `examples/claude-code/.mcp.json`。）
 验证：`claude mcp list` 里能看到 ruyi；对话中试一次 `ruyi_recall`。
 
 ### 你是 opencode
 
-在 `~/.config/opencode/opencode.jsonc` 加：
+预制配置在 `examples/opencode/opencode.jsonc`，把它合并进 `~/.config/opencode/opencode.jsonc`
+（路径改成仓库绝对路径）：
 
 ```jsonc
 {
@@ -132,12 +173,13 @@ claude mcp add ruyi -- node <仓库绝对路径>/src/cli.ts mcp
 }
 ```
 
-重启 opencode 后工具列表里应出现 `ruyi_*`。
+重启 opencode 后工具列表里应出现 `ruyi_*`（调用时显示为 `ruyi_ruyi_recall` 这种带前缀的形式，正常）。
 
 ### 你是 Hermes / 其他 MCP 客户端
 
 把 `node <仓库绝对路径>/src/cli.ts mcp` 注册为 stdio MCP server（具体注册入口查你所在客户端的 MCP 文档）。
-它暴露 `ruyi_recall`（fast/deep/excavate 三模式）、`ruyi_list`、`ruyi_get`、`ruyi_ingest`。
+它暴露六个工具：`ruyi_recall`（fast/deep/excavate 三模式）、`ruyi_list`、`ruyi_get`、`ruyi_ingest`、
+`ruyi_remember`（显式即写，走 LLM 合并裁决）、`ruyi_admin`（forget/pin/unpin/stats/profile 五合一）。
 MCP 进程直接打开同一个 SQLite 库（WAL 模式，多进程安全），与 HTTP 服务读写同一份记忆。
 
 ### 多客户端共用（重要）

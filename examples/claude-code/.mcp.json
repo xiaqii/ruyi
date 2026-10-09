@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ruyi": {
+      "command": "node",
+      "args": ["/ABSOLUTE/PATH/TO/ruyi/src/cli.ts", "mcp"]
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "ruyi": {
+      "type": "local",
+      "command": ["node", "/ABSOLUTE/PATH/TO/ruyi/src/cli.ts", "mcp"],
+      "enabled": true
+    }
+  }
+}
