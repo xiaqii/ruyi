@@ -12,6 +12,7 @@ import {
 } from "./db.ts";
 import type { Candidate } from "./types.ts";
 import { runDream, distillText, explicitRemember } from "./distill.ts";
+import { syncPush, syncState } from "./sync.ts";
 import { getInject, recall } from "./recall.ts";
 import { runSynthesize } from "./synthesize.ts";
 import { landingPage } from "./landing.ts";
@@ -182,6 +183,17 @@ export function startServer(): void {
 						dreamRunning = false;
 					});
 				return send(res, 202, { started: true });
+			}
+
+			// Session sync: remote machines push session-log deltas here for the nightly dream.
+			if (req.method === "GET" && path === "/sync/state") {
+				return send(res, 200, syncState(config, url.searchParams.get("machine") ?? ""));
+			}
+			if (req.method === "POST" && path === "/sync/session") {
+				const body = (await readBody(req)) as unknown as Parameters<typeof syncPush>[1];
+				const r = syncPush(config, body);
+				if (!r.ok) return send(res, r.status, { error: r.error, receivedBytes: r.receivedBytes });
+				return send(res, 200, r);
 			}
 
 			if (req.method === "GET" && path === "/stats") {

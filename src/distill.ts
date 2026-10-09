@@ -19,6 +19,7 @@ import { completeJson } from "./llm.ts";
 import { readSessionDelta, readSessionCwd } from "./preprocess.ts";
 import { loadPrompt } from "./prompts.ts";
 import { runDecay } from "./decay.ts";
+import { syncedSessionDirs } from "./sync.ts";
 import { runReorganize, storeOwners } from "./reorganize.ts";
 import type { Candidate, DreamReport, MemoryRow, MergeAction } from "./types.ts";
 
@@ -354,9 +355,10 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 			? (async function* () {
 					for (const s of sources) yield s;
 				})()
-			: sessionFiles(
-					config.sessions.map((s) => ({ agent: s.agent, dir: s.dir, owner: s.owner ?? "default" })),
-				);
+			: sessionFiles([
+					...config.sessions.map((s) => ({ agent: s.agent, dir: s.dir, owner: s.owner ?? "default" })),
+					...syncedSessionDirs(config), // remote machines' synced session logs
+				]);
 
 		for await (const { agent, file, owner } of stream) {
 			report.sessionsScanned++;

@@ -36,6 +36,8 @@ agent 要自写脚本/扩展对接 ruyi，照本文档实现即可正常工作�
 | POST `/memories/:id/pin` | 钉入/移出宪法层 | 无 |
 | POST `/memories/:id/forget` | 归档（软删除，可 excavate 找回） | 无 |
 | POST `/ingest` | 提交原始文本走做梦提炼管线 | 有 |
+| POST `/sync/session` | 推送会话日志增量（偏移量追加，断点续传） | 无 |
+| GET `/sync/state` | 查询某机器各会话的已收字节数（对账） | 无 |
 | GET `/profiles` | 列画像章节（摘要） | 无 |
 | GET `/profiles/:id` | 取画像章节全文 | 无 |
 | POST `/synthesize` | 立即重炼画像（通常由夜间 timer 驱动） | 有 |
@@ -173,6 +175,27 @@ pinned=1 的记忆进入宪法层，每次 `/inject` 都带全文。**只钉真�
   "tokenUsage": [{ "day": "2026-10-08", "step": "extract", "input": 12345, "output": 678 }]
 }
 ```
+
+### POST /sync/session —— 会话日志增量同步
+
+远程机器把 agent 会话日志推给 ruyi（夜间做梦提炼的原料）。偏移量追加协议：
+
+```json
+{ "machine": "win11-laptop", "agent": "claude-code", "sessionKey": "proj-a/abc.jsonl",
+  "offset": 12345, "data": "新增的字节" }
+```
+
+- `machine`：来源机器标识（稳定不变，提炼出的环境事实会标注它）；`agent`：日志格式（`claude-code`/`pi`）；
+  `sessionKey`：会话文件的相对路径
+- `offset` 必须等于服务端已存字节数，否则 `409 {"receivedBytes": <真实值>}`——客户端从该处续传
+- 响应 `200 {"receivedBytes": <新总量>}`；字节必须按 UTF-8 字符边界切分（参考 `examples/sync-sessions.mjs`）
+- 数据落在服务端 `data/synced/<machine>/` 下，自动成为夜间做梦的会话源
+
+### GET /sync/state —— 对账
+
+`GET /sync/state?machine=win11-laptop` → `{ "machine": "...", "sessions": { "proj-a/abc.jsonl": 23245 } }`
+
+参考发送端实现：`examples/sync-sessions.mjs`（增量、进度显示、断点续传、状态对账 `--status`）。
 
 ---
 

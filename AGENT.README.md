@@ -224,9 +224,19 @@ claude mcp list        # 应看到 ruyi
 顶层的 `"env": {"RUYI_URL": "...", "RUYI_TOKEN": "..."}` 给它传环境变量。
 
 **数据同步（老会话怎么进记忆）**：MCP 只负责查询和即时写入；让老会话被夜间做梦提炼，
-需要把会话日志文件同步到 ruyi 主机（文件拷贝，不走 LLM，多大都不怕）：
-服务器侧在 config.local.json 的 sessions 里登记接收目录，笔记本侧用 SessionEnd hook 或 rclone
-把 `~/.claude/projects` 增量推过去。推一次全量之后就是全自动增量。
+用同步脚本 `examples/sync-sessions.mjs`（自包含单文件，下载即用）——偏移量增量推送，
+只传新增字节，带进度显示，断了自动续传：
+
+```powershell
+curl -o C:\tools\sync-sessions.mjs https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/examples/sync-sessions.mjs
+# 全量首次同步（扫 ~/.claude/projects，显示进度）
+node C:\tools\sync-sessions.mjs        # 环境变量 RUYI_URL / RUYI_TOKEN 先设好
+# 之后挂到 SessionEnd hook 或定时任务，每次只传增量
+```
+
+同步是字节级增量 + 服务端偏移量校验：同一字节永远不会传第二次；传到服务端后做梦管线
+按字节断点续跑，记忆层由 LLM 合并裁决去重（重复内容变成印证而非新条目）。
+`--status` 可以随时对账本地与服务端的字节数。
 
 ### 你是 Hermes / 其他 MCP 客户端（本机安装了 ruyi）
 

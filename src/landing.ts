@@ -55,8 +55,8 @@ const MD = (host: string) => `# ruyi（如忆）— AI agent 长期记忆服务
 - 带 LLM 的接口（recall deep/excavate、remember、ingest）客户端超时必须 >= 45 秒；
   纯 SQL 接口（inject/list/get/stats）5 秒足够
 - 本服务不可用时你必须照常工作，只是本次没有长期记忆——记忆是挂件，不是依赖
-- 老会话进记忆的正确姿势是把会话日志文件同步到服务端做夜间提炼（文件拷贝，
-  多大都不怕），不要逐条 ingest 大文本。详见 AGENT.README.md
+- 老会话进记忆的正确姿势：用 examples/sync-sessions.mjs 把会话日志增量同步到本服务
+  （偏移量续传，只传新字节，带进度显示），夜间做梦自动提炼。不要逐条 ingest 大文本
 - 完整手册：https://github.com/xiaqii/ruyi/blob/main/AGENT.README.md
 
 ================================================================

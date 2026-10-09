@@ -143,6 +143,24 @@ const tmpId = insertMemory(
 	ok(r3.status === 400 && typeof r3.json.error === "string", "POST /recall empty-query 400");
 }
 
+// session sync protocol: push with offset, offset-mismatch 409 resume, state
+{
+	const machine = "contract-test";
+	const r1 = await call("POST", "/sync/session", { machine, agent: "claude-code", sessionKey: "t/s.jsonl", offset: 0, data: '{"a":1}\n' });
+	ok(r1.status === 200 && r1.json.receivedBytes === 8, "sync push first chunk", JSON.stringify(r1.json));
+	const r2 = await call("POST", "/sync/session", { machine, agent: "claude-code", sessionKey: "t/s.jsonl", offset: 0, data: "X" });
+	ok(r2.status === 409 && r2.json.receivedBytes === 8, "sync offset mismatch → 409 with true offset");
+	const r3 = await call("POST", "/sync/session", { machine, agent: "claude-code", sessionKey: "t/s.jsonl", offset: 8, data: '{"b":2}\n' });
+	ok(r3.status === 200 && r3.json.receivedBytes === 16, "sync resume at server offset");
+	const r4 = await call("GET", `/sync/state?machine=${machine}`);
+	ok(r4.status === 200 && (r4.json.sessions as Record<string, number>)["t/s.jsonl"] === 16, "sync state reports bytes");
+	const r5 = await call("POST", "/sync/session", { machine: "../evil", agent: "x", sessionKey: "x", offset: 0, data: "x" });
+	ok(r5.status === 400, "sync rejects path traversal");
+	// cleanup
+	const { rmSync } = await import("node:fs");
+	rmSync(new URL("../data/synced/contract-test", import.meta.url).pathname, { recursive: true, force: true });
+}
+
 // MCP tools list matches the documented six
 {
 	const { spawn } = await import("node:child_process");
