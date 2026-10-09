@@ -3,6 +3,9 @@
 All notable changes to ruyi (如忆). Semver versioning; every release passes
 typecheck + zero-LLM smoke + LLM smoke before tagging.
 
+## [0.2.14] - 2026-10-09
+
+- MCP 工具名去 ruyi_ 前缀（客户端自动拼服务器名：opencode 显示 ruyi_recall、Claude Code 显示 mcp__ruyi__recall），opencode 实测确认；smoke 同步断言新名
 ## [0.2.13] - 2026-10-09
 
 - 安装文档拆为明确两步（装服务/接agent）；examples/ 预制 opencode+claude-code 接入配置与 20 行 http-client 参考实现；新增 Windows 手动路径（§4b）；本机 opencode 经 MCP 实测联通
