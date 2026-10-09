@@ -169,7 +169,7 @@ try {
 	child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }) + "\n");
 	await new Promise((r) => setTimeout(r, 4000));
 	child.kill("SIGKILL");
-	ok(buf.includes('"serverInfo"') && buf.includes("ruyi_recall"), "MCP initialize + tools/list", buf.slice(0, 120));
+	ok(buf.includes('"serverInfo"') && buf.includes("\"name\":\"recall\""), "MCP initialize + tools/list", buf.slice(0, 120));
 } catch (err) {
 	ok(false, "MCP handshake", String(err));
 }
