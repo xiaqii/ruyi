@@ -13,8 +13,10 @@ agent 要自写脚本/扩展对接 ruyi，照本文档实现即可正常工作�
 
 ## 通用约定
 
-- **鉴权**：服务端 `config.local.json` 设了 `authToken` 时，除 `GET /health` 外所有请求必须带请求头
-  `Authorization: Bearer <authToken>`，否则 401。未设 `authToken`（纯本机部署）则无需任何头。
+- **鉴权**：鉴权由 ruyi 自己做，与反向代理无关。本机直连（127.0.0.1 且不带代理头）自动放行；
+  经反代/隧道来的请求（带 `X-Real-IP` / `X-Forwarded-For` 头）或局域网来源必须带
+  `Authorization: Bearer <authToken>`（服务端 `config.local.json` 配置），否则 401；服务端未配 token 时远程一律 503（失败即关闭）。
+  `GET /` 与 `GET /health` 恒公开。
 - **owner**：所有接口接受 `owner` 参数（query 或 body），缺省 `"default"`。同一人的多个 agent 用同一个
   owner 共享记忆池；不同人/需要隔离时用不同 owner。
 - **错误**：统一 `{"error": "..."}` + 非 200 状态码。

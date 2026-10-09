@@ -1,7 +1,7 @@
 {
   "host": "127.0.0.1",
   "port": 8899,
-  "_network_note": "To share one ruyi across YOUR machines: set host to 0.0.0.0 AND set authToken below, then point agents on other machines at http://<this-host>:8899 with the token. Never expose without authToken.",
+  "_network_note": "Auth lives in ruyi itself: direct loopback clients are trusted, anything arriving via a reverse proxy / tunnel (X-Forwarded-For) or from LAN must present this bearer token. To share one ruyi across YOUR machines, set authToken and point remote agents at it. Never expose the port without authToken.",
   "authToken": "",
   "dbPath": "./data/ruyi.db",
   "sessions": [

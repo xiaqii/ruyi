@@ -157,6 +157,25 @@ const tmpId = insertMemory(
 	const r5 = await call("POST", "/sync/session", { machine: "../evil", agent: "x", sessionKey: "x", offset: 0, data: "x" });
 	ok(r5.status === 400, "sync rejects path traversal");
 
+	// auth model: loopback trusted; proxied/remote requests must carry the bearer token
+	{
+		// unknown route still passes the auth gate first — use a real authed route:
+		const list = (headers: Record<string, string>) =>
+			fetch(`${BASE}/memories`, { headers, signal: AbortSignal.timeout(10_000) }).then((r) => r.status);
+		const rejected = await list({ "x-real-ip": "203.0.113.9" });
+		ok(rejected === 401 || rejected === 503, "proxied request without token is rejected", `got ${rejected}`);
+		const bad = await list({ "x-real-ip": "203.0.113.9", authorization: "Bearer wrong-token" });
+		ok(bad === 401 || bad === 503, "proxied request with wrong token is rejected", `got ${bad}`);
+		try {
+			const { readFileSync } = await import("node:fs");
+			const cfg = JSON.parse(readFileSync(new URL("../config.local.json", import.meta.url), "utf8")) as { authToken?: string };
+			if (cfg.authToken) {
+				const good = await list({ "x-real-ip": "203.0.113.9", authorization: `Bearer ${cfg.authToken}` });
+				ok(good === 200, "proxied request with correct token passes", `got ${good}`);
+			}
+		} catch { /* no local config — token assertions skipped */ }
+	}
+
 	// content-addressed dedup: same sessionUid from a different channel short-circuits
 	const uid = "contract-uid-0001";
 	const p1 = await call("POST", "/sync/session", {

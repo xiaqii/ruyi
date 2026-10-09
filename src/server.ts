@@ -62,8 +62,18 @@ let dreamRunning = false;
 export function startServer(): void {
 	const config = loadConfig();
 	const db = getDb(config.dbPath);
-	// Optional bearer auth — required when the service is reachable beyond localhost.
+	// Bearer auth lives in ruyi, not in the reverse proxy. Loopback clients that
+	// connect directly (no proxy headers) are trusted; anything arriving via a
+	// reverse proxy / tunnel (marked by X-Real-IP / X-Forwarded-For) or from a
+	// non-loopback address must present the token. Spoofing only goes one way:
+	// a local process adding the header gets treated as remote (stricter), and a
+	// remote client cannot reach the socket without going through the proxy.
 	const authToken = config.authToken ?? "";
+	const isLocal = (req: IncomingMessage): boolean => {
+		const addr = req.socket.remoteAddress ?? "";
+		const loopback = addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1";
+		return loopback && !req.headers["x-real-ip"] && !req.headers["x-forwarded-for"];
+	};
 
 	const server = createServer(async (req, res) => {
 		const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -81,8 +91,11 @@ export function startServer(): void {
 				return send(res, 200, { ok: true, ...memoryCounts(db) });
 			}
 
-			if (authToken && req.headers.authorization !== `Bearer ${authToken}`) {
-				return send(res, 401, { error: "missing or invalid bearer token" });
+			if (!isLocal(req)) {
+				if (!authToken) return send(res, 503, { error: "remote access requires authToken in config" });
+				if (req.headers.authorization !== `Bearer ${authToken}`) {
+					return send(res, 401, { error: "missing or invalid bearer token" });
+				}
 			}
 
 			if (req.method === "GET" && path === "/inject") {
