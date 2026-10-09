@@ -1,23 +1,17 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { loadConfig } from "./config.ts";
 import {
-	activeCandidates,
 	archiveMemory,
 	getDb,
 	getMemory,
 	getProfile,
-	insertMemory,
 	listMemories,
 	listProfiles,
-	logMemoryAction,
 	memoryCounts,
-	refineMemory,
-	reinforceMemory,
-	supersedeMemory,
 	tokenUsage,
 } from "./db.ts";
 import type { Candidate } from "./types.ts";
-import { runDream, merge, distillText } from "./distill.ts";
+import { runDream, distillText, explicitRemember } from "./distill.ts";
 import { getInject, recall } from "./recall.ts";
 import { runSynthesize } from "./synthesize.ts";
 
@@ -115,35 +109,8 @@ export function startServer(): void {
 					confidence: typeof body.confidence === "number" ? body.confidence : 0.9,
 				};
 
-				const existing = activeCandidates(db, 3650, owner).slice(0, config.dream.mergeSummaryLimit);
-				const actions = await merge([candidate], existing, { runId: "manual", sessionFile: "(manual write)" });
-				const action = actions[0] ?? { action: "NEW" as const, candidate };
-
-				switch (action.action) {
-					case "REINFORCE":
-						reinforceMemory(db, action.id);
-						logMemoryAction(db, null, "MANUAL_REINFORCE", { id: action.id, summary });
-						return send(res, 200, { id: action.id, action: "reinforced" });
-					case "REFINE":
-						refineMemory(db, action.id, action.summary, action.content, action.keywords);
-						logMemoryAction(db, null, "MANUAL_REFINE", { id: action.id, summary: action.summary ?? summary });
-						return send(res, 200, { id: action.id, action: "refined" });
-					case "SUPERSEDE": {
-						const newId = supersedeMemory(
-							db,
-							action.id,
-							{ ...candidate, summary: action.summary, content: action.content, keywords: action.keywords ?? candidate.keywords },
-							scope,
-						);
-						logMemoryAction(db, null, "MANUAL_SUPERSEDE", { oldId: action.id, newId, summary: action.summary });
-						return send(res, 201, { id: newId, action: "superseded" });
-					}
-					default: {
-						const id = insertMemory(db, candidate, scope);
-						logMemoryAction(db, null, "MANUAL_ADD", { id, summary });
-						return send(res, 201, { id, action: "new" });
-					}
-				}
+				const result = await explicitRemember(candidate, scope);
+				return send(res, result.action === "new" || result.action === "superseded" ? 201 : 200, result);
 			}
 
 			const idMatch = path.match(/^\/memories\/(\d+)(\/(pin|forget))?$/);

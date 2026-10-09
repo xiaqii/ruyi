@@ -1,8 +1,18 @@
 import { createInterface } from "node:readline";
 import { loadConfig } from "./config.ts";
-import { getDb, getMemory, listMemories } from "./db.ts";
+import {
+	archiveMemory,
+	getDb,
+	getMemory,
+	getProfile,
+	listMemories,
+	listProfiles,
+	memoryCounts,
+	pinMemory,
+	tokenUsage,
+} from "./db.ts";
 import { recall } from "./recall.ts";
-import { distillText } from "./distill.ts";
+import { distillText, explicitRemember } from "./distill.ts";
 
 /**
  * Minimal MCP (Model Context Protocol) stdio server exposing ruyi recall tools.
@@ -73,6 +83,38 @@ const TOOLS = [
 			required: ["text"],
 		},
 	},
+	{
+		name: "ruyi_remember",
+		description:
+			"Explicitly save something to long-term memory RIGHT NOW when the user asks you to remember it, or when you identify a durable rule/convention that must not wait for the nightly distillation. Goes through the same LLM merge judgement as nightly dreams — duplicates become reinforcement. Do NOT use for one-off task details.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				kind: { type: "string", enum: ["preference", "fact", "knowledge", "lesson", "skill_index"], description: "Memory kind" },
+				summary: { type: "string", description: "One-line summary (<= 30 words)" },
+				content: { type: "string", description: "Full memory content, concrete and self-contained" },
+				domain: { type: "string", description: "Short free-form tag" },
+				owner: { type: "string", description: "Memory owner namespace (default 'default')" },
+			},
+			required: ["summary", "content"],
+		},
+	},
+	{
+		name: "ruyi_admin",
+		description:
+			"Manage long-term memory. action=forget archives a memory by id (recoverable via recall mode=excavate); pin/unpin adds/removes a memory from the always-injected constitution tier; stats returns the token usage report; profile lists synthesized profile chapters or shows one chapter (pass profileId).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				action: { type: "string", enum: ["forget", "pin", "unpin", "stats", "profile"], description: "Management action" },
+				id: { type: "number", description: "Memory id — required for forget/pin/unpin" },
+				days: { type: "number", description: "Report window in days for stats (default 7)" },
+				profileId: { type: "number", description: "Profile chapter id — omit to list chapters" },
+				owner: { type: "string", description: "Memory owner namespace (default 'default')" },
+			},
+			required: ["action"],
+		},
+	},
 ];
 
 function reply(id: number | string | undefined, result: unknown): void {
@@ -127,6 +169,71 @@ async function handleToolCall(
 			const cwd = typeof args.cwd === "string" ? args.cwd : null;
 			const result = await distillText(text, { owner, cwd }, "mcp-ingest");
 			return reply(id, toolResult(JSON.stringify(result)));
+		}
+		case "ruyi_remember": {
+			const summary = String(args.summary ?? "").trim();
+			const content = String(args.content ?? "").trim();
+			if (!summary || !content) return replyError(id, -32602, "summary and content are required");
+			const kind = typeof args.kind === "string" ? args.kind : "fact";
+			const result = await explicitRemember(
+				{
+					kind: kind as never,
+					domain: typeof args.domain === "string" ? args.domain : undefined,
+					summary,
+					content,
+					origin: "user_stated",
+					confidence: 0.9,
+				},
+				{ owner, cwd: typeof args.cwd === "string" ? args.cwd : null },
+			);
+			return reply(id, toolResult(`Saved to long-term memory as #${result.id} (${result.action}): ${summary}`));
+		}
+		case "ruyi_admin": {
+			const action = String(args.action ?? "");
+			switch (action) {
+				case "forget": {
+					const mid = Number(args.id);
+					if (!mid) return replyError(id, -32602, "forget requires a memory id");
+					archiveMemory(db, mid);
+					return reply(id, toolResult(`Memory #${mid} archived (recoverable via ruyi_recall mode=excavate).`));
+				}
+				case "pin":
+				case "unpin": {
+					const mid = Number(args.id);
+					if (!mid) return replyError(id, -32602, `${action} requires a memory id`);
+					pinMemory(db, mid, action === "pin" ? 1 : 0);
+					return reply(id, toolResult(action === "pin" ? `Memory #${mid} pinned into the constitution tier.` : `Memory #${mid} unpinned.`));
+				}
+				case "stats": {
+					const days = typeof args.days === "number" ? args.days : 7;
+					const usage = tokenUsage(db, days);
+					let ti = 0;
+					let to = 0;
+					const lines = [`Memory counts: ${JSON.stringify(memoryCounts(db, owner))}`, `Token usage, last ${days} day(s):`];
+					for (const u of usage) {
+						ti += u.input;
+						to += u.output;
+						lines.push(`- ${u.day} ${u.step}: in ${u.input} / out ${u.output}`);
+					}
+					lines.push(`Total: in ${ti} / out ${to}`);
+					return reply(id, toolResult(lines.join("\n")));
+				}
+				case "profile": {
+					if (typeof args.profileId === "number") {
+						const p = getProfile(db, args.profileId);
+						if (!p || p.owner !== owner) return reply(id, toolResult("Profile not found."));
+						return reply(id, toolResult(`《${p.title}》v${p.version} (${p.maturity})\n\n${p.content}`));
+					}
+					const profiles = listProfiles(db, owner);
+					if (profiles.length === 0) return reply(id, toolResult("No profile chapters yet — they emerge from nightly dreams."));
+					return reply(
+						id,
+						toolResult(profiles.map((p) => `#${p.id} 《${p.title}》(${p.theme}) v${p.version} ${p.maturity}, updated ${p.updated_at.slice(0, 10)}`).join("\n")),
+					);
+				}
+				default:
+					return replyError(id, -32602, `unknown action: ${action}`);
+			}
 		}
 		default:
 			return replyError(id, -32601, `unknown tool: ${name}`);
