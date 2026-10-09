@@ -3,6 +3,9 @@
 All notable changes to ruyi (如忆). Semver versioning; every release passes
 typecheck + zero-LLM smoke + LLM smoke before tagging.
 
+## [0.2.10] - 2026-10-09
+
+- MCP 补齐写与管理面：ruyi_remember（与 HTTP 共用 explicitRemember 裁决管线）+ ruyi_admin（forget/pin/unpin/stats/profile）；server.ts 消除重复的显式写入逻辑
 ## [0.2.9] - 2026-10-08
 
 - pi 扩展新增 ruyi_admin 合并管理工具（forget/pin/unpin/stats/profile 五合一，省每轮工具 schema token）
