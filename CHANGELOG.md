@@ -3,6 +3,9 @@
 All notable changes to ruyi (如忆). Semver versioning; every release passes
 typecheck + zero-LLM smoke + LLM smoke before tagging.
 
+## [0.2.12] - 2026-10-09
+
+- install.sh node 版本检查精确到 23.6（原来只看大版本，23.0-23.5 会误放行进而在运行时失败）
 ## [0.2.11] - 2026-10-09
 
 - API.md 接口契约（HTTP 14 端点 + MCP 6 工具字段级定义）+ test/api-contract.ts 契约测试 22 项（发布门禁，文档与实现不一致即失败）；llm-smoke 增加真实写入-归档回路
