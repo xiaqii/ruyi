@@ -3,6 +3,9 @@
 All notable changes to ruyi (如忆). Semver versioning; every release passes
 typecheck + zero-LLM smoke + LLM smoke before tagging.
 
+## [0.2.15] - 2026-10-09
+
+- Claude Code SessionStart hook（examples/claude-code/session-start.mjs）：开局自动注入宪法层+记忆索引，3s 超时静默降级；AGENT.README 补接入说明
 ## [0.2.14] - 2026-10-09
 
 - MCP 工具名去 ruyi_ 前缀（客户端自动拼服务器名：opencode 显示 ruyi_recall、Claude Code 显示 mcp__ruyi__recall），opencode 实测确认；smoke 同步断言新名
