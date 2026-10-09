@@ -3,6 +3,9 @@
 All notable changes to ruyi (如忆). Semver versioning; every release passes
 typecheck + zero-LLM smoke + LLM smoke before tagging.
 
+## [0.2.13] - 2026-10-09
+
+- 安装文档拆为明确两步（装服务/接agent）；examples/ 预制 opencode+claude-code 接入配置与 20 行 http-client 参考实现；新增 Windows 手动路径（§4b）；本机 opencode 经 MCP 实测联通
 ## [0.2.12] - 2026-10-09
 
 - install.sh node 版本检查精确到 23.6（原来只看大版本，23.0-23.5 会误放行进而在运行时失败）
