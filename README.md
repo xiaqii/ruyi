@@ -79,11 +79,11 @@ For agents building their own integration: **[API.md](API.md)** is the authorita
 
 **All of YOUR agents — yes.** pi on your desktop, Claude Code on your laptop, opencode on your server: that's the point. Your experience follows you across tools.
 
-**Multiple machines — yes.** Pick one machine as the memory host: in its `config.local.json` set `"host": "0.0.0.0"` and `"authToken": "<a-long-random-string>"`, restart the service. Then on every other machine just tell your agent:
+**Multiple machines — yes.** Best practice: install ruyi on **one always-on host every device can reach** (a cloud VPS, or your home server behind a tunnel). Expose it over HTTPS with the bearer token (`authToken`), then on every other machine just tell your agent:
 
-> My ruyi memory service runs at http://192.168.x.x:8899, the access key is xxx — use it as my memory backend.
+> My ruyi memory service runs at https://ruyi.example.com, the access key is xxx — use it as my memory backend.
 
-(For the pi extension that's two environment variables, `RUYI_URL` and `RUYI_TOKEN`; other agents — see [AGENT.README.md](AGENT.README.md).) All your machines now share one memory pool.
+MCP-stdio agents (Claude Code, opencode) on remote machines use `examples/mcp-remote.mjs` — a single-file stdio→HTTPS bridge, no repo clone needed. (For the pi extension: two env vars, `RUYI_URL` and `RUYI_TOKEN`.) All your machines now share one memory pool.
 
 **Multiple PEOPLE — no.** One ruyi = one person. Two people sharing one instance means your coding habits merge with theirs into one confused profile, and everything either of you remembers becomes visible to both. Unless you're close enough to share a diary — in which case, know that this is literally what you're doing.
 
@@ -128,11 +128,11 @@ rm -rf ~/ruyi        # 再删掉 agent 配置里的 ruyi 那几行
 
 你自己的多个 agent 共用一个如忆——可以，这正是设计目的：经验跟着你走，跨工具不丢。
 
-多台主机——可以。挑一台当记忆主机：在它的 `config.local.json` 里把 `host` 改成 `"0.0.0.0"`、设置 `authToken`（一串长随机串），重启服务。然后在其他每台机器上告诉你的 agent：
+多台主机——可以。最佳实践：把 ruyi 装在**一台所有设备都能连到的常开主机上**（云 VPS 最佳，或是有内网穿透的家里服务器），HTTPS 暴露 + bearer token（`authToken`）。然后在其他每台机器上告诉你的 agent：
 
-> 我的 ruyi 记忆服务在 http://192.168.x.x:8899，访问密钥是 xxx，把它当作我的记忆后端。
+> 我的 ruyi 记忆服务在 https://ruyi.example.com，访问密钥是 xxx，把它当作我的记忆后端。
 
-（pi 扩展对应两个环境变量 `RUYI_URL`、`RUYI_TOKEN`；其他 agent 见 [AGENT.README.md](AGENT.README.md)。）所有机器共享同一个记忆池。
+远程机器上的 MCP-stdio 类 agent（Claude Code、opencode）用 `examples/mcp-remote.mjs`——单文件 stdio→HTTPS 桥，不用 clone 仓库。（pi 扩展对应两个环境变量 `RUYI_URL`、`RUYI_TOKEN`。）所有机器共享同一个记忆池。
 
 **一个如忆只给一个人用。** 多人共用一个，画像会互相污染（你的编程习惯和他的揉成一锅），而且彼此的记忆互相可见——除非亲密到可以共用一本日记，那这就是字面意义上的共用日记。
 

@@ -14,6 +14,9 @@ ruyi 是一个长期记忆服务：它在夜间重读你的会话日志，把值
 
 **第 1 步：安装并启动 ruyi 服务**（§0–§4：拿配置 → 检查环境 → 安装 → 写配置 → 启动）。
 完成后 ruyi 是一个常驻 HTTP 服务，谁都能连。
+**安装位置建议**：如果用户有多台设备，ruyi 最好装在**一台所有设备都能连到的常开主机上**
+（云主机最佳，或有内网穿透的家里服务器）——所有设备的 agent 连同一个实例，记忆集中一处。
+装在本机则只有本机的 agent 能用（MCP-stdio 是本机模式）。
 
 **第 2 步：把你（agent）接上 ruyi**（§5）。常用客户端的接入文件**已经写好在 `examples/` 里**：
 
@@ -189,7 +192,23 @@ claude mcp add ruyi -- node <仓库绝对路径>/src/cli.ts mcp
 
 重启 opencode 后工具列表里应出现 `ruyi_recall` 等六个工具（opencode 自动加 `ruyi_` 前缀）。
 
-### 你是 Hermes / 其他 MCP 客户端
+### 你在没有装 ruyi 的机器上（远程接入）
+
+ruyi 装在别的机器/云主机上时，用**远程桥**：`examples/mcp-remote.mjs` 是一个自包含的
+stdio→HTTP 桥（单文件，无需 clone 仓库，拷过去就能用），把六个工具桥接到远程服务：
+
+```bash
+# Claude Code（任何平台，Windows 一样）
+claude mcp add ruyi -e RUYI_URL=https://<你的ruyi域名> -e RUYI_TOKEN=<authToken> \
+  -- node C:\path\to\mcp-remote.mjs
+
+# opencode：mcp.local 里 command 数组同上，环境变量放 "environment" 字段
+```
+
+Claude Code 的 SessionStart hook（`examples/claude-code/session-start.mjs`）同样支持远程：
+设 `RUYI_URL` / `RUYI_TOKEN` 环境变量即可。
+
+### 你是 Hermes / 其他 MCP 客户端（本机安装了 ruyi）
 
 把 `node <仓库绝对路径>/src/cli.ts mcp` 注册为 stdio MCP server（具体注册入口查你所在客户端的 MCP 文档）。
 它暴露六个工具：`recall`（fast/deep/excavate 三模式）、`list`、`get`、`ingest`、
