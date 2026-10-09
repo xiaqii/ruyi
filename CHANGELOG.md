@@ -3,6 +3,9 @@
 All notable changes to ruyi (如忆). Semver versioning; every release passes
 typecheck + zero-LLM smoke + LLM smoke before tagging.
 
+## [0.4.0] - 2026-10-09
+
+- GET / 自说明落地页：服务地址即说明书（HTML/Markdown 内容协商，公网开放，不含任何密钥）；远程接入简化到一句话
 ## [0.3.0] - 2026-10-09
 
 - 公网接入能力：examples/mcp-remote.mjs 远程 MCP 桥（stdio→HTTPS，单文件自包含）；文档推荐云主机集中部署；远程接入配方（Claude Code/opencode/任意 agent）
