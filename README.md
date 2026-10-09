@@ -8,7 +8,7 @@
 
 **✅ Verified with: pi agent · pi web · Claude Code · opencode**
 
-[中文说明往下看](#中文说明) · [Full agent manual → AGENT.README.md](AGENT.README.md) · [Changelog](CHANGELOG.md)
+[中文说明往下看](#中文说明) · [Full agent manual → AGENT.README.md](AGENT.README.md) · [API contract → API.md](API.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -72,6 +72,8 @@ rm -rf ~/ruyi        # and the ruyi lines in your agent's config
 ```
 
 One process, one folder, one database file. Nothing hides anywhere else.
+
+For agents building their own integration: **[API.md](API.md)** is the authoritative, test-enforced contract for every HTTP endpoint and MCP tool.
 
 ## Who can share one ruyi
 
@@ -137,3 +139,4 @@ rm -rf ~/ruyi        # 再删掉 agent 配置里的 ruyi 那几行
 ### 更多
 
 安装排障、配置项、多客户端接入、目录结构、开发说明：**[AGENT.README.md](AGENT.README.md)**
+接口契约（HTTP 端点 + MCP 工具的完整字段级定义，agent 自写脚本对接看这个）：**[API.md](API.md)**

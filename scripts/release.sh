@@ -28,7 +28,11 @@ npx tsc --noEmit
 say "smoke tests (no LLM)"
 node test/smoke.ts
 
-# 3. LLM smoke (both tiers + one deep recall; a few hundred tokens)
+# 2b. API contract — every endpoint documented in API.md, shape by shape
+say "api contract (API.md)"
+node test/api-contract.ts
+
+# 3. LLM smoke (both tiers + deep recall + a real write/archive round trip)
 say "llm smoke"
 node test/llm-smoke.ts
 

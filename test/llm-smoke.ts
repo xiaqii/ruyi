@@ -64,5 +64,34 @@ try {
 	console.error(`✗ deep recall via service — ${err instanceof Error ? err.message : err}`);
 }
 
+// Real explicit write round trip: remember (LLM merge judgement) → forget cleanup
+try {
+	const started = Date.now();
+	const res = await fetch("http://127.0.0.1:8899/memories", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({
+			kind: "knowledge",
+			summary: "llm-smoke 写路径验证",
+			content: "发布前的显式写入端到端验证记忆，写完即归档。",
+			domain: "test",
+			owner: "default",
+		}),
+		signal: AbortSignal.timeout(90_000),
+	});
+	const j = (await res.json()) as { id?: number; action?: string };
+	const goodWrite = res.ok && typeof j.id === "number" && typeof j.action === "string";
+	console.log(`${goodWrite ? "✓" : "✗"} explicit write (POST /memories) — ${Date.now() - started}ms, #${j.id} (${j.action})`);
+	if (!goodWrite) failed++;
+	if (j.id) {
+		const f = await fetch(`http://127.0.0.1:8899/memories/${j.id}/forget`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+		console.log(`${f.ok ? "✓" : "✗"} cleanup forget #${j.id}`);
+		if (!f.ok) failed++;
+	}
+} catch (err) {
+	failed++;
+	console.error(`✗ explicit write round trip — ${err instanceof Error ? err.message : err}`);
+}
+
 console.log(failed === 0 ? "\nllm-smoke: all passed" : `\nllm-smoke: ${failed} FAILED`);
 if (failed > 0) process.exit(1);

@@ -154,7 +154,9 @@ MCP 进程直接打开同一个 SQLite 库（WAL 模式，多进程安全），�
 
 ### 任何其他 agent
 
-直接 HTTP（这是通用接口）。服务端设了 authToken 时所有请求（/health 除外）都要带 `Authorization: Bearer <token>` 头：
+**接口契约的唯一权威是 [API.md](API.md)**——每个 HTTP 端点和 MCP 工具的字段级定义都在那里，
+且每次发布由 `test/api-contract.ts` 逐字段验证，文档与实现不一致则发布失败。自写脚本/扩展对接照它实现即可。
+简要一览：
 
 ```
 POST /recall   {"query": "...", "k": 5, "mode": "deep"}     # mode: fast(免费)/deep/excavate
