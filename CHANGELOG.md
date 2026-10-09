@@ -3,6 +3,9 @@
 All notable changes to ruyi (如忆). Semver versioning; every release passes
 typecheck + zero-LLM smoke + LLM smoke before tagging.
 
+## [0.7.0] - 2026-10-09
+
+- 鉴权收归 ruyi 自身：本机直连（无代理头的回环）自动放行，经反代/隧道或局域网来源必须 bearer token，未配 token 时远程一律 503 失败即关闭；nginx 回归纯反代；配套 frps proxyBindAddr=127.0.0.1 封堵隧道端口直连漏洞
 ## [0.6.0] - 2026-10-09
 
 - 同步层 v2：gzip 压缩传输（5-10x）+ 内容寻址去重（sessionUid 注册表，跨渠道同会话零传输/只补增量，继承做梦断点）+ sync-index 回填命令 + 提炼 prompt 强化代码任务抽象规则
