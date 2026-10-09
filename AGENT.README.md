@@ -156,6 +156,20 @@ claude mcp add ruyi -- node <仓库绝对路径>/src/cli.ts mcp
 （项目级配置可参考 `examples/claude-code/.mcp.json`。）
 验证：`claude mcp list` 里能看到 ruyi；对话中试一次 recall（显示为 `mcp__ruyi__recall`）。
 
+可选但推荐——开场自动注入（获得和 pi 一样的免费宪法层+记忆索引）：把
+`examples/claude-code/session-start.mjs` 注册为 SessionStart hook（`~/.claude/settings.json`）：
+
+```json
+"hooks": {
+  "SessionStart": [{
+    "hooks": [{ "type": "command",
+                "command": "node <仓库绝对路径>/examples/claude-code/session-start.mjs" }]
+  }]
+}
+```
+
+脚本 3 秒超时静默降级，ruyi 挂了不影响 Claude Code 启动。
+
 ### 你是 opencode
 
 预制配置在 `examples/opencode/opencode.jsonc`，把它合并进 `~/.config/opencode/opencode.jsonc`
