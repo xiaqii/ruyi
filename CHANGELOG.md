@@ -3,6 +3,9 @@
 All notable changes to ruyi (如忆). Semver versioning; every release passes
 typecheck + zero-LLM smoke + LLM smoke before tagging.
 
+## [0.7.3] - 2026-10-09
+
+- token 傻瓜化：安装时自动生成随机 authToken 并醒目展示；新增 node src/cli.ts token（查看/给 agent 的完整话术）与 token --rotate（换新）；AGENT.README 同步
 ## [0.7.2] - 2026-10-09
 
 - README 重写：纯英文两段式（①安装 ruyi——独立记忆 API 服务是什么 ②连接 agent——MCP/pi/HTTP 三接法+共享规则），去掉双语与架构大图，更简洁
