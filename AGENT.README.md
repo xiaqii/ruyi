@@ -1,11 +1,17 @@
 # AGENT.README — 把 ruyi（如忆）装给 agent 用
 
 > 这份文档是写给 **AI agent** 的，不是写给人的。
-> 你的用户把这个仓库 clone 到了某台机器上，并把你指向这里。
 > 你的任务：**自主完成 ruyi 的安装、配置、启动、接入和验证**。
 > 原则：每一步都验证，失败就按指引回退，不要硬闯；涉及花钱的步骤（首次做梦）必须先征得用户同意。
->
-> 如果仓库还没 clone：先问用户安装目录；用户没指定就 clone 到 `~/ruyi`。
+
+## 先分流：你是哪种场景？
+
+- **场景 A：本机装服务**——用户只给了仓库地址，ruyi 还没装在任何机器上
+  → 走 §0–§4 完整安装（先问用户安装目录，没指定就 clone 到 `~/ruyi`）
+- **场景 B：远程接入**——用户给了你服务地址和密钥（`RUYI_URL` + `RUYI_TOKEN`），ruyi 已在别的机器上跑着
+  → **不要 clone、不要跑 install.sh、不要装服务**。最简单的一步：直接抓取那个服务地址
+    （`curl https://<地址>` 或 WebFetch）——**服务本身就是说明书**，返回的文本会告诉你怎么做。
+    或者读 §5「远程接入」。
 
 ruyi 是一个长期记忆服务：它在夜间重读你的会话日志，把值得记住的东西蒸馏成记忆，
 白天你通过 HTTP API / pi 扩展 / MCP 查询它。装上它，你就有了跨会话的记忆。
@@ -195,18 +201,32 @@ claude mcp add ruyi -- node <仓库绝对路径>/src/cli.ts mcp
 ### 你在没有装 ruyi 的机器上（远程接入）
 
 ruyi 装在别的机器/云主机上时，用**远程桥**：`examples/mcp-remote.mjs` 是一个自包含的
-stdio→HTTP 桥（单文件，无需 clone 仓库，拷过去就能用），把六个工具桥接到远程服务：
+stdio→HTTP 桥（单文件，无需 clone 仓库），把六个工具桥接到远程服务。
 
-```bash
-# Claude Code（任何平台，Windows 一样）
-claude mcp add ruyi -e RUYI_URL=https://<你的ruyi域名> -e RUYI_TOKEN=<authToken> \
-  -- node C:\path\to\mcp-remote.mjs
+**Windows + Claude Code 完整流程**（其他平台/客户端同理）：
 
-# opencode：mcp.local 里 command 数组同上，环境变量放 "environment" 字段
+```powershell
+# 1. 下载桥脚本（jsDelivr 镜像在国内更稳；不行就用 raw.githubusercontent.com）
+curl -o C:\tools\mcp-remote.mjs https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/examples/mcp-remote.mjs
+
+# 2. 注册 MCP（用户给的地址和密钥）
+claude mcp add ruyi -e RUYI_URL=https://<你的ruyi域名> -e RUYI_TOKEN=<密钥> -- node C:\tools\mcp-remote.mjs
+
+# 3. 验证（必须做）
+claude mcp list        # 应看到 ruyi
 ```
 
-Claude Code 的 SessionStart hook（`examples/claude-code/session-start.mjs`）同样支持远程：
-设 `RUYI_URL` / `RUYI_TOKEN` 环境变量即可。
+然后开新会话试一句：“用 ruyi 的 recall 查一下我以前说过什么关于编程规范的要求”。
+能返回内容 = 接入成功。
+
+可选——开场自动注入（推荐）：再下载 `examples/claude-code/session-start.mjs`，在
+`~/.claude/settings.json` 里注册 SessionStart hook（脚本里有现成的配置片段），并用 settings.json
+顶层的 `"env": {"RUYI_URL": "...", "RUYI_TOKEN": "..."}` 给它传环境变量。
+
+**数据同步（老会话怎么进记忆）**：MCP 只负责查询和即时写入；让老会话被夜间做梦提炼，
+需要把会话日志文件同步到 ruyi 主机（文件拷贝，不走 LLM，多大都不怕）：
+服务器侧在 config.local.json 的 sessions 里登记接收目录，笔记本侧用 SessionEnd hook 或 rclone
+把 `~/.claude/projects` 增量推过去。推一次全量之后就是全自动增量。
 
 ### 你是 Hermes / 其他 MCP 客户端（本机安装了 ruyi）
 

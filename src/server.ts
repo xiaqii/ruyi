@@ -14,6 +14,7 @@ import type { Candidate } from "./types.ts";
 import { runDream, distillText, explicitRemember } from "./distill.ts";
 import { getInject, recall } from "./recall.ts";
 import { runSynthesize } from "./synthesize.ts";
+import { landingPage } from "./landing.ts";
 
 const MAX_BODY = 1024 * 1024;
 
@@ -61,6 +62,14 @@ export function startServer(): void {
 		const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
 		const path = url.pathname.replace(/\/+$/, "") || "/";
 		try {
+			// Landing: the service URL doubles as its own manual (no secrets inside).
+			if (req.method === "GET" && path === "/") {
+				const host = req.headers.host ?? "ruyi.local";
+				const { body, contentType } = landingPage(host, (req.headers.accept ?? "").includes("text/html"));
+				res.writeHead(200, { "content-type": contentType });
+				return res.end(body);
+			}
+
 			if (req.method === "GET" && path === "/health") {
 				return send(res, 200, { ok: true, ...memoryCounts(db) });
 			}

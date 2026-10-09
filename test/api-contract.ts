@@ -46,6 +46,16 @@ const MEMORY_ROW_FIELDS = ["id", "owner", "kind", "summary", "content", "keyword
 
 console.log("API contract (documented in API.md):");
 
+// GET / — self-instructing landing page (public, must never leak secrets)
+{
+	const md = await fetch(`${BASE}/`, { signal: AbortSignal.timeout(5000) });
+	const text = await md.text();
+	ok(md.status === 200 && text.includes("ruyi") && text.includes("mcp-remote.mjs"), "GET / landing (markdown)");
+	ok(!/Bearer [a-f0-9]{20,}/.test(text), "landing page leaks no token");
+	const html = await fetch(`${BASE}/`, { headers: { accept: "text/html" }, signal: AbortSignal.timeout(5000) });
+	ok((html.headers.get("content-type") ?? "").includes("text/html"), "GET / content negotiation (html)");
+}
+
 // GET /health — no auth
 {
 	const { status, json } = await call("GET", "/health");
