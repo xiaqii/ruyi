@@ -4,67 +4,65 @@
  * NEVER put secrets here: no tokens, no internal IPs. Public by design.
  */
 
-const MD = (host: string) => `# ruyi（如忆）— AI agent 长期记忆服务
+const MD = (host: string) => `# ruyi — long-term memory for AI agents
 
-这是一台 ruyi 记忆服务的 HTTP 入口。让 agent 连上它，agent 就拥有跨会话的长期记忆：
-不记你说了什么，学你怎么干活——习惯、偏好、踩过的坑，下次会话自动带在身上。
+ruyi is a standalone memory API service. It doesn't remember what you said — it learns how
+you work: your habits, preferences and hard-won lessons, carried into every new session.
+All the intelligence (extraction, merging, curation) lives server-side, so any agent that
+speaks HTTP or MCP — Claude Code, pi, opencode, your own scripts — plugs in as a thin client.
 
-================================================================
-给 AI agent 的接入指令（如果你正在读这段文字并且是一个 agent，照做）
-================================================================
+## 1. Install ruyi (your own instance)
 
-用户给了你本地址和访问密钥（token）。任选你支持的接入方式：
+If someone gave you this URL together with a token, the service is already running —
+skip to section 2.
 
-## 方式一：MCP（Claude Code / opencode / 其他 MCP 客户端）
+To self-host (Linux + Node >= 23.6), just hand this repo to your agent:
 
-1. 下载桥接脚本（单文件自包含，无需 clone 仓库）：
-   首选 https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/examples/mcp-remote.mjs
-   备用 https://raw.githubusercontent.com/xiaqii/ruyi/main/examples/mcp-remote.mjs
+    https://github.com/xiaqii/ruyi
 
-2. 注册 MCP server：
+"Install this" is enough — the repo's AGENT.README.md walks the agent through cloning,
+LLM key setup, the systemd service and connecting itself. Uninstall is one script, and
+all data lives in a single data/ folder you can inspect or delete.
 
-   Claude Code（Windows 也一样）：
-     claude mcp add ruyi -e RUYI_URL=https://${host} -e RUYI_TOKEN=<用户给的token> -- node <脚本保存路径>
+## 2. Connect your agent to ruyi
 
-   opencode（~/.config/opencode/opencode.jsonc）：
-     "mcp": { "ruyi": { "type": "local", "command": ["node", "<脚本保存路径>"],
-                        "environment": { "RUYI_URL": "https://${host}", "RUYI_TOKEN": "<用户给的token>" } } }
+You need the service URL — https://${host} (or http://127.0.0.1:8899 for a local
+install) — and the access token (localhost needs none). If you are an AI agent reading
+this, follow the steps for your kind.
 
-3. 验证（必须做）：开新会话，调用 recall 工具查询 "编程规范"，能返回内容即接入成功。
+MCP clients (Claude Code, opencode, ...)
+  Download the bridge (single file, no clone needed):
+    https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/examples/mcp-remote.mjs
+  Claude Code (Windows too):
+    claude mcp add ruyi -e RUYI_URL=<url> -e RUYI_TOKEN=<token> -- node <script-path>
+  opencode (~/.config/opencode/opencode.jsonc):
+    "mcp": { "ruyi": { "type": "local", "command": ["node", "<script-path>"],
+                       "environment": { "RUYI_URL": "<url>", "RUYI_TOKEN": "<token>" } } }
 
-4. 可选（推荐）开场自动注入：下载 examples/claude-code/session-start.mjs，
-   按脚本头部注释注册为 SessionStart hook，环境变量用 settings.json 顶层 "env" 传入。
+pi / pi web
+  Download the extension into ~/.pi/agent/extensions/ruyi.ts, set RUYI_URL and
+  RUYI_TOKEN for the pi process, restart:
+    https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/examples/pi-extension/ruyi.ts
 
-## 方式二：pi / pi web 扩展
+Any script / your own agent
+  Plain HTTP. Field-level contract: https://github.com/xiaqii/ruyi/blob/main/API.md
+  20-line reference client:
+    https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/examples/http-client.mjs
 
-下载 https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/examples/pi-extension/ruyi.ts
-放到 ~/.pi/agent/extensions/ruyi.ts，给 pi 进程设环境变量 RUYI_URL 和 RUYI_TOKEN，重启。
+Then:
+- Verify (required): open a new session, call the recall tool with "coding style".
+  Content coming back means connected.
+- Auth: every route except / and /health needs the header Authorization: Bearer <token>.
+- Timeouts: LLM-backed routes (recall deep/excavate, remember, ingest) take seconds —
+  set client timeouts to 45s+; the plain-SQL routes answer in milliseconds.
+- Degradation: if ruyi is unreachable, keep working as normal — memory is an
+  accessory, not a dependency.
+- Optional: feed this machine's past sessions to the nightly dream (incremental,
+  resumable — never paste whole logs into ingest):
+    node sync-sessions.mjs --dir <your-sessions> --agent claude-code --machine <this-pc>
+    https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/examples/sync-sessions.mjs
 
-## 方式三：任意脚本 / 自研 agent
-
-接口契约（字段级，发布管线强制与实现一致）：
-  https://github.com/xiaqii/ruyi/blob/main/API.md
-20 行参考实现（四个函数抄走即用）：
-  https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/examples/http-client.mjs
-
-================================================================
-接入须知（重要）
-================================================================
-
-- 除 / 和 /health 外，所有接口必须带请求头 Authorization: Bearer <token>，否则 401
-- 带 LLM 的接口（recall deep/excavate、remember、ingest）客户端超时必须 >= 45 秒；
-  纯 SQL 接口（inject/list/get/stats）5 秒足够
-- 本服务不可用时你必须照常工作，只是本次没有长期记忆——记忆是挂件，不是依赖
-- 老会话进记忆的正确姿势：用 examples/sync-sessions.mjs 把会话日志增量同步到本服务
-  （偏移量续传，只传新字节，带进度显示），夜间做梦自动提炼。不要逐条 ingest 大文本
-- 完整手册：https://github.com/xiaqii/ruyi/blob/main/AGENT.README.md
-
-================================================================
-给人类
-================================================================
-
-健康检查：GET https://${host}/health
-源码与文档：https://github.com/xiaqii/ruyi
+Humans: health check at GET /health — source & docs: https://github.com/xiaqii/ruyi
 `;
 
 function mdToHtml(md: string): string {
@@ -74,9 +72,9 @@ function mdToHtml(md: string): string {
 	html = html.replace(/^# (.*)$/gm, "<h1>$1</h1>").replace(/^## (.*)$/gm, "<h2>$1</h2>");
 	html = html.replace(/^={10,}$/gm, "<hr>");
 	html = html.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
-	return `<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
+	return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ruyi（如忆）— AI agent 长期记忆服务</title>
+<title>ruyi — long-term memory for AI agents</title>
 <style>
 body{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#0f141b;color:#c9d4e3;margin:0;padding:2em;line-height:1.65}
 main{max-width:860px;margin:0 auto;background:#161e29;border:1px solid #263144;border-radius:12px;padding:2em 2.5em}
