@@ -3,6 +3,9 @@
 All notable changes to ruyi (如忆). Semver versioning; every release passes
 typecheck + zero-LLM smoke + LLM smoke before tagging.
 
+## [0.3.0] - 2026-10-09
+
+- 公网接入能力：examples/mcp-remote.mjs 远程 MCP 桥（stdio→HTTPS，单文件自包含）；文档推荐云主机集中部署；远程接入配方（Claude Code/opencode/任意 agent）
 ## [0.2.15] - 2026-10-09
 
 - Claude Code SessionStart hook（examples/claude-code/session-start.mjs）：开局自动注入宪法层+记忆索引，3s 超时静默降级；AGENT.README 补接入说明
