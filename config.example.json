@@ -1,0 +1,56 @@
+{
+  "host": "127.0.0.1",
+  "port": 8899,
+  "_network_note": "Auth lives in ruyi itself: direct loopback clients are trusted, anything arriving via a reverse proxy / tunnel (X-Forwarded-For) or from LAN must present this bearer token. To share one ruyi across YOUR machines, set authToken and point remote agents at it. Never expose the port without authToken.",
+  "authToken": "",
+  "dbPath": "./data/ruyi.db",
+  "sessions": [
+    {
+      "agent": "pi",
+      "dir": "~/.pi/agent/sessions"
+    },
+    {
+      "agent": "claude-code",
+      "dir": "~/.claude/projects"
+    }
+  ],
+  "llm": {
+    "protocol": "anthropic",
+    "baseUrl": "https://api.anthropic.com",
+    "apiKey": "PUT-YOUR-KEY-IN-config.local.json",
+    "model": "claude-sonnet-4-5",
+    "maxTokens": 8192,
+    "requestTimeoutMs": 180000,
+    "thinking": "default"
+  },
+  "_llm_notes": {
+    "protocol": "'anthropic' (Anthropic, Kimi coding endpoint, ...) or 'openai' (DeepSeek, OpenAI, Qwen, Moonshot, vLLM, Ollama, ...). For openai put the base up to /v1 or the host root, e.g. https://api.deepseek.com",
+    "thinking": "'off' disables thinking (best effort, anthropic protocol verified), a number sets a budget, 'default' leaves it to the model. Recall works fine with thinking off and is much cheaper.",
+    "steps": "optional per-tier overrides, e.g. run recall (understand+rerank) on a cheap fast model: { \"steps\": { \"recall\": { \"protocol\": \"openai\", \"baseUrl\": \"https://api.deepseek.com\", \"apiKey\": \"...\", \"model\": \"deepseek-chat\", \"thinking\": \"off\" } } }"
+  },
+  "dream": {
+    "pipeline": "full",
+    "minDeltaChars": 300,
+    "maxSessionChars": 30000,
+    "mergeSummaryLimit": 300,
+    "targetSize": 500,
+    "maxSegmentsPerNight": 350,
+    "keepBackups": 7
+  },
+  "inject": {
+    "constitutionMax": 5,
+    "indexMax": 20,
+    "indexDays": 30,
+    "recallK": 5,
+    "recallCandidateDays": 60,
+    "recallCandidateMax": 300,
+    "profileMax": 3
+  },
+  "recall": {
+    "defaultScope": "smart"
+  },
+  "decay": {
+    "inferredArchiveDays": 90,
+    "inferredArchiveConfidenceBelow": 0.7
+  }
+}

@@ -1,0 +1,8 @@
+[Unit]
+Description=ruyi weekly profile synthesis (memory store -> theme profiles)
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/app/ruyi
+ExecStart=/usr/bin/node --experimental-strip-types --no-warnings /app/ruyi/src/cli.ts synthesize

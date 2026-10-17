@@ -1,0 +1,35 @@
+# ruyi docker compose — 数据库永远在真实硬盘上（~/ruyi-docker/），
+# 容器删除/重建/升级镜像都不丢。这是默认且唯一的推荐姿势。
+#
+#   docker compose up -d --build        # 首次构建+启动
+#   编辑 ~/ruyi-docker/config.local.json 填 LLM key（首跑后自动生成模板）
+#   docker compose restart              # 改完配置重启生效
+#   docker compose --profile dream up -d   # 可选：容器内夜间做梦
+#   docker compose pull && docker compose up -d --build   # 升级镜像
+#
+# 不用 compose 也行：docker build -t ruyi . && docker run -d --name ruyi \
+#   -v ~/ruyi-docker:/data -p 127.0.0.1:8899:8899 ruyi serve -h 0.0.0.0
+
+services:
+  ruyi:
+    build: .
+    image: ruyi:latest
+    container_name: ruyi
+    # 容器内必须绑 0.0.0.0，-p 端口映射才能进来；token 用 -t 或配置 authToken
+    command: ["serve", "-h", "0.0.0.0"]
+    ports:
+      - "127.0.0.1:8899:8899"
+    volumes:
+      - ~/ruyi-docker:/data
+    restart: unless-stopped
+
+  # 可选：夜间做梦（triage→extract→merge→reorganize）。默认关闭，用
+  # docker compose --profile dream up -d 开启。与主服务共享 /data，
+  # 同一时间只有一个在提炼（dream.lock 互斥）。
+  dream:
+    image: ruyi:latest
+    profiles: ["dream"]
+    volumes:
+      - ~/ruyi-docker:/data
+    restart: unless-stopped
+    entrypoint: ["sh", "-c", "while true; do sleep 86400; node dist/cli.js distill || true; done"]
