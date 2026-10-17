@@ -1,0 +1,342 @@
+# AGENT.README — 把 ruyi（如忆）装给 agent 用
+
+> 这份文档是写给 **AI agent** 的，不是写给人的。
+> 你的任务：**自主完成 ruyi 的安装、配置、启动、接入和验证**。
+> 原则：每一步都验证，失败就按指引回退，不要硬闯；涉及花钱的步骤（首次做梦）必须先征得用户同意。
+
+## 先分流：你是哪种场景？
+
+- **场景 A：本机装服务**——用户只给了仓库地址，ruyi 还没装在任何机器上
+  → 走 §0–§4 完整安装（先问用户安装目录，没指定就 clone 到 `~/ruyi`）
+- **场景 B：远程接入**——用户给了你服务地址和密钥（`RUYI_URL` + `RUYI_TOKEN`），ruyi 已在别的机器上跑着
+  → **不要 clone、不要跑 install.sh、不要装服务**。最简单的一步：直接抓取那个服务地址
+    （`curl https://<地址>` 或 WebFetch）——**服务本身就是说明书**，返回的文本会告诉你怎么做。
+    或者读 §5「远程接入」。
+
+ruyi 是一个长期记忆服务：它在夜间重读你的会话日志，把值得记住的东西蒸馏成记忆，
+白天你通过 HTTP API / pi 扩展 / MCP 查询它。装上它，你就有了跨会话的记忆。
+
+## 安装总览：就两步
+
+**第 1 步：安装并启动 ruyi 服务**（§0–§4：拿配置 → 检查环境 → 安装 → 写配置 → 启动）。
+完成后 ruyi 是一个常驻 HTTP 服务，谁都能连。
+**安装位置建议**：如果用户有多台设备，ruyi 最好装在**一台所有设备都能连到的常开主机上**
+（云主机最佳，或有内网穿透的家里服务器）——所有设备的 agent 连同一个实例，记忆集中一处。
+装在本机则只有本机的 agent 能用（MCP-stdio 是本机模式）。
+
+**第 2 步：把你（agent）接上 ruyi**（§5）。常用客户端的接入文件**已经写好在 `examples/` 里**：
+
+| 客户端 | 接入方式 | 预制文件 |
+|---|---|---|
+| pi / pi web | 扩展（功能最全：自动注入+工具+熔断降级） | `examples/pi-extension/ruyi.ts` |
+| Claude Code | MCP | `claude mcp add` 一条命令，或 `examples/claude-code/.mcp.json` |
+| opencode | MCP | `examples/opencode/opencode.jsonc` |
+| 其他 agent / 自写脚本 | HTTP 或 MCP | `examples/http-client.mjs`（20 行参考实现）+ [API.md](API.md) |
+
+**Windows 用户注意**：install.sh 是 Unix 脚本（systemd/nohup/cron），Windows 上不要硬跑它，
+直接走 §4b 的 Windows 手动路径，比折腾 bash 快得多。
+
+## 0. 你需要从用户那里拿到的信息
+
+开始之前，向用户确认（缺一不可）：
+
+1. **LLM 端点三要素**：`baseUrl`、`apiKey`、`model`
+   - ruyi 支持两种协议，问清用户的端点属于哪种：
+     - `anthropic` 协议：Anthropic 官方、Kimi coding 端点等（路径风格 `/v1/messages`）
+     - `openai` 协议：DeepSeek、OpenAI 官方、通义、Moonshot、vLLM、Ollama 等（`/v1/chat/completions`）
+   - 如果用户有两个模型（一个聪明一个便宜），建议：聪明的给 dream 档，便宜的给 recall 档（见 §3 的 `steps`）
+2. **会话日志目录**：ruyi 靠读你的会话日志做梦。
+   - pi：通常是 `~/.pi/agent/sessions`（pi web 部署时可能是别的路径，确认！）
+   - Claude Code：`~/.claude/projects`
+   - 其他 agent：确认日志格式后可能需要加 parser（见 §7 故障排查）
+3. **这台机器上你（agent）的运行方式**：pi / Claude Code / 其他？决定 §5 接哪种客户端。
+
+## 1. 环境检查
+
+```bash
+node --version   # 必须 >= 23.6（用了 node:sqlite 和原生 TS）
+```
+
+不够就引导用户升级 Node，不要尝试绕过。
+
+## 2. 安装
+
+```bash
+cd <本仓库目录>
+bash scripts/install.sh
+```
+
+install.sh 会：检查 node → `npm install`（仅 dev 依赖）→ 生成 `config.local.json` →
+（有 root + systemd 时）装 systemd 服务和夜间定时器，否则打印 nohup/cron 备选方案 → 跑 doctor。
+
+可选旗标：`--dream`（装完立刻做首次梦，要花 token，先问用户）、`--no-auto-update`（关掉每日自动更新，默认开，见 §5b）。
+
+没有 root/systemd 时，按 install.sh 输出的备选方案执行（nohup 常驻 + cron 夜梦）。
+
+## 3. 配置 `config.local.json`
+
+最小可用配置（把示例值换成用户的）：
+
+```jsonc
+{
+  "llm": {
+    "protocol": "openai",                      // 或 "anthropic"
+    "baseUrl": "https://api.deepseek.com",     // openai 协议写到域名或 .../v1
+    "apiKey": "用户的key",
+    "model": "deepseek-chat",
+    "thinking": "default"
+  },
+  "sessions": [
+    { "agent": "pi", "dir": "~/.pi/agent/sessions" }   // 按实际路径改
+  ]
+}
+```
+
+推荐（用户有两个模型时）——recall 档（查询理解+重排）用便宜快模型并关思考，dream 档用聪明模型：
+
+```jsonc
+"llm": {
+  "protocol": "anthropic", "baseUrl": "...", "apiKey": "...", "model": "claude-sonnet-4-5",
+  "steps": {
+    "recall": { "protocol": "openai", "baseUrl": "https://api.deepseek.com",
+                "apiKey": "...", "model": "deepseek-chat", "thinking": "off" }
+  }
+}
+```
+
+多 key 容错（可选）：用 `"apiKeys": ["主key", "备用key"]` 代替单个 apiKey——某个 key 被拒（401/403/429，比如周配额打满）时自动换下一个，服务不断线。任一档都可配。
+
+写完后：
+
+```bash
+chmod 600 config.local.json        # 里面有 key
+node src/cli.ts doctor             # 必须全 PASS（WARN 可接受但要知道为什么）
+```
+
+doctor 的 LLM 检查会真实调用两个档位的模型各一次（花费可忽略），并报告延迟。
+如果 LLM 检查 FAIL：协议选错、key 错、模型名错，按报错修正后重跑 doctor。
+
+## 4. 启动服务
+
+install.sh 已处理 systemd 场景。手动场景：
+
+```bash
+nohup node src/cli.ts serve >> logs/serve.log 2>&1 &
+curl -s http://127.0.0.1:8899/health    # {"ok":true,...}
+```
+
+## 4b. Windows 手动路径（不要跑 install.sh）
+
+ruyi 本体是纯 Node，跨平台没问题；但 install.sh 是 Unix 脚本（依赖 systemd/nohup/cron），
+在 Windows 上硬跑只会浪费时间。Windows 直接手动四步：
+
+```powershell
+# 0. 确认 node --version >= 23.6
+git clone https://github.com/xiaqii/ruyi.git; cd ruyi
+npm install                          # 仅 dev 依赖（typescript）
+copy config.example.json config.local.json
+notepad config.local.json            # 填 llm.baseUrl/apiKey/model + sessions 目录
+node src/cli.ts doctor               # 全 PASS 再继续
+node src/cli.ts serve                # 前台跑；挂后台用 pm2 或“任务计划程序”
+```
+
+夜间做梦：Windows「任务计划程序」加一条每日任务跑 `node <仓库>\src\cli.ts distill`。
+自更新：没有 cron，就偶尔手动 `git pull --tags && git checkout <最新tag>`，或装个 WSL/Git Bash 的 cron。
+客户端接入（§5）与平台无关——MCP 配置在 Windows 上完全一样。
+
+## 5. 接入你的客户端
+
+### 你是 pi（或 pi web）
+
+预制扩展文件就是 `examples/pi-extension/ruyi.ts`：
+
+```bash
+cp examples/pi-extension/ruyi.ts ~/.pi/agent/extensions/ruyi.ts   # pi web 按实际扩展目录
+```
+
+多账号 pi web：给每个账号的环境设 `RUYI_OWNER=<账号名>`，记忆互相隔离。
+远程 ruyi 服务：设 `RUYI_URL=http://<主机>:8899` 和 `RUYI_TOKEN=<authToken>`。
+重启 pi 后：系统提示里会出现记忆注入，`ruyi_recall` / `ruyi_remember` / `ruyi_admin` 工具可用。
+
+### 你是 Claude Code
+
+```bash
+claude mcp add ruyi -- node <仓库绝对路径>/src/cli.ts mcp
+```
+
+（项目级配置可参考 `examples/claude-code/.mcp.json`。）
+验证：`claude mcp list` 里能看到 ruyi；对话中试一次 recall（显示为 `mcp__ruyi__recall`）。
+
+可选但推荐——开场自动注入（钉住的宪法铁律；目录也可带去一次会话级发现——pi 侧的哲学是目录只留服务端、上下文零常驻，见 design-v3）：把
+`examples/claude-code/session-start.mjs` 注册为 SessionStart hook（`~/.claude/settings.json`）：
+
+```json
+"hooks": {
+  "SessionStart": [{
+    "hooks": [{ "type": "command",
+                "command": "node <仓库绝对路径>/examples/claude-code/session-start.mjs" }]
+  }]
+}
+```
+
+脚本 3 秒超时静默降级，ruyi 挂了不影响 Claude Code 启动。
+
+可选但推荐——逐轮语义注入（和 pi 一样，每条用户消息自动带出本对话还没见过的相关记忆）：把
+`examples/claude-code/user-prompt-submit.mjs` 注册为 UserPromptSubmit hook（同上，`settings.json` 里
+加 `"UserPromptSubmit"` 一节，脚本头有现成片段）。服务端按会话 ID 去重——同一条记忆在一个对话里
+只注入一次，全部注入过后同话题完全静默。deep 模式 20 秒超时静默降级。
+
+### 你是 opencode
+
+预制配置在 `examples/opencode/opencode.jsonc`，把它合并进 `~/.config/opencode/opencode.jsonc`
+（路径改成仓库绝对路径）：
+
+```jsonc
+{
+  "mcp": {
+    "ruyi": {
+      "type": "local",
+      "command": ["node", "<仓库绝对路径>/src/cli.ts", "mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+重启 opencode 后工具列表里应出现 `ruyi_recall` 等六个工具（opencode 自动加 `ruyi_` 前缀）。
+
+### 你在没有装 ruyi 的机器上（远程接入）
+
+ruyi 装在别的机器/云主机上时，用**远程桥**：`examples/mcp-remote.mjs` 是一个自包含的
+stdio→HTTP 桥（单文件，无需 clone 仓库），把六个工具桥接到远程服务。
+
+**Windows + Claude Code 完整流程**（其他平台/客户端同理）：
+
+```powershell
+# 1. 下载桥脚本（jsDelivr 镜像在国内更稳；不行就用 raw.githubusercontent.com）
+curl -o C:\tools\mcp-remote.mjs https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/examples/mcp-remote.mjs
+
+# 2. 注册 MCP（用户给的地址和密钥）
+claude mcp add ruyi -e RUYI_URL=https://<你的ruyi域名> -e RUYI_TOKEN=<密钥> -- node C:\tools\mcp-remote.mjs
+
+# 3. 验证（必须做）
+claude mcp list        # 应看到 ruyi
+```
+
+然后开新会话试一句：“用 ruyi 的 recall 查一下我以前说过什么关于编程规范的要求”。
+能返回内容 = 接入成功。
+
+可选——开场自动注入（推荐）：再下载 `examples/claude-code/session-start.mjs` 与
+`examples/claude-code/user-prompt-submit.mjs`（逐轮语义注入），在
+`~/.claude/settings.json` 里分别注册 SessionStart / UserPromptSubmit hook（脚本头有现成配置片段），
+并用 settings.json 顶层的 `"env": {"RUYI_URL": "...", "RUYI_TOKEN": "..."}` 给它们传环境变量。
+
+**数据同步（老会话怎么进记忆）**：MCP 只负责查询和即时写入；让老会话被夜间做梦提炼，
+用同步脚本 `examples/sync-sessions.mjs`（自包含单文件，下载即用）——偏移量增量推送，
+只传新增字节，带进度显示，断了自动续传：
+
+```powershell
+curl -o C:\tools\sync-sessions.mjs https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/examples/sync-sessions.mjs
+# 全量首次同步（扫 ~/.claude/projects，显示进度）
+node C:\tools\sync-sessions.mjs        # 环境变量 RUYI_URL / RUYI_TOKEN 先设好
+# 之后挂到 SessionEnd hook 或定时任务，每次只传增量
+```
+
+同步是字节级增量 + 服务端偏移量校验：同一字节永远不会传第二次；传到服务端后做梦管线
+按字节断点续跑，记忆层由 LLM 合并裁决去重（重复内容变成印证而非新条目）。
+`--status` 可以随时对账本地与服务端的字节数。
+
+### 你是 Hermes / 其他 MCP 客户端（本机安装了 ruyi）
+
+把 `node <仓库绝对路径>/src/cli.ts mcp` 注册为 stdio MCP server（具体注册入口查你所在客户端的 MCP 文档）。
+它暴露六个工具：`recall`（fast/deep/excavate 三模式）、`list`、`get`、`ingest`、
+`remember`（显式即写，走 LLM 合并裁决）、`admin`（forget/stats/profile 三合一）——
+客户端会自动加服务器名前缀（opencode 显示 `ruyi_recall`，Claude Code 显示 `mcp__ruyi__recall`）。
+MCP 进程直接打开同一个 SQLite 库（WAL 模式，多进程安全），与 HTTP 服务读写同一份记忆。
+
+### 多客户端共用（重要）
+
+一个 ruyi 实例就是全家的记忆中心：pi 走扩展、Claude Code/opencode 走 MCP、脚本走 HTTP，**默认共享同一个 owner=default 的记忆池**——Claude Code 里形成的经验，pi 也能回忆到，这正是设计目的。
+需要隔离时（多人共用一台机器）：给不同客户端/账号设不同的 `RUYI_OWNER`，记忆互不串。
+做梦侧也要让所有客户端的会话都被读到：在 `config.local.json` 的 `sessions` 里加各 agent 的日志目录（pi 和 claude-code 的解析器内置；其他格式见 §7）。
+
+### 多机共享（同一人的多台主机）
+
+记忆主机侧（跑一次）：安装时已自动生成随机 `authToken`（写在 `config.local.json`，权限 600）。查看：`node src/cli.ts token`；换新：`node src/cli.ts token --rotate`（换完 `systemctl restart ruyi`，旧 token 立即失效）。对外暴露还需 `"host": "0.0.0.0"` 或反向代理/隧道，重启服务。**暴露了端口就必须有 authToken**，否则等于把全部记忆公开。
+
+其他机器上的 agent：全部改走 HTTP 接口（下节），请求头加 `Authorization: Bearer <authToken>`。pi 扩展设两个环境变量即可：`RUYI_URL=http://<主机>:8899`、`RUYI_TOKEN=<authToken>`（pi web 用户写进服务的环境）。MCP-stdio 是本机模式，远程机器不要用 MCP 接。
+
+### 任何其他 agent
+
+**接口契约的唯一权威是 [API.md](API.md)**——每个 HTTP 端点和 MCP 工具的字段级定义都在那里，
+且每次发布由 `test/api-contract.ts` 逐字段验证，文档与实现不一致则发布失败。自写脚本/扩展对接照它实现即可。
+简要一览：
+
+```
+POST /recall   {"query": "...", "k": 5, "mode": "deep"}     # mode: fast(免费关键词扫描)/deep(理解+LLM精排)/excavate(考古,含已归档)
+GET  /inject?owner=default                                   # 画像目录树，纯SQL（服务端检索材料；客户端不必常驻渲染）
+注意：ruyi 没有"常驻注入"通道——全局铁律写进 agent 平台自己的全局 AGENTS.md / CLAUDE.md（平台原生每轮注入），
+ruyi 只按相关性按需供给。当前对话里的临时规则直接说即可，长期规则夜里做梦会提炼进画像。
+POST /ingest   {"text": "..."}                               # 提交文本做梦蒸馏
+GET  /stats?days=7
+```
+
+**auto 路径的话题上下文（0.9 起）**：`conversation`+`auto` 的调用不只是去重——服务端为每个话题维护一份
+rolling summary（概要）+ 最近几轮原文，调取记忆时一并送进查询理解和精排。裸 follow-up（"哪些不能吃"）
+挂靠话题主语判读，不再脱离上下文漂移。概要走零额外调用的搭车通道（精排输出顺带刷新），只有长期静默的
+话题才靠低频增量兜底，所以实时性和零浪费兼得。
+
+## 5b. 每日自动更新（默认开启）
+
+`scripts/self-update.sh`：每天检查一次，**只升级到打了 tag 的正式发布版**（每个 tag 发布前已过 tsc + 34 项零 LLM 测试 + LLM 冒烟）；拉取后本地再过一遍 tsc + smoke，任何一关失败自动回滚到原版本。不碰 `config.local.json`/`data/`/`profiles/`，工作区不干净时拒绝执行。
+install.sh 默认就会装上这个 cron（每天 04:40）；用户明确不要时用 `--no-auto-update`，事后想开随时重跑 install.sh 即可。
+结果写在 `logs/self-update.status`（updated/skipped/rolled-back/error），排障看 `logs/self-update.log`。
+
+**升级后数据自动跟进**：DB schema 迁移在服务启动时自动跑（幂等，v8 起画像表带 parent_id 两级树）；
+画像树的重建不用手动——做梦管线发现最新画像超过 7 天会自动重炼（含抽象令清洗与旧章退休）。
+升级后想立刻看到两级画像树，手动跑一次 `node src/cli.ts synthesize`（要花一次 LLM 费用）。
+
+## 5c. Docker 形态（第二种装法）
+
+仓库自带 Dockerfile + docker-compose.yml。原则一句话：**数据库永远挂真实硬盘目录**，
+容器删了、镜像升级了都不丢库（库很小，但它是全部身家）。
+
+```bash
+git clone https://github.com/xiaqii/ruyi && cd ruyi
+docker compose up -d --build
+# 首跑后在宿主机编辑 ~/ruyi-docker/config.local.json 填 key，然后 docker compose restart
+# 可选夜间做梦：docker compose --profile dream up -d
+```
+
+要点：容器内服务绑 `0.0.0.0`（compose 已带 `-h 0.0.0.0`），端口只发布到宿主机回环
+`127.0.0.1:8899`；状态目录是卷挂载的 `/data`（RUYI_STATE 环境变量），config/data/profiles/logs
+全部落在宿主机 `~/ruyi-docker/`。升级：`docker compose up -d --build`（重新构建新版）。
+远程 agent 接入与其他形态完全相同（HTTP + token）。
+
+## 6. 首次做梦（必须先问用户！）
+
+第一次做梦会通读历史会话日志，**消耗的 tokens 与日志量成正比，可能很多**。
+默认只处理最近 14 天（`dream.initialMaxDays`）。流程：
+
+1. 告诉用户预估规模（只看最近 200KB/文件的增量，老历史默认跳过，`dream.initialMaxBytes` 控制），征得同意
+2. 告诉用户预估规模，征得同意
+3. `node src/cli.ts distill`（前台跑，能看到进度；量大时放后台并定时检查）
+4. `node src/cli.ts list` 抽查记忆质量
+5. `node src/cli.ts synthesize` 生成画像章（记忆 <10 条会自动跳过）
+6. 跑一次真实 recall 冒烟：`node src/cli.ts recall "用户最近常做的工作类型" --mode=deep`
+
+## 7. 故障排查
+
+| 症状 | 处理 |
+|---|---|
+| doctor LLM FAIL | 检查 protocol/baseUrl/apiKey/model；openai 协议 baseUrl 不含 `/chat/completions` 后缀 |
+| recall 永远空 | `node src/cli.ts list` 确认库非空；确认 owner 一致（默认 `default`） |
+| pi 里看不到注入 | 确认扩展在正确目录、pi 已重启；服务挂时 pi 表现与未安装相同（设计如此） |
+| 日志不是 pi/claude-code 格式 | `src/preprocess.ts` 里有 parser 注册点，照现有 parser 仿一个 |
+| 中文搜不到 | 该 bug 已在 v2 修复（trigram FTS）；老库升级会自动迁移，跑 doctor 的 FTS 自检确认 |
+
+## 8. 装完之后
+
+告诉用户：安装完成 + doctor 结果 + 记忆条数 + 夜梦时间（systemd timer 或 cron）+ 是否开了每日自动更新。
+日常使用你什么都不用管：白天正常干活，需要回忆时用 `ruyi_recall`（试探用 fast，重要用 deep），
+用户说"记住……"时用 `ruyi_remember`，夜间它自己做梦成长。

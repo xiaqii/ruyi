@@ -1,0 +1,9 @@
+.git
+node_modules
+data
+logs
+profiles
+dist
+*.tgz
+Dockerfile
+docker-compose.yml

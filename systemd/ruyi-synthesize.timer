@@ -1,0 +1,9 @@
+[Unit]
+Description=Weekly profile synthesis for ruyi
+
+[Timer]
+OnCalendar=Sun *-*-* 04:10:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

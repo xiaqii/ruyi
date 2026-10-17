@@ -1,0 +1,19 @@
+node_modules/
+data/
+logs/
+profiles/
+config.local.json
+config.json
+scripts/import-*.ts
+scripts/compare-prompt-styles.ts
+test/*.json
+*.tsbuildinfo
+dist/
+*.tgz
+
+# 本地快照与数据（绝不入库）
+backups/
+data/
+*.db
+*.db-shm
+*.db-wal

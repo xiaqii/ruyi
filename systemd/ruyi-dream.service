@@ -1,0 +1,7 @@
+[Unit]
+Description=ruyi nightly dream (memory distillation)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/app/ruyi
+ExecStart=/usr/bin/node /app/ruyi/src/cli.ts distill
