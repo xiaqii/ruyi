@@ -69,3 +69,10 @@ The moment it picks up right where you left off — you'll get it.
 ---
 
 More (config, troubleshooting, every client): [AGENT.README.md](AGENT.README.md) · Changelog: [CHANGELOG.md](CHANGELOG.md) · MIT
+
+## Repo map
+
+- `src/` — the service (Node ≥ 23.6, TypeScript, SQLite)
+- `scripts/` — `install.sh` (install), `self-update.sh` (self-update), `release.sh` (release pipeline), `compare-distill.ts` (distill A/B helper)
+- `test/` — `smoke.ts` (34 zero-LLM tests), `llm-smoke.ts` (LLM-path smoke), `api-contract.ts`
+- `prompts/`, `docs/`, `examples/` — prompts, design docs, client connectors
