@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.0.4] - 2026-10-17
+
+- docs: README 补 Repo map；test: api-contract 自带一次性服务实例，修复对运行环境状态的依赖（关联 issue #1）
 ## [1.0.3] - 2026-10-17
 
 - docs: README 补 Repo map；test: api-contract 自带一次性服务实例，修复对运行环境状态的依赖（关联 issue #1）
