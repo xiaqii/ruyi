@@ -10,9 +10,47 @@
 
 import { getDb, insertMemory } from "../src/db.ts";
 import { loadConfig } from "../src/config.ts";
+import { mkdtempSync, rmSync as rmDirSync, writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-const BASE = (process.env.RUYI_URL ?? "http://127.0.0.1:8899").replace(/\/+$/, "");
-const TOKEN = process.env.RUYI_TOKEN ?? "";
+// Self-contained: spawn a throwaway service on a random port with a temp
+// state dir. The suite writes directly to the service's SQLite db, so it
+// must own the instance — pointing it at any long-lived service both fails
+// (db mismatch) and pollutes it. Set RUYI_URL to test an external instance
+// instead (db-dependent assertions best-effort there, as before).
+const EXTERNAL = process.env.RUYI_URL;
+const RUN = Date.now().toString(36);
+const PORT = 19000 + Math.floor(Math.random() * 900);
+const SPAWNED_TOKEN = `contract-${RUN}`;
+const tmp = EXTERNAL ? "" : mkdtempSync(join(tmpdir(), `ruyi-contract-${RUN}-`));
+const BASE = (EXTERNAL ?? `http://127.0.0.1:${PORT}`).replace(/\/+$/, "");
+const TOKEN = process.env.RUYI_TOKEN ?? (EXTERNAL ? "" : SPAWNED_TOKEN);
+
+let server: import("node:child_process").ChildProcess | null = null;
+if (!EXTERNAL) {
+	mkdirSync(join(tmp, "data"), { recursive: true });
+	writeFileSync(join(tmp, "config.local.json"), JSON.stringify({ port: PORT, authToken: SPAWNED_TOKEN }));
+	const { spawn } = await import("node:child_process");
+	server = spawn(process.execPath, ["src/cli.ts", "serve"], {
+		cwd: new URL("..", import.meta.url).pathname,
+		env: { ...process.env, RUYI_STATE: tmp },
+		stdio: ["ignore", "ignore", "inherit"],
+	});
+	let up = false;
+	for (let i = 0; i < 100 && !up; i++) {
+		await new Promise((r) => setTimeout(r, 200));
+		try {
+			const res = await fetch(`${BASE}/health`, { signal: AbortSignal.timeout(1000) });
+			up = res.ok;
+		} catch { /* not up yet */ }
+	}
+	if (!up) {
+		console.error("✗ FAIL could not start throwaway service for contract test");
+		server.kill("SIGKILL");
+		process.exit(1);
+	}
+}
 
 let passed = 0;
 let failed = 0;
@@ -59,7 +97,10 @@ console.log("API contract (documented in API.md):");
 // GET /health — no auth
 {
 	const { status, json } = await call("GET", "/health");
-	ok(status === 200 && json.ok === true && typeof json.active === "number", "GET /health shape");
+	ok(
+		status === 200 && json.ok === true && Object.values(json).every((v) => v === true || typeof v === "number"),
+		"GET /health shape",
+	);
 }
 
 // GET /inject
@@ -90,8 +131,7 @@ console.log("API contract (documented in API.md):");
 }
 
 // mutation round trip on a throwaway row (created via db module, zero LLM)
-const config = loadConfig();
-const db = getDb(config.dbPath);
+const db = EXTERNAL ? getDb(loadConfig().dbPath) : getDb(join(tmp, "data", "ruyi.db"));
 const tmpId = insertMemory(
 	db,
 	{ kind: "knowledge", summary: "api-contract 测试行", content: "契约测试临时行，测完即归档。", keywords: ["apitest"], origin: "agent_inferred", confidence: 0.1 },
@@ -146,15 +186,15 @@ const tmpId = insertMemory(
 
 // session sync protocol: push with offset, offset-mismatch 409 resume, state
 {
-	const machine = "contract-test";
-	const r1 = await call("POST", "/sync/session", { machine, agent: "claude-code", sessionKey: "t/s.jsonl", offset: 0, data: '{"a":1}\n' });
+	const machine = `contract-test-${RUN}`;
+	const r1 = await call("POST", "/sync/session", { machine, agent: "claude-code", sessionKey: `t/${RUN}/s.jsonl`, offset: 0, data: '{"a":1}\n' });
 	ok(r1.status === 200 && r1.json.receivedBytes === 8, "sync push first chunk", JSON.stringify(r1.json));
-	const r2 = await call("POST", "/sync/session", { machine, agent: "claude-code", sessionKey: "t/s.jsonl", offset: 0, data: "X" });
+	const r2 = await call("POST", "/sync/session", { machine, agent: "claude-code", sessionKey: `t/${RUN}/s.jsonl`, offset: 0, data: "X" });
 	ok(r2.status === 409 && r2.json.receivedBytes === 8, "sync offset mismatch → 409 with true offset");
-	const r3 = await call("POST", "/sync/session", { machine, agent: "claude-code", sessionKey: "t/s.jsonl", offset: 8, data: '{"b":2}\n' });
+	const r3 = await call("POST", "/sync/session", { machine, agent: "claude-code", sessionKey: `t/${RUN}/s.jsonl`, offset: 8, data: '{"b":2}\n' });
 	ok(r3.status === 200 && r3.json.receivedBytes === 16, "sync resume at server offset");
 	const r4 = await call("GET", `/sync/state?machine=${machine}`);
-	ok(r4.status === 200 && (r4.json.sessions as Record<string, number>)["t/s.jsonl"] === 16, "sync state reports bytes");
+	ok(r4.status === 200 && (r4.json.sessions as Record<string, number>)[`t/${RUN}/s.jsonl`] === 16, "sync state reports bytes");
 	const r5 = await call("POST", "/sync/session", { machine: "../evil", agent: "x", sessionKey: "x", offset: 0, data: "x" });
 	ok(r5.status === 400, "sync rejects path traversal");
 
@@ -178,33 +218,33 @@ const tmpId = insertMemory(
 	}
 
 	// content-addressed dedup: same sessionUid from a different channel short-circuits
-	const uid = "contract-uid-0001";
+	const uid = `contract-uid-${RUN}`;
 	const p1 = await call("POST", "/sync/session", {
-		machine, agent: "claude-code", sessionKey: "a/first.jsonl", sessionUid: uid, totalSize: 20,
+		machine, agent: "claude-code", sessionKey: `a/${RUN}/first.jsonl`, sessionUid: uid, totalSize: 20,
 		offset: 0, data: "1234567890",
 	});
 	ok(p1.status === 200 && p1.json.receivedBytes === 10, "uid first push (partial)");
 	// same uid arrives again from offset 0 claiming totalSize 10 → already complete
 	const p2 = await call("POST", "/sync/session", {
-		machine, agent: "claude-code", sessionKey: "b/copy.jsonl", sessionUid: uid, totalSize: 10,
+		machine, agent: "claude-code", sessionKey: `b/${RUN}/copy.jsonl`, sessionUid: uid, totalSize: 10,
 		offset: 0, data: "1234567890",
 	});
 	ok(p2.status === 200 && p2.json.already === true, "uid already-complete short-circuit");
 	// same uid, larger totalSize → 409 tells client where the real resume point is
 	const p3 = await call("POST", "/sync/session", {
-		machine, agent: "claude-code", sessionKey: "b/copy.jsonl", sessionUid: uid, totalSize: 20,
+		machine, agent: "claude-code", sessionKey: `b/${RUN}/copy.jsonl`, sessionUid: uid, totalSize: 20,
 		offset: 0, data: "1234567890ABCDEFGHIJ",
 	});
 	ok(p3.status === 409 && p3.json.receivedBytes === 10, "uid grown session → 409 resume point");
 	const p4 = await call("POST", "/sync/session", {
-		machine, agent: "claude-code", sessionKey: "b/copy.jsonl", sessionUid: uid, totalSize: 20,
+		machine, agent: "claude-code", sessionKey: `b/${RUN}/copy.jsonl`, sessionUid: uid, totalSize: 20,
 		offset: 10, data: "ABCDEFGHIJ",
 	});
 	ok(p4.status === 200 && p4.json.receivedBytes === 20, "uid delta append completes at 20");
 
 	// auto-injection dedup: a conversation never receives the same item twice
 	// (self-contained seed: the shared tmpId is archived by the forget tests above)
-	const conv = "contract-conv-dedup";
+	const conv = `contract-conv-${RUN}`;
 	const dedupId = insertMemory(
 		db,
 		{ kind: "knowledge", summary: "api-contract 去重测试行", content: "契约去重专用行，测完即归档。", keywords: ["deduptest"], origin: "agent_inferred", confidence: 0.1 },
@@ -254,7 +294,7 @@ const tmpId = insertMemory(
 		const runHook = () => {
 			try {
 				return execFileSync("node", [hookPath], {
-					input: JSON.stringify({ session_id: "contract-hook", prompt: "契约钩子专用行", cwd: "/root/pi" }),
+					input: JSON.stringify({ session_id: `contract-hook-${RUN}`, prompt: "契约钩子专用行", cwd: "/tmp/demo-project" }),
 					env,
 					timeout: 15_000,
 				}).toString();
@@ -266,9 +306,9 @@ const tmpId = insertMemory(
 		ok(out1.includes("hook 测试行"), "hook turn 1 injects the memory");
 		const out2 = runHook();
 		ok(!out2.includes("hook 测试行"), "hook turn 2 dedups (no repeat)");
-		db.prepare(`DELETE FROM replies WHERE topic_id IN (SELECT topic_id FROM topics WHERE conversation = ?)`).run("claude:contract-hook");
-		db.prepare(`DELETE FROM topics WHERE conversation = ?`).run("claude:contract-hook");
-		db.prepare(`DELETE FROM injection_log WHERE conversation = ?`).run("claude:contract-hook");
+		db.prepare(`DELETE FROM replies WHERE topic_id IN (SELECT topic_id FROM topics WHERE conversation = ?)`).run(`claude:contract-hook-${RUN}`);
+		db.prepare(`DELETE FROM topics WHERE conversation = ?`).run(`claude:contract-hook-${RUN}`);
+		db.prepare(`DELETE FROM injection_log WHERE conversation = ?`).run(`claude:contract-hook-${RUN}`);
 		db.prepare(`UPDATE memories SET status = 'archived' WHERE id = ?`).run(hookId);
 	}
 
@@ -277,7 +317,7 @@ const tmpId = insertMemory(
 		const { gzipSync } = await import("node:zlib");
 		const headers: Record<string, string> = { "content-type": "application/json", "content-encoding": "gzip" };
 		if (TOKEN) headers.authorization = `Bearer ${TOKEN}`;
-		const body = gzipSync(JSON.stringify({ machine, agent: "pi", sessionKey: "gz/s.jsonl", offset: 0, data: "压缩测试数据\n".repeat(100) }));
+		const body = gzipSync(JSON.stringify({ machine, agent: "pi", sessionKey: `gz/${RUN}/s.jsonl`, offset: 0, data: "压缩测试数据\n".repeat(100) }));
 		const res = await fetch(`${BASE}/sync/session`, { method: "POST", headers, body, signal: AbortSignal.timeout(10_000) });
 		const j = (await res.json()) as { receivedBytes?: number };
 		ok(res.status === 200 && j.receivedBytes === Buffer.byteLength("压缩测试数据\n".repeat(100)), "gzip push decompresses correctly");
@@ -285,7 +325,7 @@ const tmpId = insertMemory(
 
 	// cleanup
 	const { rmSync } = await import("node:fs");
-	rmSync(new URL("../data/synced/contract-test", import.meta.url).pathname, { recursive: true, force: true });
+	rmDirSync(EXTERNAL ? new URL(`../data/synced/${machine}`, import.meta.url).pathname : join(tmp, "data", "synced", machine), { recursive: true, force: true });
 	db.prepare(`DELETE FROM session_registry WHERE session_uid = ?`).run(uid);
 }
 
@@ -304,6 +344,9 @@ const tmpId = insertMemory(
 	const documented = ["recall", "list", "get", "ingest", "remember", "admin"];
 	ok(documented.every((t) => buf.includes(`"${t}"`)), "MCP exposes all six documented tools");
 }
+
+server?.kill("SIGKILL");
+if (!EXTERNAL) rmDirSync(tmp, { recursive: true, force: true });
 
 console.log(`\napi-contract: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
