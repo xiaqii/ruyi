@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.1.1] - 2026-10-18
+
+- pi 扩展注入位置修复：快路径（≤2s 命中）不再写 systemPromptOptions.sections（系统提示词位于 token 0，逐轮变化会让全对话的前缀缓存从头部整体失效），改为返回 custom 消息——pi 将其落在当前用户消息之后（纯尾部追加、本轮即可见、历史轮字节不动，前缀缓存最大化保留）。快慢两路注入位置语义统一；零静态足迹现在是完全意义上的（系统提示词永不被触碰）。另修 llm-smoke 自毒化：forget 留墓碑，固定测试内容会被后续运行的墓碑检查拒写，改为每轮唯一内容
 ## [1.1.0] - 2026-10-18
 
 Hardening pass inspired by a source-level study of hippo-memory, ClawMem and
