@@ -175,6 +175,10 @@ async function main(): Promise<void> {
 				},
 				{ owner: "default", cwd: process.cwd() },
 			);
+			if (id === -1) {
+				console.log(`blocked: this content was previously forgotten (tombstone). Not re-added.`);
+				break;
+			}
 			console.log(`added #${id}`);
 			break;
 		}

@@ -153,7 +153,9 @@ GET /inject?owner=default&cwd=/path/to/project&scope=smart
 ### POST /memories/:id/forget
 
 → `{ "ok": true, "id": 400, "status": "archived" }`。归档=软删除：不再注入/召回，
-但 `recall mode=excavate` 仍能挖到。
+但 `recall mode=excavate` 仍能挖到。同时留下**墓碑**（内容指纹，不存原文）：
+此后任何写入面（做梦/remember/ingest/合并）再遇到同样内容会被拒绝落库，
+防止已遗忘的记忆被重新提炼复活。
 
 ### POST /ingest —— 提交原料
 

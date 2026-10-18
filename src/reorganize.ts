@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { completeJson } from "./llm.ts";
 import { loadPrompt } from "./prompts.ts";
-import { archiveMemory, getDb, insertMemory, logMemoryAction, now } from "./db.ts";
+import { archiveMemory, canSupersede, getDb, insertMemory, logMemoryAction, now } from "./db.ts";
 import { loadConfig } from "./config.ts";
 import type { MemoryRow } from "./types.ts";
 
@@ -80,6 +80,7 @@ export async function runReorganize(runId: string, owner: string): Promise<Reorg
 			},
 			{ owner, cwd: best.cwd },
 		);
+		if (newId === -1) continue; // tombstoned consolidated text: leave sources untouched
 		db.prepare(`UPDATE memories SET evidence = ? WHERE id = ?`).run(
 			sources.reduce((sum, s) => sum + s.evidence, 0),
 			newId,
@@ -98,6 +99,19 @@ export async function runReorganize(runId: string, owner: string): Promise<Reorg
 
 	for (const c of plan.resolve_conflict ?? []) {
 		if (!valid.has(c.keep_id) || !valid.has(c.drop_id) || c.keep_id === c.drop_id) continue;
+		const keep = memories.find((m) => m.id === c.keep_id)!;
+		const drop = memories.find((m) => m.id === c.drop_id)!;
+		// Same confidence gate as dream-time SUPERSEDE: a high-confidence
+		// user-stated entry cannot be retired in favour of an inference.
+		if (!canSupersede(drop, keep)) {
+			logMemoryAction(db, runId, "BLOCKED_CONFLICT", {
+				keep: c.keep_id,
+				drop: c.drop_id,
+				dropOrigin: drop.origin,
+				dropConfidence: drop.confidence,
+			});
+			continue;
+		}
 		db.prepare(`UPDATE memories SET status = 'superseded', superseded_by = ?, updated_at = ? WHERE id = ?`).run(
 			c.keep_id,
 			now(),

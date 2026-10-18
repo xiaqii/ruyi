@@ -160,7 +160,7 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 					return m ? send(res, 200, { memory: m }) : send(res, 404, { error: "not found" });
 				}
 				if (req.method === "POST" && sub === "forget") {
-					archiveMemory(db, id);
+					archiveMemory(db, id, "forget");
 					return send(res, 200, { ok: true, id, status: "archived" });
 				}
 			}

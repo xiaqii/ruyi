@@ -148,8 +148,16 @@ async function handleToolCall(
 				return reply(id, toolResult("No relevant memories found."));
 			const parts: string[] = [];
 			for (const p of result.profiles) parts.push(`PROFILE【${p.title}】v${p.version} (${p.maturity})\n${p.content}`);
-			for (const m of result.memories)
-				parts.push(`#${m.id} [${m.kind}${m.domain ? "/" + m.domain : ""}] ${m.summary}\n${m.content}`);
+			for (const m of result.memories) {
+				// Excavated (non-active) entries are labelled so the model treats
+				// them as history, not current truth (tiered retrieval).
+				const mark =
+					m.status === "archived" ? " [已归档]"
+					: m.status === "superseded" ? ` [已被 #${m.superseded_by ?? "?"} 取代]`
+					: m.status === "absorbed" ? ` [已并入 #${m.absorbed_by ?? "?"}]`
+					: "";
+				parts.push(`#${m.id} [${m.kind}${m.domain ? "/" + m.domain : ""}]${mark} ${m.summary}\n${m.content}`);
+			}
 			return reply(id, toolResult(parts.join("\n\n")));
 		}
 		case "list": {
@@ -185,6 +193,8 @@ async function handleToolCall(
 				},
 				{ owner, cwd: typeof args.cwd === "string" ? args.cwd : null },
 			);
+			if (result.action === "blocked")
+				return reply(id, toolResult(`Blocked: this content was previously forgotten (tombstone) — not re-saved. If it genuinely matters now, say so explicitly and rephrase it.`));
 			return reply(id, toolResult(`Saved to long-term memory as #${result.id} (${result.action}): ${summary}`));
 		}
 		case "admin": {
@@ -193,8 +203,8 @@ async function handleToolCall(
 				case "forget": {
 					const mid = Number(args.id);
 					if (!mid) return replyError(id, -32602, "forget requires a memory id");
-					archiveMemory(db, mid);
-					return reply(id, toolResult(`Memory #${mid} archived (recoverable via ruyi_recall mode=excavate).`));
+					archiveMemory(db, mid, "forget");
+					return reply(id, toolResult(`Memory #${mid} archived (recoverable via ruyi_recall mode=excavate; a tombstone prevents re-distillation).`));
 				}
 				case "stats": {
 					const days = typeof args.days === "number" ? args.days : 7;

@@ -47,8 +47,10 @@ function truncate(s: string, n: number): string {
 
 function partToLine(role: string, part: ContentPart): string | null {
 	switch (part.type) {
-		case "text":
-			return part.text?.trim() ? `[${role}] ${part.text.trim()}` : null;
+		case "text": {
+			const text = part.text ? stripInjectedEnvelope(part.text).trim() : "";
+			return text ? `[${role}] ${text}` : null;
+		}
 		case "thinking":
 			return null; // reasoning noise, skip
 		case "toolCall":
@@ -76,6 +78,30 @@ function partToLine(role: string, part: ContentPart): string | null {
 
 /** Max characters kept from a single formatted transcript line (huge pastes, minified blobs). */
 const MAX_LINE_CHARS = 8192;
+
+/**
+ * Self-eating guard (mnemo's Opie #2486 lesson): ruyi's own injected output
+ * — the "**注入记忆** / **注入画像**" envelopes a client prepends to user
+ * turns — lands in session transcripts, and would otherwise be read back by
+ * the dream as if it were conversation. Distilling the system's own output
+ * manufactures circular evidence (a memory re-entering as fresh support for
+ * itself). Strip the envelope lines deterministically, BEFORE any LLM sees
+ * the text; the user's own words around the envelope stay untouched.
+ */
+const INJECTION_ENVELOPE_PATTERNS = [
+	/^\*{0,2}注入(画像|记忆)[\*\s\d条：:]/, // "**注入画像**：《…》" / "**注入记忆 3 条**："
+	/^\d+[\.、]\s+#\d+\s+\((fact|preference|knowledge|lesson|skill_index)\)/, // "1. #630 (fact) …"
+	/^[_（(\*]*本对话已注入过的/, // "（本对话已注入过的 6 条不再重复）_"
+	/^Use the above when it helps/, // injection footer (EN)
+];
+
+export function stripInjectedEnvelope(text: string): string {
+	if (!text.includes("注入") && !text.includes("Use the above")) return text;
+	const kept = text
+		.split("\n")
+		.filter((line) => !INJECTION_ENVELOPE_PATTERNS.some((p) => p.test(line.trim())));
+	return kept.join("\n");
+}
 
 /**
  * Yield complete lines of a JSONL file as {line, end} where `end` is the byte
@@ -161,7 +187,10 @@ export function readPiSessionDelta(file: string, offset: number, maxChars: numbe
 		if (e.type !== "message" || !e.message) return [];
 		const role = e.message.role ?? "?";
 		const content = e.message.content;
-		if (typeof content === "string") return content.trim() ? [`[${role}] ${content.trim()}`] : [];
+		if (typeof content === "string") {
+			const text = stripInjectedEnvelope(content).trim();
+			return text ? [`[${role}] ${text}`] : [];
+		}
 		if (!Array.isArray(content)) return [];
 		const out: string[] = [];
 		for (const part of content) {
@@ -188,8 +217,9 @@ export function readClaudeCodeSessionDelta(file: string, offset: number, maxChar
 		const content = e.message.content;
 		if (typeof content === "string") {
 			// Skip command/system plumbing messages.
-			if (content.trim() && !content.startsWith("<command-") && !content.startsWith("<local-command"))
-				return [`[${role}] ${content.trim()}`];
+			const text = stripInjectedEnvelope(content).trim();
+			if (text && !text.startsWith("<command-") && !text.startsWith("<local-command"))
+				return [`[${role}] ${text}`];
 			return [];
 		}
 		if (!Array.isArray(content)) return [];

@@ -38,11 +38,14 @@ function readJson(path: string): Record<string, unknown> {
 /** Merge config.example.json defaults with config.local.json (or config.json) overrides, one level deep. */
 export function loadConfig(): Config {
 	const examplePath = resolve(PROJECT_ROOT, "config.example.json");
-	const localPath = [
-		resolve(PROJECT_ROOT, "config.local.json"),
-		resolve(PROJECT_ROOT, "config.json"),
-		resolve(STATE_ROOT, "config.local.json"),
-	].find(existsSync);
+	// RUYI_STATE explicitly set (Docker, tests, throwaway instances): that
+	// state's config wins over the project repo's — the env var is an
+	// explicit override and must not be silently outranked by the checkout.
+	const localPath = (
+		envState
+			? [resolve(STATE_ROOT, "config.local.json"), resolve(PROJECT_ROOT, "config.local.json"), resolve(PROJECT_ROOT, "config.json")]
+			: [resolve(PROJECT_ROOT, "config.local.json"), resolve(PROJECT_ROOT, "config.json"), resolve(STATE_ROOT, "config.local.json")]
+	).find(existsSync);
 
 	const base = readJson(examplePath);
 	const override = localPath ? readJson(localPath) : {};

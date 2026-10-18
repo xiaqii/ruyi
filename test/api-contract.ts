@@ -134,9 +134,10 @@ console.log("API contract (documented in API.md):");
 const db = EXTERNAL ? getDb(loadConfig().dbPath) : getDb(join(tmp, "data", "ruyi.db"));
 const tmpId = insertMemory(
 	db,
-	{ kind: "knowledge", summary: "api-contract 测试行", content: "契约测试临时行，测完即归档。", keywords: ["apitest"], origin: "agent_inferred", confidence: 0.1 },
+	{ kind: "knowledge", summary: "api-contract 测试行", content: `契约测试临时行 ${Date.now()}，测完即归档。`, keywords: ["apitest"], origin: "agent_inferred", confidence: 0.1 },
 	{ owner: "default", cwd: null },
 );
+if (tmpId === -1) throw new Error("fixture insert blocked by tombstone — content must be unique per run");
 {
 	const { status, json } = await call("GET", `/memories/${tmpId}`);
 	ok(status === 200 && has(json.memory, MEMORY_ROW_FIELDS), "GET /memories/:id shape");
@@ -208,10 +209,13 @@ const tmpId = insertMemory(
 		const bad = await list({ "x-real-ip": "203.0.113.9", authorization: "Bearer wrong-token" });
 		ok(bad === 401 || bad === 503, "proxied request with wrong token is rejected", `got ${bad}`);
 		try {
-			const { readFileSync } = await import("node:fs");
-			const cfg = JSON.parse(readFileSync(new URL("../config.local.json", import.meta.url), "utf8")) as { authToken?: string };
-			if (cfg.authToken) {
-				const good = await list({ "x-real-ip": "203.0.113.9", authorization: `Bearer ${cfg.authToken}` });
+			// The token must match the instance under test: the spawned instance
+			// uses its own SPAWNED_TOKEN; an EXTERNAL one uses the repo config's.
+			const authToken = EXTERNAL
+				? (JSON.parse(readFileSync(new URL("../config.local.json", import.meta.url), "utf8")) as { authToken?: string }).authToken
+				: SPAWNED_TOKEN;
+			if (authToken) {
+				const good = await list({ "x-real-ip": "203.0.113.9", authorization: `Bearer ${authToken}` });
 				ok(good === 200, "proxied request with correct token passes", `got ${good}`);
 			}
 		} catch { /* no local config — token assertions skipped */ }
@@ -247,7 +251,7 @@ const tmpId = insertMemory(
 	const conv = `contract-conv-${RUN}`;
 	const dedupId = insertMemory(
 		db,
-		{ kind: "knowledge", summary: "api-contract 去重测试行", content: "契约去重专用行，测完即归档。", keywords: ["deduptest"], origin: "agent_inferred", confidence: 0.1 },
+		{ kind: "knowledge", summary: "api-contract 去重测试行", content: `契约去重专用行 ${Date.now()}，测完即归档。`, keywords: ["deduptest"], origin: "agent_inferred", confidence: 0.1 },
 		{ owner: "default", cwd: null },
 	);
 	const dq = "契约去重专用行";
@@ -285,7 +289,7 @@ const tmpId = insertMemory(
 	{
 		const hookId = insertMemory(
 			db,
-			{ kind: "knowledge", summary: "api-contract hook 测试行", content: "契约钩子专用行。", keywords: ["hooktest"], origin: "agent_inferred", confidence: 0.1 },
+			{ kind: "knowledge", summary: "api-contract hook 测试行", content: `契约钩子专用行 ${Date.now()}。`, keywords: ["hooktest"], origin: "agent_inferred", confidence: 0.1 },
 			{ owner: "default", cwd: null },
 		);
 		const { execFileSync } = await import("node:child_process");

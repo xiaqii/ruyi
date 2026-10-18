@@ -5,8 +5,10 @@ import { loadConfig, STATE_ROOT } from "./config.ts";
 import {
 	activeCandidates,
 	archiveMemory,
+	canSupersede,
 	getDb,
 	getDistillState,
+	getMemory,
 	getSlotDemands,
 	insertMemory,
 	logMemoryAction,
@@ -246,7 +248,7 @@ export async function merge(
 export async function explicitRemember(
 	candidate: Candidate,
 	scope: { owner: string; cwd: string | null },
-): Promise<{ id: number; action: "new" | "reinforced" | "refined" | "superseded" }> {
+): Promise<{ id: number; action: "new" | "reinforced" | "refined" | "superseded" | "blocked" }> {
 	const config = loadConfig();
 	const db = getDb(config.dbPath);
 	const existing = activeCandidates(db, 3650, scope.owner).slice(0, config.dream.mergeSummaryLimit);
@@ -263,17 +265,34 @@ export async function explicitRemember(
 			logMemoryAction(db, null, "MANUAL_REFINE", { id: action.id, summary: action.summary ?? candidate.summary });
 			return { id: action.id, action: "refined" };
 		case "SUPERSEDE": {
+			const old = getMemory(db, action.id);
+			if (old && !canSupersede(old, candidate)) {
+				// Gate refused: an inference cannot retire the user's own words.
+				// Reinforce instead — the old entry stands, and the log explains why.
+				reinforceMemory(db, action.id);
+				logMemoryAction(db, null, "BLOCKED_SUPERSEDE", {
+					id: action.id,
+					old: { origin: old.origin, confidence: old.confidence },
+					candidate: { origin: candidate.origin, confidence: candidate.confidence, summary: candidate.summary },
+				});
+				return { id: action.id, action: "reinforced" };
+			}
 			const newId = supersedeMemory(
 				db,
 				action.id,
 				{ ...candidate, summary: action.summary, content: action.content, keywords: action.keywords ?? candidate.keywords },
 				scope,
 			);
+			if (newId === -1) {
+				logMemoryAction(db, null, "BLOCKED_TOMBSTONE", { summary: candidate.summary, via: "explicit-supersede" });
+				return { id: -1, action: "blocked" };
+			}
 			logMemoryAction(db, null, "MANUAL_SUPERSEDE", { oldId: action.id, newId, summary: action.summary });
 			return { id: newId, action: "superseded" };
 		}
 		default: {
 			const id = insertMemory(db, candidate, scope);
+			if (id === -1) return { id: -1, action: "blocked" };
 			logMemoryAction(db, null, "MANUAL_ADD", { id, summary: candidate.summary });
 			return { id, action: "new" };
 		}
@@ -292,6 +311,10 @@ function applyActions(
 		switch (a.action) {
 			case "NEW": {
 				const id = insertMemory(db, { ...a.candidate, source }, scope);
+				if (id === -1) {
+					report.blocked++;
+					break; // BLOCKED_TOMBSTONE already logged by insertMemory
+				}
 				report.new++;
 				logMemoryAction(db, runId, "NEW", { id, summary: a.candidate.summary });
 				break;
@@ -307,6 +330,17 @@ function applyActions(
 				logMemoryAction(db, runId, "REFINE", { id: a.id, summary: a.summary ?? a.candidate.summary });
 				break;
 			case "SUPERSEDE": {
+				const old = getMemory(db, a.id);
+				if (old && !canSupersede(old, a.candidate)) {
+					reinforceMemory(db, a.id);
+					report.blocked++;
+					logMemoryAction(db, runId, "BLOCKED_SUPERSEDE", {
+						id: a.id,
+						old: { origin: old.origin, confidence: old.confidence },
+						candidate: { origin: a.candidate.origin, confidence: a.candidate.confidence, summary: a.candidate.summary },
+					});
+					break;
+				}
 				const newId = supersedeMemory(
 					db,
 					a.id,
@@ -322,6 +356,10 @@ function applyActions(
 					},
 					scope,
 				);
+				if (newId === -1) {
+					report.blocked++;
+					break; // tombstoned successor; old entry untouched
+				}
 				report.superseded++;
 				logMemoryAction(db, runId, "SUPERSEDE", { oldId: a.id, newId, summary: a.summary });
 				break;
@@ -366,6 +404,7 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 		refined: 0,
 		superseded: 0,
 		archived: 0,
+		blocked: 0,
 		reorganize: [],
 		synthesize: [],
 		inputTokens: 0,
@@ -533,7 +572,7 @@ export async function distillText(
 	const report: DreamReport = {
 		runId, startedAt: new Date().toISOString(), finishedAt: "",
 		sessionsScanned: 0, sessionsDistilled: 0, triaged: 0,
-		new: 0, reinforced: 0, refined: 0, superseded: 0, archived: 0,
+		new: 0, reinforced: 0, refined: 0, superseded: 0, archived: 0, blocked: 0,
 		reorganize: [], synthesize: [], inputTokens: 0, outputTokens: 0, errors: [],
 	};
 
@@ -576,7 +615,7 @@ function writeDreamReport(db: ReturnType<typeof getDb>, report: DreamReport): vo
 			`# Dream report ${report.startedAt} (run ${report.runId})`,
 			"",
 			`- sessions scanned: ${report.sessionsScanned}, distilled: ${report.sessionsDistilled}, triaged-out: ${report.triaged}`,
-			`- new: ${report.new}, reinforced: ${report.reinforced}, refined: ${report.refined}, superseded: ${report.superseded}, decayed: ${report.archived}`,
+			`- new: ${report.new}, reinforced: ${report.reinforced}, refined: ${report.refined}, superseded: ${report.superseded}, decayed: ${report.archived}, blocked: ${report.blocked}`,
 			`- synthesize: ${report.synthesize.map((s) => `${s.owner}: ${s.domains} domains, ${s.chapters} chapters, ${s.retired} retired`).join("; ") || "not due"}`,
 			`- reorganize: ${
 				report.reorganize
