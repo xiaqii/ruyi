@@ -148,9 +148,23 @@ export default function (pi: ExtensionAPI) {
 			),
 		]);
 		if (!fast.late) {
-			// Endpoint was quick: inject straight into the system prompt this turn.
+			// Endpoint was quick: return the recall block as a custom message — pi
+			// places it right after this turn's user prompt (tail append, visible to
+			// the model this same run). NEVER the system prompt: it sits at token 0,
+			// and any per-turn change there invalidates provider prefix caching for
+			// the entire conversation — worse than editing an early turn.
 			if (fast.r && (fast.r.memories.length > 0 || (fast.r.profiles ?? []).length > 0)) {
-				event.systemPromptOptions.sections["ruyi-recall"] = formatRecall(fast.r) + ADVISORY;
+				return {
+					message: {
+						customType: "ruyi",
+						content: formatRecall(fast.r) + ADVISORY,
+						display: true,
+						details: {
+							profiles: (fast.r.profiles ?? []).map((p) => p.id),
+							memories: fast.r.memories.map((m) => m.id),
+						},
+					},
+				};
 			}
 			return;
 		}
