@@ -251,6 +251,8 @@ node C:\tools\sync-sessions.mjs        # 环境变量 RUYI_URL / RUYI_TOKEN 先�
 把 `node <仓库绝对路径>/src/cli.ts mcp` 注册为 stdio MCP server（具体注册入口查你所在客户端的 MCP 文档）。
 它暴露六个工具：`recall`（fast/deep/excavate 三模式）、`list`、`get`、`ingest`、
 `remember`（显式即写，走 LLM 合并裁决）、`admin`（forget/stats/profile 三合一）——
+forget 是软删除（excavate 可挖回），并会留下内容指纹（tombstone）：被忘掉的内容
+之后任何写入面都不会再收录，防止旧对话把它重新提炼回来。
 客户端会自动加服务器名前缀（opencode 显示 `ruyi_recall`，Claude Code 显示 `mcp__ruyi__recall`）。
 MCP 进程直接打开同一个 SQLite 库（WAL 模式，多进程安全），与 HTTP 服务读写同一份记忆。
 

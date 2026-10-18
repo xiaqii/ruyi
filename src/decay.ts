@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { logMemoryAction, now } from "./db.ts";
+import { archiveMemory, logMemoryAction } from "./db.ts";
 import type { Config } from "./types.ts";
 
 /**
@@ -18,10 +18,11 @@ export function runDecay(db: DatabaseSync, config: Config): number {
 		)
 		.all(config.decay.inferredArchiveConfidenceBelow, cutoff) as unknown as { id: number }[];
 
-	const t = now();
-	const stmt = db.prepare(`UPDATE memories SET status = 'archived', updated_at = ? WHERE id = ?`);
+	// Go through archiveMemory so decayed entries also leave a forget
+	// tombstone — without it the same stale inference could be re-distilled
+	// from old logs and resurrect the night it expired.
 	for (const { id } of stale) {
-		stmt.run(t, id);
+		archiveMemory(db, id, "decay");
 		logMemoryAction(db, null, "ARCHIVE", { id, reason: "decay" });
 	}
 	return stale.length;

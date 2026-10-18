@@ -133,6 +133,7 @@ export interface DreamReport {
 	refined: number;
 	superseded: number;
 	archived: number;
+	blocked: number; // tombstone refusals + confidence-gate refusals (see memory_log BLOCKED_*)
 	reorganize: {
 		owner: string;
 		merged: number;

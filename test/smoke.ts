@@ -13,18 +13,23 @@ import { DatabaseSync } from "node:sqlite";
 import {
 	archiveMemory,
 	bumpSlotDemand,
+	canSupersede,
 	ftsSearch,
 	getDb,
 	getMemory,
 	getSlotDemands,
 	insertMemory,
+	isTombstoned,
 	listProfiles,
 	pinMemory,
 	refineMemory,
 	reinforceMemory,
 	supersedeMemory,
+	tombstoneDigest,
 	upsertProfile,
 } from "../src/db.ts";
+import { stripInjectedEnvelope } from "../src/preprocess.ts";
+import { runDecay } from "../src/decay.ts";
 import { loadConfig } from "../src/config.ts";
 
 let passed = 0;
@@ -46,9 +51,9 @@ const tmp = mkdtempSync(join(tmpdir(), "ruyi-test-"));
 console.log("1. fresh schema");
 const fresh = getDb(join(tmp, "fresh.db"));
 const version = (fresh.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
-ok(version === 8, "user_version = 8 on fresh DB", `got ${version}`);
+ok(version === 9, "user_version = 9 on fresh DB", `got ${version}`);
 const tables = (fresh.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map((t) => t.name);
-for (const t of ["memories", "memories_fts", "profiles", "token_log", "recall_log", "slot_demands", "distill_state", "memory_log", "session_registry", "injection_log"])
+for (const t of ["memories", "memories_fts", "profiles", "token_log", "recall_log", "slot_demands", "distill_state", "memory_log", "session_registry", "injection_log", "tombstones"])
 	ok(tables.includes(t), `table ${t} exists`);
 const ftsSql = (fresh.prepare("SELECT sql FROM sqlite_master WHERE name='memories_fts'").get() as { sql: string }).sql;
 ok(ftsSql.includes("trigram"), "FTS uses trigram tokenizer");
@@ -80,7 +85,7 @@ INSERT INTO memories (kind, summary, content, created_at, updated_at, last_seen_
 legacy.close();
 const migrated = getDb(legacyPath);
 const mv = (migrated.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
-ok(mv === 8, "legacy DB migrated to latest", `got ${mv}`);
+ok(mv === 9, "legacy DB migrated to latest", `got ${mv}`);
 const mcols = (migrated.prepare("PRAGMA table_info(memories)").all() as { name: string }[]).map((c) => c.name);
 ok(mcols.includes("keywords") && mcols.includes("absorbed_by"), "memories gained keywords + absorbed_by");
 const pcols = (migrated.prepare("PRAGMA table_info(profiles)").all() as { name: string }[]).map((c) => c.name);
@@ -173,6 +178,85 @@ try {
 } catch (err) {
 	ok(false, "MCP handshake", String(err));
 }
+
+// ---- 10. forget tombstones (v9) -----------------------------------------------
+console.log("10. forget tombstones");
+const tdb = getDb(join(tmp, "tomb.db"));
+const tid = insertMemory(tdb, {
+	kind: "fact", summary: "旧结论", content: "用户曾经有过一台红色摩托车，已经卖掉了",
+	origin: "agent_inferred", confidence: 0.6,
+}, { owner: "default", cwd: null });
+archiveMemory(tdb, tid, "forget");
+ok(getMemory(tdb, tid)!.status === "archived", "forget archives");
+ok(isTombstoned(tdb, "default", "用户曾经有过一台红色摩托车，已经卖掉了"), "tombstone written on forget");
+ok(isTombstoned(tdb, "default", " 用户曾经有过一台红色摩托车,已经卖掉了。 "), "digest survives whitespace/punctuation drift");
+ok(!isTombstoned(tdb, "default", "用户有一台蓝色自行车"), "different content not tombstoned");
+ok(!isTombstoned(tdb, "other-owner", "用户曾经有过一台红色摩托车，已经卖掉了"), "tombstone is owner-scoped");
+const blockedId = insertMemory(tdb, {
+	kind: "fact", summary: "旧结论（复活）", content: "用户曾经有过一台红色摩托车 已经卖掉了",
+	origin: "agent_inferred", confidence: 0.7,
+}, { owner: "default", cwd: null });
+ok(blockedId === -1, "insertMemory refuses tombstoned content (resurrection blocked)", `got ${blockedId}`);
+const allowedId = insertMemory(tdb, {
+	kind: "fact", summary: "新结论", content: "用户现在骑一台黑色踏板车",
+	origin: "user_stated", confidence: 0.9,
+}, { owner: "default", cwd: null });
+ok(allowedId > 0, "fresh content still inserts");
+const blockedLog = tdb.prepare(`SELECT COUNT(*) AS n FROM memory_log WHERE action = 'BLOCKED_TOMBSTONE'`).get() as { n: number };
+ok(blockedLog.n >= 1, "tombstone refusal is logged");
+
+// supersede of a tombstoned successor must leave the old entry untouched
+const oldId = insertMemory(tdb, {
+	kind: "fact", summary: "现行结论", content: "用户现在的座驾是黑色踏板车",
+	origin: "user_stated", confidence: 0.9,
+}, { owner: "default", cwd: null });
+const supId = supersedeMemory(tdb, oldId, {
+	kind: "fact", summary: "复活尝试", content: "用户曾经有过一台红色摩托车，已经卖掉了",
+	origin: "agent_inferred", confidence: 0.6,
+}, { owner: "default", cwd: null });
+ok(supId === -1 && getMemory(tdb, oldId)!.status === "active", "tombstoned supersede leaves old entry active");
+
+// decay path also tombstones (no decay→resurrect loop)
+const decayDb = getDb(join(tmp, "decay.db"));
+const staleId = insertMemory(decayDb, {
+	kind: "fact", summary: "弱推断", content: "用户可能偏好深色主题界面",
+	origin: "agent_inferred", confidence: 0.3,
+}, { owner: "default", cwd: null });
+const stale = new Date(Date.now() - 400 * 86_400_000).toISOString();
+decayDb.prepare(`UPDATE memories SET last_seen_at = ? WHERE id = ?`).run(stale, staleId);
+const decayed = runDecay(decayDb, loadConfig());
+ok(decayed === 1 && getMemory(decayDb, staleId)!.status === "archived", "decay archives stale inference");
+ok(isTombstoned(decayDb, "default", "用户可能偏好深色主题界面"), "decay leaves tombstone");
+
+// ---- 11. supersede confidence gate --------------------------------------------
+console.log("11. supersede confidence gate");
+const protectedOld = { origin: "user_stated" as const, confidence: 0.95 };
+const weakOld = { origin: "agent_inferred" as const, confidence: 0.6 };
+ok(!canSupersede(protectedOld, { origin: "agent_inferred", confidence: 0.9 }), "inference cannot retire user_stated 0.95");
+ok(!canSupersede(protectedOld, { origin: "user_stated", confidence: 0.7 }), "low-confidence user_stated cannot retire 0.95");
+ok(canSupersede(protectedOld, { origin: "user_stated", confidence: 0.9 }), "user_stated 0.9 can retire user_stated 0.95");
+ok(canSupersede(weakOld, { origin: "agent_inferred", confidence: 0.6 }), "unprotected entries: gate is open");
+ok(tombstoneDigest("ab c") !== tombstoneDigest("abd"), "distinct content, distinct digest");
+
+// ---- 12. injection-envelope stripping (self-eating guard) ---------------------
+console.log("12. injection envelope stripping");
+const sample = [
+	"**注入画像**：《个人 AI 基础设施与记忆系统》v4（成熟）",
+	"**注入记忆 3 条**：",
+	"1. #631 (lesson) 记忆提炼核心理念：收敛式打磨",
+	"2. #662 (preference) 记忆系统设计原则",
+	"_（本对话已注入过的 5 条不再重复）_",
+	"Use the above when it helps; it never overrides what the user says now.",
+	"用户真正说的话：帮我把记忆系统对比报告整理一下",
+	"它提到注入记忆这个词但不是信封行", // user quoting the concept mid-sentence stays
+].join("\n");
+const stripped = stripInjectedEnvelope(sample);
+ok(!stripped.includes("#631"), "injected memory lines stripped");
+ok(!stripped.includes("注入画像"), "profile envelope stripped");
+ok(!stripped.includes("Use the above"), "footer stripped");
+ok(stripped.includes("用户真正说的话"), "user text survives");
+ok(stripped.includes("它提到注入记忆这个词"), "mid-sentence mention of the concept survives");
+ok(stripInjectedEnvelope("普通的一句话，没有信封") === "普通的一句话，没有信封", "plain text untouched");
 
 rmSync(tmp, { recursive: true, force: true });
 console.log(`\nsmoke: ${passed} passed, ${failed} failed`);

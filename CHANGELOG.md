@@ -1,11 +1,42 @@
 # Changelog
 
+## [1.1.0] - 2026-10-18
+
+Hardening pass inspired by a source-level study of hippo-memory, ClawMem and
+Mnemo Cortex. All four changes enforce decisions already made — no new
+judgement logic, no new LLM calls.
+
+- **Forget tombstones (schema v9).** Archiving a memory (forget / reorganize /
+  decay) now leaves a content fingerprint in a `tombstones` table (hash only,
+  never the forgotten text). Every write surface funnels through
+  `insertMemory`, which refuses tombstoned content — a forgotten memory can no
+  longer be resurrected by the nightly dream re-reading old logs. Migration
+  backfills fingerprints for memories archived before v9.
+- **Supersede confidence gate.** A high-confidence (≥0.8) `user_stated` entry
+  can only be retired by another high-confidence user-stated candidate; an
+  inference is demoted to REINFORCE and the refusal is logged
+  (`BLOCKED_SUPERSEDE` / `BLOCKED_CONFLICT`). Applies to dream-time merge,
+  explicit remember, and nightly reorganize conflict resolution.
+- **Excavate status markers.** MCP recall labels non-active entries
+  (`[已归档]` / `[已被 #N 取代]` / `[已并入 #N]`) so archaeology mode reads
+  history as history, not as current truth.
+- **Self-eating guard.** Session preprocessing strips ruyi's own injection
+  envelopes (`**注入记忆**` / `**注入画像**` blocks and their footers) before
+  the dream ever sees them — the system no longer distills its own output as
+  if it were user signal.
+- Dream report gains a `blocked` counter; 25 new smoke tests (59 total).
+- `RUYI_STATE` now takes precedence over the repo checkout's `config.local.json`
+  (explicit env override wins; fixes the self-contained contract suite on machines
+  where the repo is also the live install).
+
 ## [1.0.4] - 2026-10-17
 
 - docs: README 补 Repo map；test: api-contract 自带一次性服务实例，修复对运行环境状态的依赖（关联 issue #1）
+
 ## [1.0.3] - 2026-10-17
 
 - docs: README 补 Repo map；test: api-contract 自带一次性服务实例，修复对运行环境状态的依赖（关联 issue #1）
+
 ## [1.0.2] - 2026-10-17
 
 Single-commit fresh history. ruyi is a generic memory system: product code

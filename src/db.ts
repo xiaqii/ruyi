@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Candidate, MemoryRow } from "./types.ts";
@@ -15,8 +16,9 @@ const dbs = new Map<string, DatabaseSync>();
  * v6 = topics.summary (rolling per-topic gist, carried into recall as context).
  * v7 = topics.summary_at (reply_id of last gist refresh — piggyback + incremental fallback).
  * v8 = profiles.parent_id (two-level profile tree: domain index -> subchapters).
+ * v9 = tombstones table (forget leaves a content fingerprint; distill never resurrects it).
  */
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 function migrate(d: DatabaseSync, from: number): void {
 	if (from < 1) {
@@ -69,6 +71,73 @@ function migrate(d: DatabaseSync, from: number): void {
 			d.exec(`ALTER TABLE profiles ADD COLUMN parent_id INTEGER`);
 		}
 	}
+	if (from < 9) {
+		createTombstones(d);
+		// Backfill: memories archived before v9 never left a tombstone, so their
+		// content could still be re-distilled from old logs. Fingerprint them now.
+		const archived = d.prepare(`SELECT id, owner, content FROM memories WHERE status = 'archived'`).all() as unknown as {
+			id: number;
+			owner: string;
+			content: string;
+		}[];
+		for (const row of archived) addTombstone(d, row.owner, row.content, "v9-backfill", row.id);
+	}
+}
+
+/**
+ * Forget tombstones (schema v9). Forgetting/archiving a memory leaves a
+ * content fingerprint — NOT the text itself (the forgotten text may be a
+ * secret; persisting it would defeat the point). Every write surface
+ * (dream distill, explicit remember, ingest, reorganize merge) goes through
+ * insertMemory, which refuses content whose fingerprint is tombstoned.
+ *
+ * This is an enforcement mechanism, not a judgement: the decision to forget
+ * was already made (by the user, or by a past curation pass). The tombstone
+ * delivers that decision to future write paths, which would otherwise
+ * re-distill the same content from old conversation logs — a forgotten
+ * memory resurrecting the same night was a real failure mode.
+ *
+ * Matching is exact-after-normalization (hippo's rejected-values lesson:
+ * over-normalization creates false refusals, which are worse than misses).
+ * A genuinely new memory about the same topic is worded differently and
+ * passes; only verbatim-equivalent resurrections are blocked.
+ */
+function createTombstones(d: DatabaseSync): void {
+	d.exec(`
+CREATE TABLE IF NOT EXISTS tombstones (
+  digest     TEXT PRIMARY KEY,
+  owner      TEXT NOT NULL DEFAULT 'default',
+  reason     TEXT NOT NULL DEFAULT '',
+  source_id  INTEGER,
+  created_at TEXT NOT NULL
+);
+	`);
+}
+
+/** Normalize for fingerprinting: case/NFC fold, strip all whitespace and punctuation. */
+export function tombstoneDigest(content: string): string {
+	const normalized = content
+		.normalize("NFC")
+		.toLowerCase()
+		.replace(/[\s\p{P}\p{S}]+/gu, "");
+	return createHash("sha256").update(normalized).digest("hex");
+}
+
+export function addTombstone(d: DatabaseSync, owner: string, content: string, reason: string, sourceId?: number): void {
+	if (!content.trim()) return;
+	d.prepare(`INSERT OR IGNORE INTO tombstones (digest, owner, reason, source_id, created_at) VALUES (?, ?, ?, ?, ?)`).run(
+		tombstoneDigest(content),
+		owner,
+		reason.slice(0, 200),
+		sourceId ?? null,
+		now(),
+	);
+}
+
+/** True when this content was previously forgotten/archived for this owner. */
+export function isTombstoned(d: DatabaseSync, owner: string, content: string): boolean {
+	if (!content.trim()) return false;
+	return !!d.prepare(`SELECT 1 FROM tombstones WHERE digest = ? AND owner = ?`).get(tombstoneDigest(content), owner);
 }
 
 /** Per-conversation ledger of auto-injected items (dedup of repeat injections). */
@@ -395,6 +464,7 @@ CREATE TABLE IF NOT EXISTS profiles (
 	createSessionRegistry(db);
 	createInjectionLog(db);
 	createTopics(db); // idempotent; migrate() is a no-op for fresh DBs (user_version already current)
+	createTombstones(db);
 
 	if (!hadMemories) {
 		db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
@@ -408,11 +478,20 @@ CREATE TABLE IF NOT EXISTS profiles (
 
 export const now = (): string => new Date().toISOString();
 
+/**
+ * The single write choke point for new memories. Returns the new id, or -1
+ * when the content matches a forget tombstone (refused, logged; callers must
+ * treat -1 as "not written" and skip any follow-up state changes).
+ */
 export function insertMemory(
 	d: DatabaseSync,
 	c: Candidate & { source?: string | null },
 	scope: { owner: string; cwd: string | null },
 ): number {
+	if (isTombstoned(d, scope.owner, c.content)) {
+		logMemoryAction(d, null, "BLOCKED_TOMBSTONE", { summary: c.summary, owner: scope.owner });
+		return -1;
+	}
 	const t = now();
 	const r = d
 		.prepare(
@@ -456,6 +535,7 @@ export function supersedeMemory(
 	scope: { owner: string; cwd: string | null },
 ): number {
 	const newId = insertMemory(d, c, scope);
+	if (newId === -1) return -1; // tombstoned successor: leave the old entry untouched
 	d.prepare(`UPDATE memories SET status = 'superseded', superseded_by = ?, updated_at = ? WHERE id = ?`).run(
 		newId,
 		now(),
@@ -464,12 +544,37 @@ export function supersedeMemory(
 	return newId;
 }
 
-export function archiveMemory(d: DatabaseSync, id: number): void {
+/**
+ * Archive a memory AND leave a forget tombstone, so tonight's dream cannot
+ * re-distill the same content from old logs. Superseded entries are exempt
+ * (they were replaced, not rejected — their content stays queryable history).
+ */
+export function archiveMemory(d: DatabaseSync, id: number, reason = ""): void {
+	const row = getMemory(d, id);
 	d.prepare(`UPDATE memories SET status = 'archived', updated_at = ? WHERE id = ?`).run(now(), id);
+	if (row) addTombstone(d, row.owner, row.content, reason || "archived", id);
 }
 
 export function pinMemory(d: DatabaseSync, id: number, pinned: 0 | 1): void {
 	d.prepare(`UPDATE memories SET pinned = ?, updated_at = ? WHERE id = ?`).run(pinned, now(), id);
+}
+
+/**
+ * Confidence gate for SUPERSEDE / conflict resolution (policy enforcement,
+ * not judgement — the LLM still decides WHAT contradicts what; this rule only
+ * executes a settled policy): a high-confidence user-stated entry can only be
+ * retired by another high-confidence user-stated candidate. An inference,
+ * however confident it looks, never silently overwrites the user's own words
+ * (mnemo's confidence ladder: verified can only be overwritten by verified).
+ */
+export const SUPERSEDE_GATE_CONFIDENCE = 0.8;
+export function canSupersede(
+	old: Pick<MemoryRow, "origin" | "confidence">,
+	candidate: Pick<Candidate, "origin" | "confidence">,
+): boolean {
+	const protectedOld = old.origin === "user_stated" && old.confidence >= SUPERSEDE_GATE_CONFIDENCE;
+	if (!protectedOld) return true;
+	return candidate.origin === "user_stated" && candidate.confidence >= SUPERSEDE_GATE_CONFIDENCE;
 }
 
 export function getMemory(d: DatabaseSync, id: number): MemoryRow | undefined {
