@@ -73,7 +73,7 @@ try {
 		body: JSON.stringify({
 			kind: "knowledge",
 			summary: "llm-smoke 写路径验证",
-			content: "发布前的显式写入端到端验证记忆，写完即归档。",
+			content: `发布前的显式写入端到端验证记忆（${new Date().toISOString()} 批次），写完即归档。`,  // 每轮唯一：forget 留墓碑，固定内容会被后续运行判定为已删除而拒写
 			domain: "test",
 			owner: "default",
 		}),
