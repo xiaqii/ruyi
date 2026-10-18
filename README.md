@@ -12,6 +12,17 @@ My agent remembers now. Work feels normal again. Putting it here in case friends
 - **New chat, old topic, zero catch-up** — no re-explaining your setup, your tastes, or the traps you've already paid for
 - **No nagging** — unrelated chats get zero memories; relevant ones arrive once, never on repeat
 
+## Core techniques (关键词速览)
+
+- **Distill the person, not the episode（画像提炼）** — the store holds abstractions (style, rules, lessons, environment), never project state or code; a four-stage LLM pipeline does it: **triage → extract → verify → merge**（二审可否决、quote 强制溯源、origin/confidence 诚实标注）
+- **Two-level profile tree（两级画像树）** — domain index → on-demand subchapters, re-synthesized weekly; project codenames are abstracted away by iron rule
+- **Forget tombstone（遗忘墓碑）** — forgetting leaves a content hash (never the text); every write path checks it, so a forgotten memory can't be re-distilled from old logs. Zero LLM, pure enforcement
+- **Confidence gate（置信度门禁）** — a high-confidence user-stated entry can only be retired by another high-confidence user-stated one; inferences demote to reinforce. Policy in code, judgement in the LLM
+- **Self-eating guard（防自噬）** — injected memory envelopes are stripped from session logs before distillation, so the system never manufactures circular evidence from its own output
+- **Tiered retrieval（分级召回）** — fast keyword probe → LLM semantic rerank with topic anchoring → excavate mode for archived/superseded history, labelled as such; per-conversation injection ledger guarantees each item arrives once
+- **Semantic decay（语义衰减）** — user-stated facts never decay; only low-confidence inferences expire — and even then they archive (excavatable), never delete
+- **Contract-tested releases（契约测试）** — tsc + 59 zero-LLM smoke tests + 40 API contract tests gate every tag; the daily self-update rolls back on any failure
+
 ## Install ruyi
 
 **From source.** Easiest: hand the repo URL to your agent:
