@@ -154,10 +154,12 @@ export default function (pi: ExtensionAPI) {
 			// and any per-turn change there invalidates provider prefix caching for
 			// the entire conversation — worse than editing an early turn.
 			if (fast.r && (fast.r.memories.length > 0 || (fast.r.profiles ?? []).length > 0)) {
+				const nProf = (fast.r.profiles ?? []).length;
+				const header = `**加载记忆 ${fast.r.memories.length} 条${nProf ? `、画像 ${nProf} 篇` : ""}**（已进本轮上下文）\n\n`;
 				return {
 					message: {
 						customType: "ruyi",
-						content: formatRecall(fast.r) + ADVISORY,
+						content: header + formatRecall(fast.r) + ADVISORY,
 						display: true,
 						details: {
 							profiles: (fast.r.profiles ?? []).map((p) => p.id),
@@ -176,12 +178,12 @@ export default function (pi: ExtensionAPI) {
 				// prompt on fast turns; on slow turns one-liners + ruyi_recall on demand
 				// is the index philosophy anyway. No full-text dump in the display.
 				const card: string[] = [];
-				for (const p of result.profiles ?? []) card.push(`**注入画像**：《${p.title}》v${p.version}（${p.maturity === "seeding" ? "部分经验" : "成熟"}）`);
+				for (const p of result.profiles ?? []) card.push(`**加载画像**：《${p.title}》v${p.version}（${p.maturity === "seeding" ? "部分经验" : "成熟"}）`);
 				if (result.memories.length > 0) {
-					card.push(`**注入记忆 ${result.memories.length} 条**：`);
+					card.push(`**加载记忆 ${result.memories.length} 条**：`);
 					result.memories.forEach((m, i) => card.push(`${i + 1}. #${m.id} (${m.kind}) ${m.summary}`));
 				}
-				if ((result.deduped ?? 0) > 0) card.push(`_（本对话已注入过的 ${result.deduped} 条不再重复）_`);
+				if ((result.deduped ?? 0) > 0) card.push(`_（本对话已加载过的 ${result.deduped} 条不再重复）_`);
 				pi.sendMessage(
 					{
 						customType: "ruyi",
@@ -335,18 +337,18 @@ export default function (pi: ExtensionAPI) {
 
 		renderCall(args, theme) {
 			return new Text(
-				theme.fg("toolTitle", theme.bold("ruyi_remember ")) + theme.fg("accent", args.summary),
+				theme.fg("toolTitle", theme.bold("保存记忆 ")) + theme.fg("accent", args.summary),
 				0,
 				0,
 			);
 		},
 
 		renderResult(result, { isPartial }, theme) {
-			if (isPartial) return new Text(theme.fg("warning", "Saving..."), 0, 0);
-			const d = result.details as { saved?: boolean } | undefined;
+			if (isPartial) return new Text(theme.fg("warning", "保存中..."), 0, 0);
+			const d = result.details as { saved?: boolean; id?: number } | undefined;
 			return d?.saved
-				? new Text(theme.fg("success", "saved"), 0, 0)
-				: new Text(theme.fg("warning", "not saved (service unavailable)"), 0, 0);
+				? new Text(theme.fg("success", `已保存记忆 1 条（#${d.id}）`), 0, 0)
+				: new Text(theme.fg("warning", "保存失败（记忆服务不可用）"), 0, 0);
 		},
 	});
 
@@ -392,8 +394,8 @@ export default function (pi: ExtensionAPI) {
 					});
 					return text(
 						r
-							? `Memory #${params.id} archived — no longer injected or recalled (recoverable via excavate).`
-							: "Memory service unavailable; nothing was changed.",
+							? `记忆 #${params.id} 已归档——不再加载/召回（excavate 模式可恢复）。`
+							: "记忆服务不可用，未做任何改动。",
 						!!r,
 					);
 				}
