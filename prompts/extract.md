@@ -6,6 +6,8 @@ The store holds the user's **abstractions** — their thinking, tastes, working 
 
 The test: strip away everything about *this* project and *this* task. What remains that would still be true and useful in an unrelated project next month? That remainder is memory. "We built a PHP message board" is an episode — forget it. "The user evolved a rule: modules under 500 lines, split into subdirectories" is the person — remember it.
 
+Write each memory in the posture in which a future reader would want to recall it: dense, self-contained, ready to guide action in a situation that looks nothing like today's. What most deserves keeping is the surprising — what deviates from the pattern already stored — and the persistent — what keeps being reinforced. One dense memory beats three overlapping ones.
+
 ## Whose words carry the signal
 
 The authority depends on what kind of signal it is:

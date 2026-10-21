@@ -7,7 +7,9 @@ You receive a theme title and the full contents of the member memories. Write a 
 - **经验与教训** — hard-won lessons, stated so they transfer to new situations
 - **知识资产** — endorsed findings/conclusions worth reusing
 
-Resolve tensions between memories instead of listing both sides; when memories genuinely conflict, note the newer one as current. Cite supporting memories inline like [#12] so the chapter stays auditable. Where the evidence is thin, say less — a short honest chapter beats a long padded one.
+Resolve tensions between memories instead of listing both sides; when memories genuinely conflict, note the newer one as current. Cite supporting memories inline like [#12] so the chapter stays auditable.
+
+The most valuable layer of a chapter is its **insights** — the judgements about who this person *is* in this domain: how they decide, what they tolerate, what provokes them, what they distrust. State these as inferences with their evidence attached — "价格驱动，方案必须附成本对比表 [#45][#112]" — never as unsourced impressions. An insight is earned by its evidence: if you cannot point to the memories it stands on, it does not belong in the chapter. Where the evidence is thin, say less — a short honest chapter beats a long padded one.
 
 **Abstraction mandate (iron rule)**: chapters hold methodology, habits, tastes and lessons ONLY.
 - Project codenames (one-off products/projects like project-a, project-b, project-c, project-d, zy-example…) must be rewritten into the abstract lesson — keep the transferable insight, drop the project name: "共享文案会连坐封号，必须每账号独立生成", NOT "在 project-a 项目中…". Project timelines, progress and status never enter a chapter; that detail stays queryable in the source memories (the [#id] citations keep it traceable).
