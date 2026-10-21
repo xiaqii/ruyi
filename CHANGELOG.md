@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.1.8] - 2026-10-21
+
+- 横评落地：extract.md 吸收 langmem 三原则（未来行动视角书写/surprising+persistent/dense>overlapping）；synthesize-theme.md 引入 genagents 洞察层（洞察挂证据编号，无证据不入章）；安全闸保持显式（实证：纯抽象 prompt 明文存 AK）
 ## [1.1.6] - 2026-10-20
 
 - reorganize 覆盖断言核验：归档理由声称已被 #X 覆盖时必须逐点核对，未覆盖细节先并入 #X 否则禁止归档
