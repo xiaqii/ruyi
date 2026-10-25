@@ -26,8 +26,10 @@ const BASE = (process.env.RUYI_URL ?? "http://127.0.0.1:8899").replace(/\/+$/, "
 const OWNER = process.env.RUYI_OWNER ?? "default";
 const TOKEN = process.env.RUYI_TOKEN ?? ""; // bearer token, only needed for remote/shared services // per-account namespace in multi-user pi-web
 const BREAKER_MS = 5 * 60_000;
-/** How long we wait for deep recall before falling back to async follow-up delivery. */
-const RECALL_SYNC_BUDGET_MS = 1200;
+/** How long we wait for deep recall before falling back to async follow-up delivery.
+ *  Measured production latency: p50 4.3s / p90 5.7s — a 10s budget lands nearly
+ *  every recall BEFORE the answer (quality first; the wait is narrated via status). */
+const RECALL_SYNC_BUDGET_MS = 10_000;
 
 // Per-operation timeouts and circuit breakers: a slow/failed recall must not
 // block remember (and vice versa). Injection stays snappy or is skipped.
@@ -141,12 +143,21 @@ export default function (pi: ExtensionAPI) {
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ query, k: 6, owner: OWNER, cwd: ctx.cwd, scope: "smart", mode: "deep", conversation, auto: true }),
 		});
+		// Narrate the wait in the status bar while the fast path blocks (graceful
+		// no-op where the UI doesn't render extension status).
+		const stages = [
+			setTimeout(() => ctx.ui?.setStatus?.("ruyi", "ruyi: analyzing what this turn needs…"), 0),
+			setTimeout(() => ctx.ui?.setStatus?.("ruyi", "ruyi: searching memories & profiles…"), 2500),
+			setTimeout(() => ctx.ui?.setStatus?.("ruyi", "ruyi: preparing injection…"), 5000),
+		];
 		const fast = await Promise.race([
 			recallPromise.then((r) => ({ r, late: false as const })),
 			new Promise<{ r: null; late: true }>((resolve) =>
 				setTimeout(() => resolve({ r: null, late: true }), RECALL_SYNC_BUDGET_MS),
 			),
 		]);
+		for (const s of stages) clearTimeout(s);
+		ctx.ui?.setStatus?.("ruyi", undefined);
 		if (!fast.late) {
 			// Endpoint was quick: return the recall block as a custom message — pi
 			// places it right after this turn's user prompt (tail append, visible to
