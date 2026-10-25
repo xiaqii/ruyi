@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.1.10] - 2026-10-25
+
+- pi 扩展注入时序修复：同步预算 1.2s→10s（生产实测 deep 召回延迟 p50=4.3s / p90=5.7s，1.2s 预算几乎全部落到迟到的慢通道，用户看到“回答完才注入”）；等待期间状态栏分阶段提示（正在分析→检索→整理，pi-web 前端已确认处理 setStatus 事件，不支持的 UI 静默无影响）。实测依据：T1 纯 SQL 候选只覆盖 deep 管线最终选中的 23%——LLM 层（T2 查询理解/T3 语义精排）是召回质量主体，不可用裸匹配替代；understand A/B：kimi 与 qwen3.7-flash 关思考质量相当，flash 快 3 倍（0.8-1.6s vs 2.2-4.7s），recall 层换 flash 留作可选后续
 ## [1.1.8] - 2026-10-21
 
 - 横评落地：extract.md 吸收 langmem 三原则（未来行动视角书写/surprising+persistent/dense>overlapping）；synthesize-theme.md 引入 genagents 洞察层（洞察挂证据编号，无证据不入章）；安全闸保持显式（实证：纯抽象 prompt 明文存 AK）
