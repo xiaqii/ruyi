@@ -142,6 +142,8 @@ export interface DreamReport {
 		retagged: number;
 	}[];
 	synthesize: { owner: string; domains: number; chapters: number; retired: number }[];
+	/** Gists rewritten by the dream tier this run (weekly, rides synthesize gate). */
+	gistsRegened?: number;
 	inputTokens: number;
 	outputTokens: number;
 	errors: string[];

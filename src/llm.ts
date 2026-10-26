@@ -18,6 +18,10 @@ export interface CompleteOptions {
 	sessionFile?: string;
 	maxTokens?: number;
 	timeoutMs?: number;
+	/** openai protocol: send response_format json_object (default true). Pass
+	 *  false for plain-text tasks — forced JSON makes some models wrap prose in
+	 *  tool-call-shaped envelopes. */
+	json?: boolean;
 }
 
 /** Extract the first JSON value (object or array) from LLM output, tolerating code fences and prose. */
@@ -83,7 +87,7 @@ function appendUsageLog(entry: Record<string, unknown>): void {
 }
 
 /** Steps served by the (cheap, fast, thinking-off) "recall" tier; everything else is "dream". */
-const RECALL_STEPS = new Set(["understand", "rerank", "topic-summary"]);
+const RECALL_STEPS = new Set(["understand", "rerank", "topic-summary", "reply-gist"]);
 
 interface ResolvedLlm {
 	protocol: "anthropic" | "openai";
@@ -140,7 +144,7 @@ function buildBody(llm: ResolvedLlm, opts: CompleteOptions, fixes: Set<string>):
 		};
 		if (fixes.has("max_completion_tokens")) body.max_completion_tokens = maxTok;
 		else body.max_tokens = maxTok;
-		if (!fixes.has("response_format")) body.response_format = { type: "json_object" };
+		if (!fixes.has("response_format") && opts.json !== false) body.response_format = { type: "json_object" };
 		// DashScope-style switch for thinking-capable OpenAI-compatible models
 		// (qwen3.x): dropped on 400 via the "thinking" downgrade fix.
 		if (llm.thinking === "off" && !fixes.has("thinking")) body.enable_thinking = false;

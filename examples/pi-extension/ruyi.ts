@@ -36,6 +36,7 @@ const RECALL_SYNC_BUDGET_MS = 10_000;
 const TIMEOUTS = {
 	inject: 2_000,
 	recall: 30_000,
+	answer: 10_000,
 	remember: 45_000, // POST /memories runs LLM merge synchronously (~10s)
 	stats: 1_500,
 } as const;
@@ -213,6 +214,30 @@ export default function (pi: ExtensionAPI) {
 			} catch {
 				// Delivery is best-effort; the next ruyi_recall can always fetch again.
 			}
+		});
+	});
+
+	// After each run: report the assistant's answer so the server can attach it
+	// to this turn's reply row and distill a 1-2 sentence gist (recall tier,
+	// async). Gists anchor future follow-ups ("那它的价格") against drift.
+	// Fire-and-forget: never blocks, never breaks a turn.
+	pi.on("agent_end", async (event, ctx) => {
+		const texts = event.messages
+			.filter((m) => m.role === "assistant")
+			.flatMap((m) =>
+				typeof m.content === "string"
+					? [m.content]
+					: (m.content ?? []).filter((c) => c.type === "text").map((c) => ("text" in c ? c.text : "")),
+			);
+		const answer = texts.join("\n").trim();
+		if (!answer) return;
+		void api("answer", "/replies/answer", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				conversation: `pi:${ctx.sessionManager.getSessionId()}`,
+				answer: answer.slice(0, 20000),
+			}),
 		});
 	});
 

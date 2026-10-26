@@ -18,7 +18,7 @@ const dbs = new Map<string, DatabaseSync>();
  * v8 = profiles.parent_id (two-level profile tree: domain index -> subchapters).
  * v9 = tombstones table (forget leaves a content fingerprint; distill never resurrects it).
  */
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 function migrate(d: DatabaseSync, from: number): void {
 	if (from < 1) {
@@ -81,6 +81,13 @@ function migrate(d: DatabaseSync, from: number): void {
 			content: string;
 		}[];
 		for (const row of archived) addTombstone(d, row.owner, row.content, "v9-backfill", row.id);
+	}
+	if (from < 10) {
+		// Reply-level material for layered recall context: the assistant's answer
+		// (raw, kept whole) and a regenerable 1-2 sentence gist of the Q+A pair.
+		const cols = d.prepare(`SELECT name FROM pragma_table_info('replies')`).all() as unknown as { name: string }[];
+		if (!cols.some((c) => c.name === "answer")) d.exec(`ALTER TABLE replies ADD COLUMN answer TEXT NOT NULL DEFAULT ''`);
+		if (!cols.some((c) => c.name === "gist")) d.exec(`ALTER TABLE replies ADD COLUMN gist TEXT NOT NULL DEFAULT ''`);
 	}
 }
 
@@ -169,6 +176,8 @@ CREATE TABLE IF NOT EXISTS replies (
   reply_id   INTEGER NOT NULL,
   query      TEXT NOT NULL,
   injected   TEXT NOT NULL DEFAULT '[]',
+  answer     TEXT NOT NULL DEFAULT '',
+  gist       TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   PRIMARY KEY (topic_id, reply_id)
 );
@@ -206,10 +215,39 @@ export function logReply(d: DatabaseSync, topicId: number, replyId: number, quer
 	d.prepare(`INSERT OR REPLACE INTO replies (topic_id, reply_id, query, injected, created_at) VALUES (?, ?, ?, ?, ?)`).run(
 		topicId,
 		replyId,
-		scrubSecrets(query.slice(0, 2000)),
+		scrubSecrets(query.slice(0, 20000)),
 		JSON.stringify(injectedItems),
 		now(),
 	);
+}
+
+/** Attach the assistant's answer to the latest unanswered reply of a conversation.
+ *  Returns the reply coordinates (for async gist generation), or null when the
+ *  conversation has no pending reply (answer arrived before any recall turn). */
+export function setReplyAnswer(
+	d: DatabaseSync,
+	conversation: string,
+	answer: string,
+): { topicId: number; replyId: number } | null {
+	const topic = d.prepare(`SELECT topic_id FROM topics WHERE conversation = ?`).get(conversation) as { topic_id: number } | undefined;
+	if (!topic) return null;
+	const row = d
+		.prepare(`SELECT reply_id FROM replies WHERE topic_id = ? AND answer = '' ORDER BY reply_id DESC LIMIT 1`)
+		.get(topic.topic_id) as { reply_id: number } | undefined;
+	if (!row) return null;
+	d.prepare(`UPDATE replies SET answer = ? WHERE topic_id = ? AND reply_id = ?`).run(scrubSecrets(answer.slice(0, 20000)), topic.topic_id, row.reply_id);
+	return { topicId: topic.topic_id, replyId: row.reply_id };
+}
+
+export function setReplyGist(d: DatabaseSync, topicId: number, replyId: number, gist: string): void {
+	d.prepare(`UPDATE replies SET gist = ? WHERE topic_id = ? AND reply_id = ?`).run(gist.slice(0, 500), topicId, replyId);
+}
+
+/** Reply rows for context assembly, oldest first: verbatim user turns + gists. */
+export function getReplies(d: DatabaseSync, topicId: number): { reply_id: number; query: string; gist: string }[] {
+	return d
+		.prepare(`SELECT reply_id, query, gist FROM replies WHERE topic_id = ? ORDER BY reply_id ASC`)
+		.all(topicId) as unknown as { reply_id: number; query: string; gist: string }[];
 }
 
 /** Rolling gist of a topic ("what is this conversation about"), maintained by a cheap LLM pass. */

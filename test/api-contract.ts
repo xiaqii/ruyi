@@ -316,6 +316,29 @@ if (tmpId === -1) throw new Error("fixture insert blocked by tombstone — conte
 		db.prepare(`UPDATE memories SET status = 'archived' WHERE id = ?`).run(hookId);
 	}
 
+	// POST /replies/answer —— attaches to the pending reply, gist async
+	{
+		const conv = `pi:contract-answer-${RUN}`;
+		const headers: Record<string, string> = { "content-type": "application/json" };
+		if (TOKEN) headers.authorization = `Bearer ${TOKEN}`;
+		// no recall turn yet → nothing to attach
+		const r0 = await fetch(`${BASE}/replies/answer`, { method: "POST", headers, body: JSON.stringify({ conversation: conv, answer: "先到的回答" }), signal: AbortSignal.timeout(10_000) });
+		const j0 = (await r0.json()) as { attached?: boolean };
+		ok(r0.status === 200 && j0.attached === false, "/replies/answer without pending reply → attached:false");
+		// a recall turn creates the pending reply, then the answer attaches
+		await fetch(`${BASE}/recall`, { method: "POST", headers, body: JSON.stringify({ query: "contract answer test", conversation: conv, auto: true, mode: "fast" }), signal: AbortSignal.timeout(10_000) });
+		const r1 = await fetch(`${BASE}/replies/answer`, { method: "POST", headers, body: JSON.stringify({ conversation: conv, answer: "本轮回答：测试内容" }), signal: AbortSignal.timeout(10_000) });
+		const j1 = (await r1.json()) as { attached?: boolean };
+		ok(r1.status === 201 && j1.attached === true, "/replies/answer attaches to pending reply (201)");
+		const row = db.prepare(`SELECT answer FROM replies r JOIN topics t ON t.topic_id = r.topic_id WHERE t.conversation = ?`).get(conv) as { answer: string } | undefined;
+		ok(row?.answer === "本轮回答：测试内容", "answer persisted on the reply row");
+		const bad = await fetch(`${BASE}/replies/answer`, { method: "POST", headers, body: JSON.stringify({ conversation: conv }), signal: AbortSignal.timeout(10_000) });
+		ok(bad.status === 400, "/replies/answer missing answer → 400");
+		db.prepare(`DELETE FROM replies WHERE topic_id IN (SELECT topic_id FROM topics WHERE conversation = ?)`).run(conv);
+		db.prepare(`DELETE FROM topics WHERE conversation = ?`).run(conv);
+		db.prepare(`DELETE FROM injection_log WHERE conversation = ?`).run(conv);
+	}
+
 	// gzip-compressed push (content-encoding: gzip)
 	{
 		const { gzipSync } = await import("node:zlib");

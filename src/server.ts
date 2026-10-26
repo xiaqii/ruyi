@@ -9,12 +9,13 @@ import {
 	listMemories,
 	listProfiles,
 	memoryCounts,
+	setReplyAnswer,
 	tokenUsage,
 } from "./db.ts";
 import type { Candidate } from "./types.ts";
 import { runDream, distillText, explicitRemember } from "./distill.ts";
 import { syncPush, syncState } from "./sync.ts";
-import { getInject, recall } from "./recall.ts";
+import { generateReplyGist, getInject, recall } from "./recall.ts";
 import { runSynthesize } from "./synthesize.ts";
 import { landingPage } from "./landing.ts";
 
@@ -119,6 +120,20 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 					auto,
 				});
 				return send(res, 200, result);
+			}
+
+			// Assistant-answer report (client fire-and-forget, after each agent run):
+			// attach to the pending reply of this conversation, then generate its
+			// gist async (recall tier). The answer is the reference resolver that
+			// keeps follow-up anchoring ("那它的价格") from drifting.
+			if (req.method === "POST" && path === "/replies/answer") {
+				const body = await readBody(req);
+				const conversation = typeof body.conversation === "string" ? body.conversation.slice(0, 200) : "";
+				const answer = typeof body.answer === "string" ? body.answer : "";
+				if (!conversation || !answer.trim()) return send(res, 400, { error: "conversation and answer are required" });
+				const at = setReplyAnswer(db, conversation, answer);
+				if (at) void generateReplyGist(db, at.topicId, at.replyId).catch(() => {});
+				return send(res, at ? 201 : 200, { attached: !!at });
 			}
 
 			if (req.method === "GET" && path === "/memories") {

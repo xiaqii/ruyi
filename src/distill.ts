@@ -407,6 +407,7 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 		blocked: 0,
 		reorganize: [],
 		synthesize: [],
+		gistsRegened: 0,
 		inputTokens: 0,
 		outputTokens: 0,
 		errors: [],
@@ -529,6 +530,17 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 					}
 				} catch (err) {
 					report.errors.push(`synthesize(${owner}): ${err instanceof Error ? err.message : String(err)}`);
+				}
+			}
+			// Weekly gist regeneration rides the synthesize gate: when profiles are
+			// due for a rebuild, recently-active topics get their gists rewritten by
+			// the dream tier from raw turns (drift repair for daytime flash gists).
+			if (!opts.skipReorganize && report.synthesize.length > 0) {
+				try {
+					const { regenRecentGists } = await import("./recall.ts");
+					report.gistsRegened = await regenRecentGists(db);
+				} catch (err) {
+					report.errors.push(`gist-regen: ${err instanceof Error ? err.message : String(err)}`);
 				}
 			}
 		}

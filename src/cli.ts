@@ -195,6 +195,16 @@ async function main(): Promise<void> {
 			break;
 		}
 
+		case "regen-gists": {
+			const days = typeof flags.days === "string" ? Number(flags.days) : 7;
+			const max = typeof flags.limit === "string" ? Number(flags.limit) : 150;
+			const { regenRecentGists } = await import("./recall.ts");
+			const { getDb } = await import("./db.ts");
+			const n = await regenRecentGists(getDb(config.dbPath), { days, max });
+			console.log(`regenerated ${n} reply gists (topics active within ${days}d, cap ${max})`);
+			break;
+		}
+
 		case "backfill-keywords": {
 			const owner = typeof flags.owner === "string" ? flags.owner : "default";
 			const limit = typeof flags.limit === "string" ? Number(flags.limit) : undefined;

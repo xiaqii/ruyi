@@ -121,6 +121,28 @@ GET /inject?owner=default&cwd=/path/to/project&scope=smart
 
 无命中时 `memories` 与 `profiles` 均为空数组（不是错误）。
 
+### POST /replies/answer —— 上报助手回答（逐轮纪要的原料）
+
+agent 每轮回答完后上报（fire-and-forget），服务端把回答附到该会话最新一条未答的 reply 上，并异步生成
+1-2 句 gist（recall 层，不占注入路径）。gist 与回答原文一起成为后续召回的分层话题上下文
+（topic_summary + 逐轮 gist + 最近 3 轮用户原文，32K 预算组装）——裸追问（"那它的价格"）的答案侧
+实体靠这个不漂移。
+
+```json
+{ "conversation": "pi:<sessionId>", "answer": "助手本轮的回答全文" }
+```
+
+| 字段 | 说明 |
+|---|---|
+| `conversation` | 必填，与 /recall 的会话标识一致 |
+| `answer` | 必填，服务端截断到 20000 字并做密钥脱敏后保存（原文全量保留原则） |
+
+响应：附到待答 reply 返回 `201 {"attached":true}`；该会话没有待答 reply（如本轮未触发召回）返回
+`200 {"attached":false}`，均为正常。gist 生成失败不留空难——组装时该轮退回截断原文。
+
+夜间做梦管线每周随画像重炼用 dream 层（思考型模型）从原文重写活跃话题的 gist，修复白天快模型的漂移
+（gist 是可再生视图，原文是唯一事实源）。手动触发：`ruyi regen-gists [--days 7] [--limit 150]`。
+
 ### POST /memories —— 显式写入（"记住这个"）
 
 ```json

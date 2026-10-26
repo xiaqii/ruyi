@@ -8,7 +8,9 @@ import {
 	getOrCreateTopic,
 	getProfile,
 	getRecentQueries,
+	getReplies,
 	getTopicSummary,
+	setReplyGist,
 	listProfiles,
 	logInjections,
 	logRecall,
@@ -232,16 +234,120 @@ function gatherChannels(
 
 const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n)}…` : s);
 
-/** The current query plus the topic's gist and the user's OWN turns, full text
- *  (user turns are short — 20 of them is still small). Anchors bare follow-ups
- *  against the topic: understanding judges the subject, never the bare words. */
-function withTopicContext(query: string, summary: string, recent: string[]): string {
-	if (!summary && recent.length === 0) return query;
-	const parts: string[] = [query, "", "【本话题上下文】"];
-	if (summary) parts.push(`话题概要：${summary}`);
-	if (recent.length > 0)
-		parts.push(`本话题用户逐轮原文：\n${recent.map((q, i) => `${i + 1}. ${clip(q.replace(/\s+/g, " "), 2000)}`).join("\n")}`);
+const CONTEXT_BUDGET = 32_000;
+
+/**
+ * Layered topic context (long → mid → short term), assembled within 32K chars:
+ *  1. topic summary (long-term: what this conversation is about)
+ *  2. last 3 user turns verbatim, ≤4K each (short-term: the exact live wording)
+ *  3. per-turn gists, newest first, until the budget runs out (mid-term)
+ * A reply without a gist yet (or whose gist failed) contributes its raw user
+ * text, clipped. Everything here is a regenerable view over replies — the raw
+ * turns are the permanent record.
+ */
+export function assembleTopicContext(db: ReturnType<typeof getDb>, topicId: number, summary: string): string {
+	const replies = getReplies(db, topicId);
+	if (!summary && replies.length === 0) return "";
+	const parts: string[] = [];
+	let used = 0;
+	const push = (s: string): boolean => {
+		if (used + s.length > CONTEXT_BUDGET) return false;
+		parts.push(s);
+		used += s.length;
+		return true;
+	};
+	if (summary) push(`话题概要：${summary}`);
+	const verbatim = replies.slice(-3);
+	const verbatimIds = new Set(verbatim.map((r) => r.reply_id));
+	push(
+		`最近用户轮原文：\n${verbatim.map((r) => `${r.reply_id}. ${clip(r.query.replace(/\s+/g, " "), 4000)}`).join("\n")}`,
+	);
+	const gistLines: string[] = [];
+	for (const r of [...replies].reverse()) {
+		if (verbatimIds.has(r.reply_id)) continue;
+		const line = `${r.reply_id}. ${r.gist || `用户：${clip(r.query.replace(/\s+/g, " "), 300)}`}`;
+		if (used + line.length + 20 > CONTEXT_BUDGET) break;
+		gistLines.push(line);
+		used += line.length;
+	}
+	if (gistLines.length > 0) push(`逐轮纪要（新→旧）：\n${gistLines.join("\n")}`);
 	return parts.join("\n");
+}
+
+/** The current query anchored against the assembled topic context. */
+function withTopicContext(query: string, context: string): string {
+	if (!context) return query;
+	return `${query}\n\n【本话题上下文】\n${context}`;
+}
+
+/**
+ * Generate (or regenerate) the 1-2 sentence gist of one Q+A reply pair.
+ * Daytime: recall tier (flash) — fast and off the critical path. Nightly
+ * regeneration uses step "gist-regen" (dream tier → k3-class thinking) to
+ * rewrite drifted gists from the raw turns (gist = regenerable view, never a chain).
+ */
+export async function generateReplyGist(
+	db: ReturnType<typeof getDb>,
+	topicId: number,
+	replyId: number,
+	opts: { dream?: boolean } = {},
+): Promise<boolean> {
+	const row = db
+		.prepare(`SELECT query, answer FROM replies WHERE topic_id = ? AND reply_id = ?`)
+		.get(topicId, replyId) as { query: string; answer: string } | undefined;
+	if (!row || !row.answer) return false;
+	const summary = getTopicSummary(db, topicId);
+	const recent = getReplies(db, topicId)
+		.filter((r) => r.reply_id < replyId && r.gist)
+		.slice(-3)
+		.map((r) => `${r.reply_id}. ${r.gist}`);
+	const ref = [summary && `话题概要：${summary}`, recent.length > 0 && `最近纪要：\n${recent.join("\n")}`].filter(Boolean).join("\n");
+	const result = await complete({
+		system: loadPrompt("reply-gist"),
+		user: `${ref ? `REFERENCE（仅供还原指代，不可取事实）：\n${ref}\n\n` : ""}USER（原文）：\n${clip(row.query, 8000)}\n\nASSISTANT（原文）：\n${clip(row.answer, 8000)}`,
+		step: opts.dream ? "gist-regen" : "reply-gist",
+		maxTokens: 200,
+		json: false, // prose output — forced JSON makes flash wrap it in envelopes
+	});
+	const gist = result.text.trim();
+	if (!gist) return false;
+	// Grounding guard (learned from a live failure: flash once answered
+	// "[2025.10]" for a degenerate fragment): the gist must share at least one
+	// real token with the raw source — verbatim-grounding, enforced in code.
+	const source = `${row.query}\n${row.answer}`;
+	const tokens = gist.match(/[\u4e00-\u9fff]{2,}|[A-Za-z0-9]{4,}/g) ?? [];
+	if (tokens.length === 0 || !tokens.some((t) => source.includes(t))) return false;
+	setReplyGist(db, topicId, replyId, gist);
+	return true;
+}
+
+/**
+ * Nightly gist regeneration (dream tier, k3-class thinking): rewrite the gists
+ * of recently-active topics from their raw turns. Daytime gists (flash) are
+ * views over the raw record — regeneration is the drift-repair loop.
+ */
+export async function regenRecentGists(
+	db: ReturnType<typeof getDb>,
+	opts: { days?: number; max?: number } = {},
+): Promise<number> {
+	const days = opts.days ?? 7;
+	const max = opts.max ?? 150;
+	const rows = db
+		.prepare(
+			`SELECT r.topic_id, r.reply_id FROM replies r JOIN topics t ON t.topic_id = r.topic_id
+			 WHERE r.answer != '' AND t.last_seen_at > datetime('now', ?)
+			 ORDER BY r.topic_id DESC, r.reply_id ASC LIMIT ?`,
+		)
+		.all(`-${days} days`, max) as unknown as { topic_id: number; reply_id: number }[];
+	let n = 0;
+	for (const r of rows) {
+		try {
+			if (await generateReplyGist(db, r.topic_id, r.reply_id, { dream: true })) n++;
+		} catch {
+			// Keep the old gist; tomorrow is another run.
+		}
+	}
+	return n;
 }
 
 /**
@@ -387,8 +493,7 @@ export async function recall(
 	const ledger = opts?.auto && opts.conversation ? getInjectedItems(db, opts.conversation) : null;
 	const turn = ledger && opts?.conversation ? getOrCreateTopic(db, opts.conversation, query) : null;
 	const topicSummary = turn ? getTopicSummary(db, turn.topicId) : "";
-	const recent = turn ? getRecentQueries(db, turn.topicId, 40) : [];
-	const contextQuery = withTopicContext(query, topicSummary, recent);
+	const contextQuery = turn ? withTopicContext(query, assembleTopicContext(db, turn.topicId, topicSummary)) : query;
 	const logNew = (memories: MemoryRow[], profiles: ProfileRow[]) => {
 		if (!ledger || !opts?.conversation || !turn) return;
 		const items = [...memories.map((m) => `m:${m.id}`), ...profiles.map((p) => `p:${p.id}`)];
