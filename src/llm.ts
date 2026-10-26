@@ -136,6 +136,9 @@ function buildBody(llm: ResolvedLlm, opts: CompleteOptions, fixes: Set<string>):
 		if (fixes.has("max_completion_tokens")) body.max_completion_tokens = maxTok;
 		else body.max_tokens = maxTok;
 		if (!fixes.has("response_format")) body.response_format = { type: "json_object" };
+		// DashScope-style switch for thinking-capable OpenAI-compatible models
+		// (qwen3.x): dropped on 400 via the "thinking" downgrade fix.
+		if (llm.thinking === "off" && !fixes.has("thinking")) body.enable_thinking = false;
 		return body;
 	}
 	// anthropic protocol
