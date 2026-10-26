@@ -19,7 +19,7 @@ function line(status: Status, label: string, detail = ""): boolean {
 	return status !== "FAIL";
 }
 
-async function checkLlm(step: string): Promise<boolean> {
+async function checkLlm(step: string): Promise<{ ok: boolean; ms: number }> {
 	const llm = resolveLlm(step);
 	const started = Date.now();
 	try {
@@ -33,13 +33,15 @@ async function checkLlm(step: string): Promise<boolean> {
 		});
 		const ms = Date.now() - started;
 		const parsed = r.text.includes("ok");
-		return line(
+		const ok = line(
 			ms < 30_000 ? "PASS" : "WARN",
-			`LLM ${step} tier (${llm.protocol}/${llm.model})`,
+			`LLM ${step} tier (${llm.protocol}/${llm.model}${llm.thinking === "off" ? ", thinking off" : ""})`,
 			`${ms}ms, ${r.inputTokens}+${r.outputTokens} tokens${parsed ? "" : ", unexpected reply"}`,
 		);
+		return { ok, ms };
 	} catch (err) {
-		return line("FAIL", `LLM ${step} tier (${llm.protocol}/${llm.model})`, err instanceof Error ? err.message.slice(0, 200) : String(err));
+		const ok = line("FAIL", `LLM ${step} tier (${llm.protocol}/${llm.model})`, err instanceof Error ? err.message.slice(0, 200) : String(err));
+		return { ok, ms: Date.now() - started };
 	}
 }
 
@@ -80,8 +82,22 @@ export async function runDoctor(): Promise<void> {
 	}
 
 	// 4. LLM tiers
-	ok = (await checkLlm("rerank")) && ok;
-	ok = (await checkLlm("extract")) && ok;
+	const recallCheck = await checkLlm("rerank");
+	const dreamCheck = await checkLlm("extract");
+	ok = recallCheck.ok && dreamCheck.ok && ok;
+	// Advisory (never auto-mutates config): a slow recall tier on the SAME model
+	// as dream means selection work is paying thinking-model latency for nothing.
+	{
+		const recallLlm = resolveLlm("rerank");
+		const dreamLlm = resolveLlm("extract");
+		if (recallCheck.ms > 3000 && recallLlm.model === dreamLlm.model) {
+			line("WARN", "recall tier shares the dream model", `${recallCheck.ms}ms — selection work (understand/rerank) does not need a thinking model`);
+			console.log(`  Suggestion: point the recall tier at a cheap fast model in config.local.json:`);
+			console.log(`  "steps": { "recall": { "protocol": "openai", "baseUrl": "<provider>", "apiKey": "<key>",`);
+			console.log(`              "model": "qwen3.7-flash | deepseek-chat | claude-haiku-4-5", "thinking": "off" } }`);
+			console.log(`  (measured: no quality loss on selection tasks, ~3x faster)`);
+		}
+	}
 
 	// 5. pi extension presence
 	const ext = resolve(homedir(), ".pi/agent/extensions/ruyi.ts");

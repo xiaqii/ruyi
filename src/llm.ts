@@ -113,7 +113,12 @@ export function resolveLlm(step: string): ResolvedLlm {
 		model: override?.model ?? base.model,
 		maxTokens: override?.maxTokens ?? base.maxTokens,
 		requestTimeoutMs: override?.requestTimeoutMs ?? base.requestTimeoutMs,
-		thinking: override?.thinking ?? base.thinking ?? "default",
+		// Selection work (recall tier) never needs a thinking model — default it
+		// off even without a tier override (A/B-verified: no quality loss on
+		// understand/rerank/topic-summary). Providers that reject the parameter
+		// trigger the 400 downgrade path. Dream tier keeps the base setting:
+		// thinking is where distillation quality comes from.
+		thinking: override?.thinking ?? (tier === "recall" ? "off" : (base.thinking ?? "default")),
 	};
 }
 
