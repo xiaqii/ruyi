@@ -136,9 +136,10 @@ export default function (pi: ExtensionAPI) {
 		// already injected into THIS conversation and skips the LLM call entirely
 		// when nothing new could surface.
 		const conversation = `pi:${ctx.sessionManager.getSessionId()}`;
-		// Full input, no head-truncation: long messages put background first and
-		// the real question LAST — head-cutting drops intent. 16k chars sanity cap.
-		const query = event.prompt.length > 16000 ? `${event.prompt.slice(0, 8000)}\n[……]\n${event.prompt.slice(-8000)}` : event.prompt;
+		// Full input: long messages put background first and the real question LAST
+		// — head-cutting drops intent. Cap exists only against pathological pastes
+		// (log dumps) that would blow the 10s sync budget on prefill, not cost.
+		const query = event.prompt.length > 100_000 ? `${event.prompt.slice(0, 50000)}\n[……]\n${event.prompt.slice(-50000)}` : event.prompt;
 		if (!query.trim()) return;
 		const recallPromise = api<RecallResponse>("recall", `/recall`, {
 			method: "POST",
