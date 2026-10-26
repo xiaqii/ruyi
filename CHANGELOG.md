@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.2.0] - 2026-10-26
+
+- 分层话题上下文（用户定案的 gist 架构）：replies 表加 answer(原文全量)+gist(可再生视图) 字段（schema v10）；扩展 agent_end 上报 AI 回答（fire-and-forget）→ 服务端异步 flash 产 1-2 句逐轮纪要（新 prompt reply-gist：事实只出自本轮原文/禁裸代词/数字逐字/举例非主题，参照块仅用于还原指代）；组装器重写为三层——topic_summary(长效)+最后3轮用户原文(短效,单轮≤4K)+逐轮gist由新到旧填满(中效)，总预算32K；防漂移体系：单层压缩铁律(gist只从原文生成绝不链式)、代码级 grounding 检查(gist与原文须共享实词，实证抓获flash对退化输入输出垃圾)、夜间dream层(k3-256k思考)周级从原文重写活跃话题gist修复漂移(搭synthesize周闸门，新CLI regen-gists)；llm.ts openai分支补json:false选项(强制response_format会让flash把散文包成工具调用信封——实证抓获)。历史会话回放实测(数字人12轮)：gist主体精确/数字逐字/指代还原全部正确，12轮组装仅1060字符
 ## [1.1.17] - 2026-10-26
 
 - 召回输入上限 16k→100k 字符（用户裁定：flash 十万字约两分钱，省钱不是约束；上限只防整份日志 dump 的病态粘贴吃光 10s 同步预算的 prefill 延迟）
