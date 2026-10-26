@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.1.11] - 2026-10-26
+
+- 模型分层配置落地：dream 层（夜间提纯/merge）kimi-for-coding→k3-256k 且不再关思考（此前 base thinking=off 一直在裸奔；实测 k3-256k 默认即带 thinking 块）；recall 层（understand/rerank/topic-summary）切 qwen3.7-flash 关思考——openai 协议分支补 enable_thinking:false 映射（400 时按既有 thinking 降级规则摘除）；生产实测召回延迟 p50 4.3s→2.8s；config.example.json 补 steps.recall 分层示例
 ## [1.1.10] - 2026-10-25
 
 - pi 扩展注入时序修复：同步预算 1.2s→10s（生产实测 deep 召回延迟 p50=4.3s / p90=5.7s，1.2s 预算几乎全部落到迟到的慢通道，用户看到“回答完才注入”）；等待期间状态栏分阶段提示（正在分析→检索→整理，pi-web 前端已确认处理 setStatus 事件，不支持的 UI 静默无影响）。实测依据：T1 纯 SQL 候选只覆盖 deep 管线最终选中的 23%——LLM 层（T2 查询理解/T3 语义精排）是召回质量主体，不可用裸匹配替代；understand A/B：kimi 与 qwen3.7-flash 关思考质量相当，flash 快 3 倍（0.8-1.6s vs 2.2-4.7s），recall 层换 flash 留作可选后续
