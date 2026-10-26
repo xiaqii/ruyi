@@ -174,20 +174,73 @@ function gatherCandidates(
 	return { rows: out, scores, ftsHitCount };
 }
 
+/**
+ * LLM-driven candidate pool (deep mode): the domain channel opened by query
+ * understanding ∪ recent ∪ pinned. NO string retrieval in the normal path —
+ * keyword matching cannot tell a subject from an example (a turn that uses
+ * "显卡" as an analogy is not about GPUs), and its worst failure (a good
+ * memory never entering the pool) is fatal. Every candidate here was invited
+ * by meaning; the reranker makes the final call.
+ */
+function gatherChannels(
+	db: ReturnType<typeof getDb>,
+	owner: string,
+	scope: RecallScope,
+	cwd: string | null,
+	opts: { domains?: string[]; timeFrom?: string } = {},
+): CandidatePool {
+	const rows = new Map<number, MemoryRow>();
+	const push = (list: MemoryRow[]) => {
+		for (const m of list) if (!rows.has(m.id)) rows.set(m.id, m);
+	};
+	push(
+		db
+			.prepare(`SELECT * FROM memories WHERE status = 'active' AND owner = ? ORDER BY last_seen_at DESC LIMIT 20`)
+			.all(owner) as unknown as MemoryRow[],
+	);
+	push(
+		db.prepare(`SELECT * FROM memories WHERE status = 'active' AND owner = ? AND pinned = 1`).all(owner) as unknown as MemoryRow[],
+	);
+	if (opts.domains && opts.domains.length > 0) {
+		const domIn = opts.domains.map(() => "?").join(",");
+		push(
+			db
+				.prepare(
+					`SELECT * FROM memories WHERE status = 'active' AND owner = ? AND domain IN (${domIn})
+					 ORDER BY evidence DESC, last_seen_at DESC LIMIT 40`,
+				)
+				.all(owner, ...opts.domains) as unknown as MemoryRow[],
+		);
+	}
+	const out: MemoryRow[] = [];
+	for (const m of rows.values()) {
+		if (!scopeOk(m, scope, cwd)) continue;
+		if (opts.timeFrom && m.last_seen_at < opts.timeFrom) continue;
+		out.push(m);
+	}
+	// Recency/evidence order only decides what makes the candidate cap;
+	// relevance is entirely the reranker's call.
+	out.sort((a, b) => b.evidence - a.evidence || b.last_seen_at.localeCompare(a.last_seen_at));
+	return { rows: out.slice(0, 120), scores: new Map(), ftsHitCount: 0 };
+}
+
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
-// Topic context: rolling summary + recent turns, so a bare follow-up query
+// Topic context: rolling summary + the user's turns of this topic, so a bare follow-up query
 // ("which parts can't be eaten?") is read against the topic, not in a vacuum.
 // ---------------------------------------------------------------------------
 
 const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n)}…` : s);
 
-/** The current query plus the topic's gist and recent turns, for T2/T3 eyes only (FTS still uses the raw query). */
+/** The current query plus the topic's gist and the user's OWN turns, full text
+ *  (user turns are short — 20 of them is still small). Anchors bare follow-ups
+ *  against the topic: understanding judges the subject, never the bare words. */
 function withTopicContext(query: string, summary: string, recent: string[]): string {
 	if (!summary && recent.length === 0) return query;
 	const parts: string[] = [query, "", "【本话题上下文】"];
 	if (summary) parts.push(`话题概要：${summary}`);
-	if (recent.length > 0) parts.push(`最近几轮：${recent.map((q) => clip(q.replace(/\s+/g, " "), 120)).join(" ｜ ")}`);
+	if (recent.length > 0)
+		parts.push(`本话题用户逐轮原文：\n${recent.map((q, i) => `${i + 1}. ${clip(q.replace(/\s+/g, " "), 2000)}`).join("\n")}`);
 	return parts.join("\n");
 }
 
@@ -227,7 +280,6 @@ async function refreshSummaryFallback(
 interface Understanding {
 	domains?: string[];
 	kinds?: string[];
-	keywords?: string[];
 	time_from?: string;
 	demand_domain?: string;
 }
@@ -335,7 +387,7 @@ export async function recall(
 	const ledger = opts?.auto && opts.conversation ? getInjectedItems(db, opts.conversation) : null;
 	const turn = ledger && opts?.conversation ? getOrCreateTopic(db, opts.conversation, query) : null;
 	const topicSummary = turn ? getTopicSummary(db, turn.topicId) : "";
-	const recent = turn ? getRecentQueries(db, turn.topicId, 5) : [];
+	const recent = turn ? getRecentQueries(db, turn.topicId, 40) : [];
 	const contextQuery = withTopicContext(query, topicSummary, recent);
 	const logNew = (memories: MemoryRow[], profiles: ProfileRow[]) => {
 		if (!ledger || !opts?.conversation || !turn) return;
@@ -367,32 +419,18 @@ export async function recall(
 		return { memories, profiles: [], deduped: suppressed, topicId: turn?.topicId, replyId: turn?.replyId };
 	}
 
-	// deep: T1 → (sparse? T2) → T3 → (insufficient? T4)
-	let pool = gatherCandidates(db, query, owner, effectiveScope, cwd);
-	let usedT2 = false;
-	let understanding: Understanding = {};
-	if (pool.ftsHitCount < 3) {
-		understanding = await understand(db, contextQuery, owner);
-		usedT2 = true;
-		const extraQuery = (understanding.keywords ?? []).join(" ");
-		if (extraQuery || (understanding.domains ?? []).length > 0) {
-			const expanded = gatherCandidates(db, query, owner, effectiveScope, cwd, {
-				extraQuery,
-				domains: understanding.domains,
-				timeFrom: understanding.time_from,
-			});
-			// merge pools, keep best score
-			const scores = new Map(pool.scores);
-			const byId = new Map(pool.rows.map((m) => [m.id, m]));
-			for (const m of expanded.rows) {
-				const s = expanded.scores.get(m.id) ?? 0;
-				if ((scores.get(m.id) ?? 0) < s) scores.set(m.id, s);
-				if (!byId.has(m.id)) byId.set(m.id, m);
-			}
-			const merged = [...byId.values()].sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0));
-			pool = { rows: merged, scores, ftsHitCount: Math.max(pool.ftsHitCount, expanded.ftsHitCount) };
-		}
-	}
+	// deep: T2 (always — string retrieval no longer gates query understanding;
+	// its worst failure, a good memory never entering the pool, is fatal)
+	// → channel candidates (domains ∪ recent ∪ pinned, zero FTS in the normal
+	//   path) → dedup → T3 → T4. FTS survives only in mode=fast/excavate
+	//   (explicit keyword-scan tool calls) and as degraded fallback when the
+	//   LLM is down (变笨但不断线).
+	const understanding = await understand(db, contextQuery, owner);
+	const usedT2 = true;
+	let pool = gatherChannels(db, owner, effectiveScope, cwd, {
+		domains: understanding.domains,
+		timeFrom: understanding.time_from,
+	});
 
 	// Dedup pre-filter + LLM short-circuit: if every candidate was already
 	// injected into this conversation, the LLM could only pick repeats —
@@ -444,9 +482,10 @@ export async function recall(
 	try {
 		({ ids, profileIds, gist } = await rerank(db, contextQuery, candidates, limit, owner, alreadyBlock, profileMax));
 	} catch (err) {
-		// Graceful degradation: LLM down/quota out → FTS-ordered top-k, no profiles.
+		// Graceful degradation: LLM down/quota out → pool order (recency/evidence),
+		// no profiles. 变笨但不断线.
 		degraded = true;
-		console.error(`[ruyi] rerank failed, degraded to FTS ordering: ${err instanceof Error ? err.message : err}`);
+		console.error(`[ruyi] rerank failed, degraded to pool ordering: ${err instanceof Error ? err.message : err}`);
 		ids = candidates.slice(0, limit).map((m) => m.id);
 		profileIds = [];
 		gist = null;
