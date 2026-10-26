@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.1.13] - 2026-10-26
+
+- 安装体验：recall 层代码级默认关思考（单 LLM 用户零配置获益，供应商不认参数走 400 降级自动摘除）；doctor 新增分层建议（recall 与 dream 同模型且延迟>3s 时打印实测推荐配置片段，只建议不改配置；否决自动探测供应商模型列表：端点不通用/快慢靠猜/猜错静默劣化）；修复 config.example.json 陷阱：steps 具体配置块会经 defaults 合并变成每个用户的实际配置
 ## [1.1.11] - 2026-10-26
 
 - 模型分层配置落地：dream 层（夜间提纯/merge）kimi-for-coding→k3-256k 且不再关思考（此前 base thinking=off 一直在裸奔；实测 k3-256k 默认即带 thinking 块）；recall 层（understand/rerank/topic-summary）切 qwen3.7-flash 关思考——openai 协议分支补 enable_thinking:false 映射（400 时按既有 thinking 降级规则摘除）；生产实测召回延迟 p50 4.3s→2.8s；config.example.json 补 steps.recall 分层示例
