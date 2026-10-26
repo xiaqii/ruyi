@@ -51,7 +51,7 @@ const tmp = mkdtempSync(join(tmpdir(), "ruyi-test-"));
 console.log("1. fresh schema");
 const fresh = getDb(join(tmp, "fresh.db"));
 const version = (fresh.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
-ok(version === 9, "user_version = 9 on fresh DB", `got ${version}`);
+ok(version === 10, "user_version = 10 on fresh DB", `got ${version}`);
 const tables = (fresh.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map((t) => t.name);
 for (const t of ["memories", "memories_fts", "profiles", "token_log", "recall_log", "slot_demands", "distill_state", "memory_log", "session_registry", "injection_log", "tombstones"])
 	ok(tables.includes(t), `table ${t} exists`);
@@ -85,7 +85,7 @@ INSERT INTO memories (kind, summary, content, created_at, updated_at, last_seen_
 legacy.close();
 const migrated = getDb(legacyPath);
 const mv = (migrated.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
-ok(mv === 9, "legacy DB migrated to latest", `got ${mv}`);
+ok(mv === 10, "legacy DB migrated to latest", `got ${mv}`);
 const mcols = (migrated.prepare("PRAGMA table_info(memories)").all() as { name: string }[]).map((c) => c.name);
 ok(mcols.includes("keywords") && mcols.includes("absorbed_by"), "memories gained keywords + absorbed_by");
 const pcols = (migrated.prepare("PRAGMA table_info(profiles)").all() as { name: string }[]).map((c) => c.name);
