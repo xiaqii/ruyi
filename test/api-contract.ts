@@ -267,14 +267,6 @@ if (tmpId === -1) throw new Error("fixture insert blocked by tombstone — conte
 	ok(d3.status === 200 && d3.json.memories.some((m) => m.id === dedupId), "explicit recall (no auto) ignores the ledger");
 	const d4 = await call("POST", "/recall", { query: dq, k: 5, mode: "fast", auto: true });
 	ok(d4.status === 400, "auto recall without conversation -> 400");
-	// compaction hole: after the client compacts, /injection-log/clear resets the
-	// dedup ledger so already-injected memories become re-injectable (issue #2)
-	const c0 = await call("POST", "/injection-log/clear", {});
-	ok(c0.status === 400, "/injection-log/clear without conversation -> 400");
-	const c1 = await call("POST", "/injection-log/clear", { conversation: conv });
-	ok(c1.status === 200 && (c1.json.cleared as number) >= 1, "/injection-log/clear removes the ledger rows");
-	const d5 = await call("POST", "/recall", { query: dq, k: 5, mode: "fast", conversation: conv, auto: true });
-	ok(d5.status === 200 && d5.json.memories.some((m) => m.id === dedupId), "after clear: the memory is re-injected");
 	ok(
 		d1.json.topicId === d2.json.topicId && d2.json.replyId === (d1.json.replyId as number) + 1,
 		"server numbering: topic stable, reply_id increments",
@@ -288,6 +280,14 @@ if (tmpId === -1) throw new Error("fixture insert blocked by tombstone — conte
 		"reply ledger: turn 1 injected it, turn 2 did not",
 		JSON.stringify(replyRows),
 	);
+	// compaction hole: after the client compacts, /injection-log/clear resets the
+	// dedup ledger so already-injected memories become re-injectable (issue #2)
+	const c0 = await call("POST", "/injection-log/clear", {});
+	ok(c0.status === 400, "/injection-log/clear without conversation -> 400");
+	const c1 = await call("POST", "/injection-log/clear", { conversation: conv });
+	ok(c1.status === 200 && (c1.json.cleared as number) >= 1, "/injection-log/clear removes the ledger rows");
+	const d5 = await call("POST", "/recall", { query: dq, k: 5, mode: "fast", conversation: conv, auto: true });
+	ok(d5.status === 200 && d5.json.memories.some((m) => m.id === dedupId), "after clear: the memory is re-injected");
 	db.prepare(`DELETE FROM replies WHERE topic_id = ?`).run(topicRow!.topic_id);
 	db.prepare(`DELETE FROM topics WHERE conversation = ?`).run(conv);
 	db.prepare(`DELETE FROM injection_log WHERE conversation = ?`).run(conv);
