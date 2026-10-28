@@ -34,7 +34,7 @@ const LOCK_STALE_MS = 2 * 3600_000;
  * The SQLite file is the whole store — copy it anywhere and it just works —
  * but a careless moment should never cost a month of distillation.
  */
-function backupDb(dbPath: string, keep: number): string | null {
+export function backupDb(dbPath: string, keep: number): string | null {
 	if (!keep) return null;
 	try {
 		const dir = resolve(STATE_ROOT, "data", "backups");

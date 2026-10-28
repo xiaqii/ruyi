@@ -195,6 +195,19 @@ async function main(): Promise<void> {
 			break;
 		}
 
+		case "audit-lessons": {
+			const { runLessonAudit } = await import("./audit.ts");
+			const limit = typeof flags.limit === "string" ? Number(flags.limit) : undefined;
+			const report = await runLessonAudit({ apply: flags.apply === true, limit });
+			console.log(`scanned ${report.scanned} active lessons → ${report.items.length} flagged`);
+			for (const it of report.items) {
+				console.log(`\n#${it.id} [${it.verdict}] ${it.reason}\n  旧: ${it.summary}`);
+				if (it.newSummary) console.log(`  新: ${it.newSummary}`);
+			}
+			if (!report.applied && report.items.length > 0) console.log(`\n(dry-run —— 确认无误后加 --apply 落笔，落笔前自动备份，原文入 memory_log 可回滚)`);
+			break;
+		}
+
 		case "regen-gists": {
 			const days = typeof flags.days === "string" ? Number(flags.days) : 7;
 			const max = typeof flags.limit === "string" ? Number(flags.limit) : 150;
