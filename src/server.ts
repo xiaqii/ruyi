@@ -3,6 +3,7 @@ import { gunzipSync } from "node:zlib";
 import { loadConfig } from "./config.ts";
 import {
 	archiveMemory,
+	clearInjections,
 	getDb,
 	getMemory,
 	getProfile,
@@ -134,6 +135,18 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 				const at = setReplyAnswer(db, conversation, answer);
 				if (at) void generateReplyGist(db, at.topicId, at.replyId).catch(() => {});
 				return send(res, at ? 201 : 200, { attached: !!at });
+			}
+
+			// Client-side compaction notice (pi session_compact hook): the injected
+			// memory cards left the model's context, so clear this conversation's
+			// injection_log to make them re-injectable on the next turn. Only the
+			// dedup ledger is reset — topics/replies history is kept.
+			if (req.method === "POST" && path === "/injection-log/clear") {
+				const body = await readBody(req);
+				const conversation = typeof body.conversation === "string" ? body.conversation.slice(0, 200) : "";
+				if (!conversation) return send(res, 400, { error: "conversation is required" });
+				const cleared = clearInjections(db, conversation);
+				return send(res, 200, { cleared });
 			}
 
 			if (req.method === "GET" && path === "/memories") {

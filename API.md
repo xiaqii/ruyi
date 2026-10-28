@@ -143,6 +143,19 @@ agent 每轮回答完后上报（fire-and-forget），服务端把回答附到�
 夜间做梦管线每周随画像重炼用 dream 层（思考型模型）从原文重写活跃话题的 gist，修复白天快模型的漂移
 （gist 是可再生视图，原文是唯一事实源）。手动触发：`ruyi regen-gists [--days 7] [--limit 150]`。
 
+### POST /injection-log/clear —— 客户端压缩通知（重置注入去重台账）
+
+agent 客户端发生上下文压缩（如 pi 的 session_compact）时调用：已注入的记忆卡片随压缩离开模型
+上下文，但 injection_log 仍记着“已注入”，不清理的话这些记忆永远不会被重发（长会话静默丢记忆）。
+本端点只清空该会话的注入去重台账，使记忆在下一轮可重新注入；topics/replies 对话历史保留不动。
+
+```json
+{ "conversation": "pi:<sessionId>" }
+```
+
+响应 `200 {"cleared": <删除的行数>}`；缺 conversation 返回 400。pi 扩展在 session_compact 事件里
+fire-and-forget 调用。
+
 ### POST /memories —— 显式写入（"记住这个"）
 
 ```json

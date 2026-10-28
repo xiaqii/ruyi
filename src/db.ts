@@ -291,6 +291,15 @@ export function logInjections(d: DatabaseSync, conversation: string, items: stri
 	for (const item of items) stmt.run(conversation, item, t);
 }
 
+/**
+ * Forget what was injected into a conversation (client context compaction:
+ * injected cards left the model context, so they must become re-injectable).
+ * Only the injection ledger is cleared — topics/replies history is kept.
+ */
+export function clearInjections(d: DatabaseSync, conversation: string): number {
+	return Number(d.prepare(`DELETE FROM injection_log WHERE conversation = ?`).run(conversation).changes);
+}
+
 /** Content-addressed registry of known session logs (dedup across sync channels). */
 function createSessionRegistry(d: DatabaseSync): void {
 	d.exec(`

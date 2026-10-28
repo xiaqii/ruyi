@@ -217,6 +217,19 @@ export default function (pi: ExtensionAPI) {
 		});
 	});
 
+	// Compaction hole fix: when pi compacts the session, injected memory cards
+	// leave the model context but the server's injection_log still counts them
+	// as injected — without this reset they would silently never be re-sent.
+	// Fire-and-forget: topics/replies history is kept server-side, only the
+	// dedup ledger for THIS conversation is cleared.
+	pi.on("session_compact", async (_event, ctx) => {
+		void api("inject", "/injection-log/clear", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ conversation: `pi:${ctx.sessionManager.getSessionId()}` }),
+		});
+	});
+
 	// After each run: report the assistant's answer so the server can attach it
 	// to this turn's reply row and distill a 1-2 sentence gist (recall tier,
 	// async). Gists anchor future follow-ups ("那它的价格") against drift.
