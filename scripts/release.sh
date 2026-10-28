@@ -48,12 +48,12 @@ NEW="$(node -e "const p='$OLD'.split('.').map(Number); const l='$LEVEL';
 node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json'));p.version='$NEW';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
 say "version $OLD → $NEW"
 
-# 5. CHANGELOG
+# 5. CHANGELOG (values via env: interpolating $NOTE into JS source breaks on apostrophes)
 DATE="$(date +%Y-%m-%d)"
-node -e "
+NEW="$NEW" DATE="$DATE" NOTE="$NOTE" node -e "
 const fs=require('fs');
 const cl=fs.existsSync('CHANGELOG.md')?fs.readFileSync('CHANGELOG.md','utf8'):'# CHANGELOG\n';
-const entry='## [$NEW] - $DATE\n\n- $NOTE\n';
+const entry='## ['+process.env.NEW+'] - '+process.env.DATE+'\n\n- '+process.env.NOTE+'\n';
 const idx=cl.indexOf('\n## ');
 fs.writeFileSync('CHANGELOG.md', idx===-1 ? cl.trimEnd()+'\n\n'+entry : cl.slice(0,idx+1)+entry+cl.slice(idx+1));
 "
