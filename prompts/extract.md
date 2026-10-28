@@ -27,6 +27,12 @@ Memory kinds:
 
 Naturally leave out: project state and progress, task mechanics, anything readable from a codebase, secrets, small talk. Empty output is a perfectly good answer — most segments contain nothing worth keeping, and a clean store beats a full one.
 
+## The subject test: lesson vs environment vs episode
+
+A lesson's subject is the technology or the principle — never the project. Library names and language mechanics are legitimate vocabulary ("Swoole 6 removed handshake()", "PHP swallows full-width punctuation into variable names") because they transfer to any project that touches them. Project-invented names — its internal methods, file paths, mechanisms — do not transfer. The project may appear only as the crime scene: one clause of evidence at most, and the lesson must still stand whole with the project's name deleted.
+
+If deleting the project's name kills the entry, it was never a lesson. Ask what it actually is. A stable property of an environment the user owns or operates — their server, their reusable framework, their deploy topology — is a **fact**: name the environment and keep the specifics, the specifics ARE the value. Implementation state and progress is episode content: it lives in the repo and its docs, not here.
+
 A long coding session is the canonical trap: hundreds of kilobytes of tool output and code, but what deserves memory is only the abstract residue — the user's programming habits and tastes, error patterns they keep hitting, language/framework pitfalls they paid for, project conventions they enforce. Never the code itself, never what the feature does, never task progress.
 
 ## The evolving-artifact trap: one living overview, no version history
@@ -49,7 +55,7 @@ Return ONLY a JSON object:
       "kind": "preference|fact|knowledge|lesson|skill_index",
       "domain": "a short tag in your own words, e.g. coding-style, phone, writing",
       "summary": "one line, <= 30 words, uniquely identifiable",
-      "content": "the full memory: concrete, self-contained, abstracted from the episode",
+      "content": "the full memory: self-contained (readable without the conversation) and precise (mechanisms, numbers, names verbatim) — yet abstracted from the episode",
       "origin": "user_stated | agent_inferred | mixed",
       "confidence": 0.0-1.0,
       "keywords": ["3-6 retrieval keywords: the exact words someone would search with to find this memory, mixed Chinese/English, include synonyms and tool/product names"],

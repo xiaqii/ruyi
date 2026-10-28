@@ -11,7 +11,7 @@ Memory kinds:
 - **preference** — tastes, style, working rules held across contexts (the user's own words are the only authority)
 - **fact** — stable things about the person or environment that live in no repository; when the user has several machines, name which one the fact belongs to
 - **knowledge** — user-ENDORSED findings and conclusions: research outcomes, validated frameworks, settled answers worth reusing without re-researching. Assistant output only counts when the user accepted/built on it.
-- **lesson** — generalizable experience, stated abstractly; what the user pushed back on is often the best lesson
+- **lesson** — generalizable experience, stated abstractly; what the user pushed back on is often the best lesson. Its subject is the technology or the principle, never the project: library names transfer, project-invented names (methods, paths, mechanisms) do not. If the entry dies when the project's name is deleted, it is an environment fact (name the environment, keep specifics) or episode content (leave it out).
 - **skill_index** — a pointer to reusable know-how, never the know-how itself
 
 Naturally leave out: project state, task mechanics, codebase-derivable facts, secrets, small talk. Before including each memory, silently verify: is it grounded in an exact quote? Is it abstracted from the episode? Is it durable? Is it safe? Empty output is a perfectly good answer.
