@@ -5,7 +5,7 @@
 # Gate order: typecheck → smoke (zero-LLM E2E) → LLM smoke (cheap) →
 # version bump + CHANGELOG → commit → tag → push. Any failure aborts.
 # Privacy screening is NOT here — it lives in the machine-wide pre-commit
-# hook (privacy-gate), which gates every
+# hook (privacy gate), which gates every
 # commit on this box with string scans + LLM review (fail-closed).
 set -euo pipefail
 cd "$(dirname "$0")/.."
