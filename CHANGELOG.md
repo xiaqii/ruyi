@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.3.0] - 2026-10-28
+
+- 旧数据标准升级通道（用户裁决落地）：新 CLI audit-lessons——主语测试审计存量 lesson，k3 分批判决 ok/重写抽象/转环境事实fact/剧集归档，重写逐条 dream 层执行（数字逐字/项目只作案发现场），dry-run 先出报告 --apply 才落笔，落笔前自动备份+原文入 memory_log 可回滚；新 prompt audit-lessons/audit-rewrite；backupDb 从 distill 导出复用。首战：36 条活跃 lesson 审出 9 条——#71/#758/#897/#1049/#1144 转 fact（用户自有系统/服务器的环境属性），#190/#1025/#1117/#1135 抽象重写，#1114 剧集内容归档（已迁 GitHub issue #2）。已知局限：apply 会重新判决而非重放 dry-run 报告（LLM 非确定），计划文件重放留待后续
 ## [1.2.0] - 2026-10-26
 
 - 分层话题上下文（用户定案的 gist 架构）：replies 表加 answer(原文全量)+gist(可再生视图) 字段（schema v10）；扩展 agent_end 上报 AI 回答（fire-and-forget）→ 服务端异步 flash 产 1-2 句逐轮纪要（新 prompt reply-gist：事实只出自本轮原文/禁裸代词/数字逐字/举例非主题，参照块仅用于还原指代）；组装器重写为三层——topic_summary(长效)+最后3轮用户原文(短效,单轮≤4K)+逐轮gist由新到旧填满(中效)，总预算32K；防漂移体系：单层压缩铁律(gist只从原文生成绝不链式)、代码级 grounding 检查(gist与原文须共享实词，实证抓获flash对退化输入输出垃圾)、夜间dream层(k3-256k思考)周级从原文重写活跃话题gist修复漂移(搭synthesize周闸门，新CLI regen-gists)；llm.ts openai分支补json:false选项(强制response_format会让flash把散文包成工具调用信封——实证抓获)。历史会话回放实测(数字人12轮)：gist主体精确/数字逐字/指代还原全部正确，12轮组装仅1060字符
