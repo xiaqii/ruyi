@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.3.1] - 2026-10-28
+
+- 修复压缩黑洞：pi session_compact 后清空该会话 injection_log，已注入记忆可重新注入（issue #2）
+
 ## [1.3.0] - 2026-10-28
 
 - 旧数据标准升级通道（用户裁决落地）：新 CLI audit-lessons——主语测试审计存量 lesson，k3 分批判决 ok/重写抽象/转环境事实fact/剧集归档，重写逐条 dream 层执行（数字逐字/项目只作案发现场），dry-run 先出报告 --apply 才落笔，落笔前自动备份+原文入 memory_log 可回滚；新 prompt audit-lessons/audit-rewrite；backupDb 从 distill 导出复用。首战：36 条活跃 lesson 审出 9 条——#71/#758/#897/#1049/#1144 转 fact（用户自有系统/服务器的环境属性），#190/#1025/#1117/#1135 抽象重写，#1114 剧集内容归档（已迁 GitHub issue #2）。已知局限：apply 会重新判决而非重放 dry-run 报告（LLM 非确定），计划文件重放留待后续
