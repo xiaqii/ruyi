@@ -136,7 +136,7 @@ export async function runSynthesize(owner: string): Promise<SynthesizeReport> {
 			]),
 		];
 		const domMaturity = domMemberIds.length >= MATURE_MEMBERS ? "mature" : "seeding";
-		const domRow = upsertProfile(db, owner, dom.theme, dom.title, (dom.gist ?? "").trim() || dom.title, domMemberIds, domMaturity, null);
+		const domRow = upsertProfile(db, owner, dom.theme, dom.title, (dom.gist ?? "").trim() || dom.title, domMemberIds, domMaturity, null, (dom.gist ?? "").trim() || null);
 		touched.add(dom.theme);
 		for (const id of domMemberIds) covered.add(id);
 		report.updated.push({ theme: dom.theme, title: dom.title, version: domRow.version, members: domMemberIds.length, maturity: domMaturity, absorbed: 0 });
@@ -160,9 +160,9 @@ export async function runSynthesize(owner: string): Promise<SynthesizeReport> {
 						`[#${m.id}] (${m.kind}, evidence ${m.evidence}, confidence ${m.confidence}, last seen ${m.last_seen_at.slice(0, 10)})\n${m.summary}\n${m.content}`,
 				)
 				.join("\n\n");
-			const chapter = await completeJson<{ chapter: string }>({
+			const chapter = await completeJson<{ abstract?: string; chapter: string }>({
 				system: loadPrompt("synthesize-theme"),
-				user: `THEME: ${dom.title} / ${sub.title}\n\nMATURITY: ${maturity} (${memberRows.length} member memories)\n\nMEMBER MEMORIES:\n${material}\n\nReturn ONLY JSON: {"chapter": "..."} (markdown inside the string).`,
+				user: `THEME: ${dom.title} / ${sub.title}\n\nMATURITY: ${maturity} (${memberRows.length} member memories)\n\nMEMBER MEMORIES:\n${material}\n\nReturn ONLY JSON: {"abstract": "one line <=60 chars", "chapter": "..."} (markdown inside the strings).`,
 				runId: `synthesize-${Date.now()}`,
 				step: `synthesize-theme:${subTheme}`,
 				maxTokens: 8192,
@@ -170,7 +170,7 @@ export async function runSynthesize(owner: string): Promise<SynthesizeReport> {
 			const content = chapter.chapter?.trim();
 			if (!content) continue;
 
-			const row = upsertProfile(db, owner, subTheme, sub.title, content, memberRows.map((m) => m.id), maturity, domRow.id);
+			const row = upsertProfile(db, owner, subTheme, sub.title, content, memberRows.map((m) => m.id), maturity, domRow.id, chapter.abstract?.trim() || null);
 			touched.add(subTheme);
 			for (const m of memberRows) covered.add(m.id);
 

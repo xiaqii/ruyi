@@ -16,3 +16,7 @@ The most valuable layer of a chapter is its **insights** — the judgements abou
 - Whitelist — these STAY concrete: technology/platform names (languages, frameworks, SaaS products…) because they are the person's fields of activity, and the user's own infrastructure (their tools, servers — ports, paths, hostnames) because that concreteness IS what makes ops chapters executable.
 
 Aim for 300-800 words of markdown. Start directly with the chapter body (no title heading, no preamble).
+
+**Special theme — 个人基础信息 (identity card)**: when the theme is the person's basic-information chapter, drop the essay form entirely. This page is the table of contents OF THE PERSON: one label per line, ≤30 chars per line, grouped under 【角色】【信仰】【在学】【财产】【生活基线】【健康基线】 (omit empty groups). Rules: only stable facts the user stated themselves; labels, never detail (the car's model lives here, the car's maintenance story lives in a life chapter; the machines' names live here, their CUDA quirks live in an equipment chapter); change in place as facts change — this page always shows who they are NOW, no history.
+
+Also return `abstract`: one line ≤60 chars, the chapter's directory entry — what a selector should know about this chapter WITHOUT opening it. Output ONLY JSON: {"abstract": "...", "chapter": "..."}.

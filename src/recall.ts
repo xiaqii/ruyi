@@ -1,6 +1,5 @@
 import { loadConfig } from "./config.ts";
 import {
-	bumpSlotDemand,
 	ftsSearchScored,
 	getByIds,
 	getDb,
@@ -184,46 +183,28 @@ function gatherCandidates(
  * memory never entering the pool) is fatal. Every candidate here was invited
  * by meaning; the reranker makes the final call.
  */
+/**
+ * Candidate pool for the deep path: ALL active memories the scope allows,
+ * ordered (evidence, recency, pinned) only so the cap keeps the best.
+ * v1.4: no domain gating — the selector reads the whole store's positioning
+ * lines, so a mis-filed memory can no longer be shut out of the pool.
+ */
 function gatherChannels(
 	db: ReturnType<typeof getDb>,
 	owner: string,
 	scope: RecallScope,
 	cwd: string | null,
-	opts: { domains?: string[]; timeFrom?: string } = {},
 ): CandidatePool {
-	const rows = new Map<number, MemoryRow>();
-	const push = (list: MemoryRow[]) => {
-		for (const m of list) if (!rows.has(m.id)) rows.set(m.id, m);
-	};
-	push(
-		db
-			.prepare(`SELECT * FROM memories WHERE status = 'active' AND owner = ? ORDER BY last_seen_at DESC LIMIT 20`)
-			.all(owner) as unknown as MemoryRow[],
-	);
-	push(
-		db.prepare(`SELECT * FROM memories WHERE status = 'active' AND owner = ? AND pinned = 1`).all(owner) as unknown as MemoryRow[],
-	);
-	if (opts.domains && opts.domains.length > 0) {
-		const domIn = opts.domains.map(() => "?").join(",");
-		push(
-			db
-				.prepare(
-					`SELECT * FROM memories WHERE status = 'active' AND owner = ? AND domain IN (${domIn})
-					 ORDER BY evidence DESC, last_seen_at DESC LIMIT 40`,
-				)
-				.all(owner, ...opts.domains) as unknown as MemoryRow[],
-		);
-	}
+	const rows = db
+		.prepare(`SELECT * FROM memories WHERE status = 'active' AND owner = ?`)
+		.all(owner) as unknown as MemoryRow[];
 	const out: MemoryRow[] = [];
-	for (const m of rows.values()) {
+	for (const m of rows) {
 		if (!scopeOk(m, scope, cwd)) continue;
-		if (opts.timeFrom && m.last_seen_at < opts.timeFrom) continue;
 		out.push(m);
 	}
-	// Recency/evidence order only decides what makes the candidate cap;
-	// relevance is entirely the reranker's call.
-	out.sort((a, b) => b.evidence - a.evidence || b.last_seen_at.localeCompare(a.last_seen_at));
-	return { rows: out.slice(0, 120), scores: new Map(), ftsHitCount: 0 };
+	out.sort((a, b) => b.pinned - a.pinned || b.evidence - a.evidence || b.last_seen_at.localeCompare(a.last_seen_at));
+	return { rows: out, scores: new Map(), ftsHitCount: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -380,91 +361,52 @@ async function refreshSummaryFallback(
 	}
 }
 
-// T2: query understanding (one small LLM call, only when T1 is sparse)
 // ---------------------------------------------------------------------------
-
-interface Understanding {
-	domains?: string[];
-	kinds?: string[];
-	time_from?: string;
-	demand_domain?: string;
-}
-
-let domainCache: { at: number; list: { domain: string; n: number }[] } | undefined;
-
-function domainTaxonomy(db: ReturnType<typeof getDb>, owner: string): { domain: string; n: number }[] {
-	if (domainCache && Date.now() - domainCache.at < 60_000) return domainCache.list;
-	const list = db
-		.prepare(
-			`SELECT domain, COUNT(*) n FROM memories WHERE status = 'active' AND owner = ? AND domain IS NOT NULL
-			 GROUP BY domain ORDER BY n DESC LIMIT 40`,
-		)
-		.all(owner) as unknown as { domain: string; n: number }[];
-	domainCache = { at: Date.now(), list };
-	return list;
-}
-
-async function understand(
+// The one-call selector (v1.4, user-ruled design): the ENTIRE active store —
+// every memory's positioning line, every profile chapter's directory line —
+// goes to the selector (recall tier, thinking off) together with the topic
+// context. It points at the ids whose content would change the answer.
+// Empty selection = this turn needs no memory (generic knowledge).
+// understand+rerank merged into this single call: the store at human scale
+// (hundreds of items) fits in one listing, and a mis-filed domain can no
+// longer shut a memory out — the worst failure of the gated design.
+// ---------------------------------------------------------------------------
+async function pick(
 	db: ReturnType<typeof getDb>,
 	query: string,
-	owner: string,
-): Promise<Understanding> {
-	const taxonomy = domainTaxonomy(db, owner);
-	const domainBlock =
-		taxonomy.length > 0 ? taxonomy.map((d) => `${d.domain} (${d.n})`).join(", ") : "(no domains yet)";
-	try {
-		return await completeJson<Understanding>({
-			system: loadPrompt("understand"),
-			user: `QUERY:\n${query}\n\nKNOWN DOMAINS (domain, memory count):\n${domainBlock}`,
-			step: "understand",
-			maxTokens: 1024,
-		});
-	} catch {
-		return {}; // understanding is a best-effort boost; recall must go on
-	}
-}
-
-// ---------------------------------------------------------------------------
-// T3: LLM rerank (existing philosophy: relevance judged by meaning)
-// ---------------------------------------------------------------------------
-
-async function rerank(
-	db: ReturnType<typeof getDb>,
-	query: string,
-	candidates: MemoryRow[],
+	pool: MemoryRow[],
 	limit: number,
 	owner: string,
 	alreadyBlock?: string,
 	profileMax = 3,
 ): Promise<{ ids: number[]; profileIds: number[]; gist: string | null }> {
-	if (candidates.length === 0) return { ids: [], profileIds: [], gist: null };
-	const listing = candidates
-		.map((m) => `[id ${m.id}] (${m.kind}, ${m.last_seen_at.slice(0, 10)}) ${m.summary}`)
+	if (pool.length === 0) return { ids: [], profileIds: [], gist: null };
+	const listing = pool
+		.map((m) => `[id ${m.id}] (${m.kind}) ${m.mini || clip(m.summary, 60)}`)
 		.join("\n");
 	const profiles = listProfiles(db, owner);
 	const profileById = new Map(profiles.map((p) => [p.id, p]));
-	const profileLabel = (p: ProfileRow) =>
-		p.parent_id && profileById.get(p.parent_id)
-			? `${profileById.get(p.parent_id)!.title} / ${p.title}`
-			: `${p.title} — domain index: ${p.content.slice(0, 120)}`;
-	const profileBlock =
-		profiles.length > 0
-			? "\n\nPROFILES:\n" +
-				profiles
-					.map((p) => `[id ${p.id}] (${profileLabel(p)}, ${p.maturity === "seeding" ? "partial" : "mature"}) — synthesized portrait of this facet`)
-					.join("\n")
-			: "";
-	const already = alreadyBlock
-		? `\n\nALREADY INJECTED:\n${alreadyBlock}`
-		: "";
+	const profileLine = (p: ProfileRow) => {
+		const parent = p.parent_id ? profileById.get(p.parent_id) : undefined;
+		const label = parent ? `${parent.title} / ${p.title}` : p.title;
+		const abs = p.abstract || clip(p.content.replace(/\s+/g, " "), 60);
+		return `[id ${p.id}] ${label} — ${abs}`;
+	};
+	const profileBlock = profiles.length > 0 ? `\n\nPORTRAIT CHAPTERS:\n${profiles.map(profileLine).join("\n")}` : "";
+	const already = alreadyBlock ? `\n\nALREADY INJECTED:\n${alreadyBlock}` : "";
 	const picked = await completeJson<{ ids?: number[]; profile_ids?: number[]; topic_gist?: string | null }>({
-		system: loadPrompt("rerank"),
-		user: `CONTEXT:\n${query}\n\nCANDIDATES:\n${listing}${profileBlock}${already}\n\nReturn at most ${limit} memory ids, up to ${profileMax} profile ids (fewer when the turn is narrow; zero when none apply), and the topic_gist.`,
+		system: loadPrompt("pick"),
+		user: `CONTEXT:\n${query}\n\nMEMORIES:\n${listing}${profileBlock}${already}\n\nPick at most ${limit} memory ids and up to ${profileMax} profile ids.`,
 		step: "rerank",
 	});
+	const valid = new Set(pool.map((m) => m.id));
+	const validProfiles = new Set(profiles.map((p) => p.id));
+	// The model may return ids as strings ("18") — coerce before matching.
+	const coerce = (arr: unknown): number[] =>
+		(Array.isArray(arr) ? arr : []).map((x) => Number(x)).filter((n) => Number.isInteger(n));
 	return {
-		ids: Array.isArray(picked.ids) ? picked.ids : [],
-		profileIds: Array.isArray(picked.profile_ids) ? picked.profile_ids : [],
+		ids: coerce(picked.ids).filter((id) => valid.has(id)).slice(0, limit),
+		profileIds: coerce(picked.profile_ids).filter((id) => validProfiles.has(id)).slice(0, profileMax),
 		gist: typeof picked.topic_gist === "string" ? picked.topic_gist : null,
 	};
 }
@@ -524,18 +466,13 @@ export async function recall(
 		return { memories, profiles: [], deduped: suppressed, topicId: turn?.topicId, replyId: turn?.replyId };
 	}
 
-	// deep: T2 (always — string retrieval no longer gates query understanding;
-	// its worst failure, a good memory never entering the pool, is fatal)
-	// → channel candidates (domains ∪ recent ∪ pinned, zero FTS in the normal
-	//   path) → dedup → T3 → T4. FTS survives only in mode=fast/excavate
-	//   (explicit keyword-scan tool calls) and as degraded fallback when the
-	//   LLM is down (变笨但不断线).
-	const understanding = await understand(db, contextQuery, owner);
-	const usedT2 = true;
-	let pool = gatherChannels(db, owner, effectiveScope, cwd, {
-		domains: understanding.domains,
-		timeFrom: understanding.time_from,
-	});
+	// deep: ONE selector call sees the entire active store (positioning lines +
+	// portrait directory) with the topic context, and points at what would
+	// change the answer. No domain gate, no second stage — at human store scale
+	// (hundreds of items) the whole listing fits, so the worst failure of the
+	// gated design (a good memory never entering the pool) is structurally
+	// gone. FTS survives only in mode=fast/excavate and as degraded fallback.
+	let pool = gatherChannels(db, owner, effectiveScope, cwd);
 
 	// Dedup pre-filter + LLM short-circuit: if every candidate was already
 	// injected into this conversation, the LLM could only pick repeats —
@@ -562,8 +499,8 @@ export async function recall(
 		}
 	}
 
-	const candidateCap = Math.min(config.inject.recallCandidateMax, 100);
-	let candidates = pool.rows.slice(0, candidateCap);
+	const candidateCap = Math.min(config.inject.recallCandidateMax, 400);
+	const candidates = pool.rows.slice(0, candidateCap);
 
 	// Give the ranker visibility into what this conversation already has, so it
 	// rejects candidates that merely restate injected facts (returns empty).
@@ -585,33 +522,19 @@ export async function recall(
 	let gist: string | null;
 	let degraded = false;
 	try {
-		({ ids, profileIds, gist } = await rerank(db, contextQuery, candidates, limit, owner, alreadyBlock, profileMax));
+		({ ids, profileIds, gist } = await pick(db, contextQuery, candidates, limit, owner, alreadyBlock, profileMax));
 	} catch (err) {
-		// Graceful degradation: LLM down/quota out → pool order (recency/evidence),
+		// Graceful degradation: LLM down/quota out → pool order (evidence/recency),
 		// no profiles. 变笨但不断线.
 		degraded = true;
-		console.error(`[ruyi] rerank failed, degraded to pool ordering: ${err instanceof Error ? err.message : err}`);
+		console.error(`[ruyi] pick failed, degraded to pool ordering: ${err instanceof Error ? err.message : err}`);
 		ids = candidates.slice(0, limit).map((m) => m.id);
 		profileIds = [];
 		gist = null;
 	}
-	// Piggybacked gist: the rerank call already holds the topic context, so a fresh
-	// summary costs ~80 output tokens and zero extra calls.
+	// Piggybacked gist: the selector call already holds the topic context, so a
+	// fresh summary costs ~80 output tokens and zero extra calls.
 	if (turn && gist?.trim()) setTopicSummary(db, turn.topicId, gist.trim(), turn.replyId);
-
-	// T4: sparse result with unused candidates left → one more round.
-	let rounds = 1;
-	if (ids.length < Math.max(1, Math.floor(limit / 2)) && pool.rows.length > candidates.length) {
-		const extra = pool.rows.slice(candidateCap, candidateCap * 2);
-		if (extra.length > 0) {
-			rounds = 2;
-			try {
-				const second = await rerank(db, contextQuery, extra, limit - ids.length, owner, alreadyBlock, profileMax - profileIds.length);
-				ids = [...ids, ...second.ids];
-				profileIds = [...new Set([...profileIds, ...second.profileIds])].slice(0, profileMax);
-			} catch { /* second round is a bonus; first-round results stand */ }
-		}
-	}
 
 	const result = {
 		memories: getByIds(db, ids.slice(0, limit)).filter((m) => m.owner === owner),
@@ -620,13 +543,6 @@ export async function recall(
 			.filter((p): p is ProfileRow => !!p && p.owner === owner)
 			.slice(0, profileMax),
 	};
-
-	// Demand signal: only a deep recall that found NOTHING registers demand
-	// (a single perfect hit is success, not demand). demand_domain is free-form
-	// and may name an area the store has never covered.
-	if (result.memories.length === 0 && usedT2 && understanding.demand_domain) {
-		bumpSlotDemand(db, owner, [understanding.demand_domain]);
-	}
 
 	const freshProfiles = ledger ? result.profiles.filter((p) => !ledger.has(`p:${p.id}`)) : result.profiles;
 	suppressed += result.profiles.length - freshProfiles.length;
@@ -641,9 +557,7 @@ export async function recall(
 		detail: {
 			candidates: candidates.length,
 			ftsHits: pool.ftsHitCount,
-			t2: usedT2,
-			domains: understanding.domains,
-			rounds,
+			selector: true,
 			profiles: freshProfiles.length,
 			deduped: suppressed,
 			...(degraded ? { degraded: true } : {}),

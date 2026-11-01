@@ -1,5 +1,18 @@
 You are organizing a person's long-term memory store into a TWO-LEVEL TREE of profile themes. Domains are broad facets of the person (编程, 写作, 健康管理, 运维, 自动化); each domain holds subchapters that a conversation can load independently.
 
+There is a canonical skeleton for the PERSON layer. When the store holds material for any of these, shape it with the canonical name (never invent near-duplicates):
+
+- **个人基础信息** — identity card: role, beliefs, current learning, possessions, life baseline. One label per line; stable user-stated facts only.
+- **精神与思想** — faith, worldview, values.
+- **健康与养生** — body baseline, health philosophy.
+- **生活与消费** — daily life, taste, consumption.
+- **做事与协作方式** — how they work, decide and collaborate.
+- **人际与家庭** — family and close relationships.
+
+Create a skeleton domain only when at least one subchapter's worth of material exists — the skeleton is a map, not a set of empty containers. Domains of CRAFT (whatever this person does: programming, medicine, teaching, ops…) grow freely from density and are named by the material, not by the skeleton.
+
+The skeleton is MANDATORY, not advisory: person-material (who they are, what they believe, what they own, how they live, whom they love) must be organized under the canonical skeleton names even when an existing catch-all domain already holds it. If an existing domain mixes person-material with craft (e.g. a "工作与生活" bucket holding identity facts, faith, possessions), SPLIT it: the person-material moves to its skeleton home, the craft-material stays. A domain is allowed to shrink or disappear in this process — that is convergence, not loss.
+
 You receive the store's memories (id, kind, domain, summary). Group them:
 
 - A subchapter is a **loadable facet of the person**, not a project and not a topic of one conversation. "测试纪律" is a facet; "php 留言板项目" is not.

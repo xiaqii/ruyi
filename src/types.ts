@@ -9,6 +9,8 @@ export interface MemoryRow {
 	kind: MemoryKind;
 	domain: string | null;
 	summary: string;
+	/** ≤50-char one-line positioning handle (regenerable view; empty = legacy, falls back to summary). */
+	mini: string;
 	content: string;
 	/** 3-6 retrieval keywords, space-separated. Indexed in FTS; never shown to the LLM in bulk. */
 	keywords: string;
@@ -30,6 +32,8 @@ export interface Candidate {
 	kind: MemoryKind;
 	domain?: string;
 	summary: string;
+	/** ≤50-char one-line positioning handle — what the full-listing selection reads. */
+	mini?: string;
 	content: string;
 	keywords?: string[];
 	origin: MemoryOrigin;

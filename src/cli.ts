@@ -227,6 +227,15 @@ async function main(): Promise<void> {
 			break;
 		}
 
+		case "backfill-minis": {
+			const owner = typeof flags.owner === "string" ? flags.owner : "default";
+			const limit = typeof flags.limit === "string" ? Number(flags.limit) : undefined;
+			const { backfillMinis } = await import("./backfill.ts");
+			const report = await backfillMinis(owner, limit);
+			console.log(`updated ${report.updated} minis in ${report.batches} batches`);
+			break;
+		}
+
 		case "sync-index": {
 			// One-time backfill: register content-derived uids of every session log
 			// already on disk (configured sources + synced inboxes), so the sync

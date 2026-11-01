@@ -30,6 +30,7 @@ Return ONLY a JSON object:
       "kind": "preference|fact|knowledge|lesson|skill_index",
       "domain": "a short tag",
       "summary": "one line, <= 30 words",
+      "mini": "one line, <= 50 chars: subject + verdict only; the line a selector reads when scanning the whole store",
       "content": "full memory, self-contained, abstracted from the episode",
       "origin": "user_stated|agent_inferred|mixed",
       "confidence": 0.0-1.0,

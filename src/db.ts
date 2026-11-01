@@ -18,7 +18,7 @@ const dbs = new Map<string, DatabaseSync>();
  * v8 = profiles.parent_id (two-level profile tree: domain index -> subchapters).
  * v9 = tombstones table (forget leaves a content fingerprint; distill never resurrects it).
  */
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 
 function migrate(d: DatabaseSync, from: number): void {
 	if (from < 1) {
@@ -88,6 +88,15 @@ function migrate(d: DatabaseSync, from: number): void {
 		const cols = d.prepare(`SELECT name FROM pragma_table_info('replies')`).all() as unknown as { name: string }[];
 		if (!cols.some((c) => c.name === "answer")) d.exec(`ALTER TABLE replies ADD COLUMN answer TEXT NOT NULL DEFAULT ''`);
 		if (!cols.some((c) => c.name === "gist")) d.exec(`ALTER TABLE replies ADD COLUMN gist TEXT NOT NULL DEFAULT ''`);
+	}
+	if (from < 11) {
+		// v11: one-line positioning handles. memories.mini (≤50 chars) is what the
+		// full-listing selection reads; profiles.abstract (≤60 chars) is the
+		// chapter's directory line. Both are regenerable views, backfilled by CLI.
+		const mCols = d.prepare(`SELECT name FROM pragma_table_info('memories')`).all() as unknown as { name: string }[];
+		if (!mCols.some((c) => c.name === "mini")) d.exec(`ALTER TABLE memories ADD COLUMN mini TEXT NOT NULL DEFAULT ''`);
+		const pCols = d.prepare(`SELECT name FROM pragma_table_info('profiles')`).all() as unknown as { name: string }[];
+		if (!pCols.some((c) => c.name === "abstract")) d.exec(`ALTER TABLE profiles ADD COLUMN abstract TEXT NOT NULL DEFAULT ''`);
 	}
 }
 
@@ -441,6 +450,7 @@ CREATE TABLE IF NOT EXISTS memories (
   kind          TEXT NOT NULL,
   domain        TEXT,
   summary       TEXT NOT NULL,
+  mini          TEXT NOT NULL DEFAULT '',
   content       TEXT NOT NULL,
   keywords      TEXT NOT NULL DEFAULT '',
   origin        TEXT NOT NULL DEFAULT 'agent_inferred',
@@ -494,6 +504,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   owner      TEXT NOT NULL DEFAULT 'default',
   theme      TEXT NOT NULL,
   title      TEXT NOT NULL,
+  abstract   TEXT NOT NULL DEFAULT '',
   content    TEXT NOT NULL,
   memory_ids TEXT NOT NULL DEFAULT '[]',
   maturity   TEXT NOT NULL DEFAULT 'mature',
@@ -542,10 +553,10 @@ export function insertMemory(
 	const t = now();
 	const r = d
 		.prepare(
-			`INSERT INTO memories (owner, cwd, kind, domain, summary, content, keywords, origin, confidence, evidence, source, created_at, updated_at, last_seen_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+			`INSERT INTO memories (owner, cwd, kind, domain, summary, mini, content, keywords, origin, confidence, evidence, source, created_at, updated_at, last_seen_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
 		)
-		.run(scope.owner, scope.cwd, c.kind, c.domain ?? null, c.summary, c.content, (c.keywords ?? []).join(" "), c.origin, c.confidence, c.source ?? null, t, t, t);
+		.run(scope.owner, scope.cwd, c.kind, c.domain ?? null, c.summary, c.mini ?? "", c.content, (c.keywords ?? []).join(" "), c.origin, c.confidence, c.source ?? null, t, t, t);
 	return Number(r.lastInsertRowid);
 }
 
@@ -817,6 +828,8 @@ export interface ProfileRow {
 	owner: string;
 	theme: string;
 	title: string;
+	/** One-line directory entry for the full-listing selection (regenerable view). */
+	abstract: string;
 	content: string;
 	memory_ids: string;
 	maturity: "seeding" | "mature" | string;
@@ -837,16 +850,18 @@ export function upsertProfile(
 	memoryIds: number[],
 	maturity: "seeding" | "mature" = "mature",
 	parentId: number | null = null,
+	abstract: string | null = null,
 ): ProfileRow {
 	const now = new Date().toISOString();
 	d.prepare(
-		`INSERT INTO profiles (owner, theme, title, content, memory_ids, maturity, version, created_at, updated_at, parent_id)
-		 VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+		`INSERT INTO profiles (owner, theme, title, abstract, content, memory_ids, maturity, version, created_at, updated_at, parent_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
 		 ON CONFLICT(owner, theme) DO UPDATE SET
 		   title = excluded.title, content = excluded.content, memory_ids = excluded.memory_ids,
+		   abstract = COALESCE(NULLIF(excluded.abstract, ''), profiles.abstract),
 		   maturity = excluded.maturity, parent_id = excluded.parent_id,
 		   version = version + 1, updated_at = excluded.updated_at`,
-	).run(owner, theme, title, content, JSON.stringify(memoryIds), maturity, now, now, parentId);
+	).run(owner, theme, title, abstract ?? "", content, JSON.stringify(memoryIds), maturity, now, now, parentId);
 	return d.prepare(`SELECT * FROM profiles WHERE owner = ? AND theme = ?`).get(owner, theme) as unknown as ProfileRow;
 }
 

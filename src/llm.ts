@@ -87,7 +87,7 @@ function appendUsageLog(entry: Record<string, unknown>): void {
 }
 
 /** Steps served by the (cheap, fast, thinking-off) "recall" tier; everything else is "dream". */
-const RECALL_STEPS = new Set(["understand", "rerank", "topic-summary", "reply-gist"]);
+const RECALL_STEPS = new Set(["pick", "rerank", "topic-summary", "reply-gist"]);
 
 interface ResolvedLlm {
 	protocol: "anthropic" | "openai";
