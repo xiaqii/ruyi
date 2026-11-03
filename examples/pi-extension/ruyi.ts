@@ -170,12 +170,24 @@ export default function (pi: ExtensionAPI) {
 			// the entire conversation — worse than editing an early turn.
 			if (fast.r && (fast.r.memories.length > 0 || (fast.r.profiles ?? []).length > 0)) {
 				const nProf = (fast.r.profiles ?? []).length;
-				const header = `**加载记忆 ${fast.r.memories.length} 条${nProf ? `、画像 ${nProf} 篇` : ""}**（已进本轮上下文）\n\n`;
+				const nMem = fast.r.memories.length;
+				const payload = formatRecall(fast.r) + ADVISORY;
+				const tokens = Math.round(payload.length / 2); // rough CN/EN mix estimate, display-only
+				// Visible one-liner keeps the chat clean; the full payload rides hidden
+				// (display:false still reaches the model) as the hook's return message.
+				pi.sendMessage(
+					{
+						customType: "ruyi",
+						content: `ruyi · 已加载${nProf ? `画像 ${nProf} 篇 + ` : ""}记忆 ${nMem} 条（约 ${tokens} tokens）`,
+						display: true,
+					},
+					{ triggerTurn: false },
+				);
 				return {
 					message: {
-						customType: "ruyi",
-						content: header + formatRecall(fast.r) + ADVISORY,
-						display: true,
+						customType: "ruyi-payload",
+						content: payload,
+						display: false,
 						details: {
 							profiles: (fast.r.profiles ?? []).map((p) => p.id),
 							memories: fast.r.memories.map((m) => m.id),
@@ -189,25 +201,29 @@ export default function (pi: ExtensionAPI) {
 		recallPromise.then((result) => {
 			if (!result || (result.memories.length === 0 && (result.profiles ?? []).length === 0)) return;
 			try {
-				// Compact card only — the model already has the full text in the system
-				// prompt on fast turns; on slow turns one-liners + ruyi_recall on demand
-				// is the index philosophy anyway. No full-text dump in the display.
-				const card: string[] = [];
-				for (const p of result.profiles ?? []) card.push(`**加载画像**：《${p.title}》v${p.version}（${p.maturity === "seeding" ? "部分经验" : "成熟"}）`);
-				if (result.memories.length > 0) {
-					card.push(`**加载记忆 ${result.memories.length} 条**：`);
-					result.memories.forEach((m, i) => card.push(`${i + 1}. #${m.id} (${m.kind}) ${m.summary}`));
-				}
-				if ((result.deduped ?? 0) > 0) card.push(`_（本对话已加载过的 ${result.deduped} 条不再重复）_`);
+				// Late delivery: hidden full payload (the model gets everything on the
+				// follow-up turn) + a visible one-liner (the chat stays clean).
+				const nMem = result.memories.length;
+				const nProf = (result.profiles ?? []).length;
+				const payload = formatRecall(result) + ADVISORY;
+				const tokens = Math.round(payload.length / 2);
 				pi.sendMessage(
 					{
-						customType: "ruyi",
-						content: card.join("\n") + "\n\n" + ADVISORY,
-						display: true,
+						customType: "ruyi-payload",
+						content: payload,
+						display: false,
 						details: {
 							profiles: (result.profiles ?? []).map((p) => p.id),
 							memories: result.memories.map((m) => m.id),
 						},
+					},
+					{ triggerTurn: false, deliverAs: "followUp" },
+				);
+				pi.sendMessage(
+					{
+						customType: "ruyi",
+						content: `ruyi · 补加载${nProf ? `画像 ${nProf} 篇 + ` : ""}记忆 ${nMem} 条（约 ${tokens} tokens）`,
+						display: true,
 					},
 					{ triggerTurn: false, deliverAs: "followUp" },
 				);
