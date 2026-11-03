@@ -172,13 +172,20 @@ export default function (pi: ExtensionAPI) {
 				const nProf = (fast.r.profiles ?? []).length;
 				const nMem = fast.r.memories.length;
 				const payload = formatRecall(fast.r) + ADVISORY;
-				const tokens = Math.round(payload.length / 2); // rough CN/EN mix estimate, display-only
+				const tokens = Math.round(payload.length / 2); // rough CN/EN mix estimate of the hidden payload, display-only
+				// Visible: headline + a目录行 of id+短名 (no full text — that rides hidden).
+				const tag = (s: string) => (s.length > 12 ? `${s.slice(0, 12)}…` : s);
+				const items = [
+					...(fast.r.profiles ?? []).map((p) => `#${p.id} ${p.title}`),
+					...fast.r.memories.map((m) => `#${m.id} ${tag(m.mini || m.summary)}`),
+				].join(" · ");
+				const note = `ruyi · 已加载${nProf ? `画像 ${nProf} 篇 + ` : ""}记忆 ${nMem} 条（正文约 ${tokens} tokens，已入上下文）\n${items}`;
 				// Visible one-liner keeps the chat clean; the full payload rides hidden
 				// (display:false still reaches the model) as the hook's return message.
 				pi.sendMessage(
 					{
 						customType: "ruyi",
-						content: `ruyi · 已加载${nProf ? `画像 ${nProf} 篇 + ` : ""}记忆 ${nMem} 条（约 ${tokens} tokens）`,
+						content: note,
 						display: true,
 					},
 					{ triggerTurn: false },
@@ -207,6 +214,11 @@ export default function (pi: ExtensionAPI) {
 				const nProf = (result.profiles ?? []).length;
 				const payload = formatRecall(result) + ADVISORY;
 				const tokens = Math.round(payload.length / 2);
+				const tag = (s: string) => (s.length > 12 ? `${s.slice(0, 12)}…` : s);
+				const items = [
+					...(result.profiles ?? []).map((p) => `#${p.id} ${p.title}`),
+					...result.memories.map((m) => `#${m.id} ${tag(m.mini || m.summary)}`),
+				].join(" · ");
 				pi.sendMessage(
 					{
 						customType: "ruyi-payload",
@@ -222,7 +234,7 @@ export default function (pi: ExtensionAPI) {
 				pi.sendMessage(
 					{
 						customType: "ruyi",
-						content: `ruyi · 补加载${nProf ? `画像 ${nProf} 篇 + ` : ""}记忆 ${nMem} 条（约 ${tokens} tokens）`,
+						content: `ruyi · 补加载${nProf ? `画像 ${nProf} 篇 + ` : ""}记忆 ${nMem} 条（正文约 ${tokens} tokens，已入上下文）\n${items}`,
 						display: true,
 					},
 					{ triggerTurn: false, deliverAs: "followUp" },
