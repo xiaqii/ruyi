@@ -22,6 +22,10 @@ export interface CompleteOptions {
 	 *  false for plain-text tasks — forced JSON makes some models wrap prose in
 	 *  tool-call-shaped envelopes. */
 	json?: boolean;
+	/** Sampling temperature. Default: 0.2 for recall-tier steps (selection must
+	 *  be near-deterministic — at default sampling the same query can flip
+	 *  between hit and empty), provider default for the dream tier. */
+	temperature?: number;
 }
 
 /** Extract the first JSON value (object or array) from LLM output, tolerating code fences and prose. */
@@ -145,6 +149,10 @@ function buildBody(llm: ResolvedLlm, opts: CompleteOptions, fixes: Set<string>):
 		if (fixes.has("max_completion_tokens")) body.max_completion_tokens = maxTok;
 		else body.max_tokens = maxTok;
 		if (!fixes.has("response_format") && opts.json !== false) body.response_format = { type: "json_object" };
+		// Recall tier defaults to near-deterministic sampling: selection is a
+		// judgement that should not flip between identical calls.
+		if (!fixes.has("temperature") && (opts.temperature !== undefined || RECALL_STEPS.has(opts.step)))
+			body.temperature = opts.temperature ?? 0.2;
 		// DashScope-style switch for thinking-capable OpenAI-compatible models
 		// (qwen3.x): dropped on 400 via the "thinking" downgrade fix.
 		if (llm.thinking === "off" && !fixes.has("thinking")) body.enable_thinking = false;
@@ -161,6 +169,8 @@ function buildBody(llm: ResolvedLlm, opts: CompleteOptions, fixes: Set<string>):
 		if (llm.thinking === "off") body.thinking = { type: "disabled" };
 		else if (typeof llm.thinking === "number") body.thinking = { type: "enabled", budget_tokens: llm.thinking };
 	}
+	if (!fixes.has("temperature") && (opts.temperature !== undefined || RECALL_STEPS.has(opts.step)))
+		body.temperature = opts.temperature ?? 0.2;
 	return body;
 }
 
