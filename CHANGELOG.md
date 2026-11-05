@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.4.2] - 2026-11-05
+
+- docs: full English rewrite of API.md/AGENT.README.md/design-v2/design-v3 (author credit stays Chinese), staleness sweep (selector replaces understand/rerank descriptions, test counts, examples comments); db: kind whitelist at insertMemory chokepoint (an out-of-enum kind once slipped in via LLM merge and evaded all kind-based consumers)
 ## [1.4.1] - 2026-11-03
 
 - 选题稳定性：recall 层默认 temperature=0.2（选择是判断题，默认采样下同一句查询会在有/无结果间翻转——生产抓获：xiaoxiao 查询一次空两次中）；llm.ts 双协议分支支持 opts.temperature 覆盖
