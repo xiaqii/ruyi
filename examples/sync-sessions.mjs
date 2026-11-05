@@ -154,7 +154,7 @@ console.log(`ruyi sync: ${files.length} session file(s) from ${DIR} → ${BASE} 
 	for (const rel of files) {
 	try {
 		const r = await syncFile(rel);
-		if (r.skipped) { skipped++; if (r.already) console.log(`≡ ${rel}（服务端已有完整内容，零传输）`); }
+		if (r.skipped) { skipped++; if (r.already) console.log(`≡ ${rel} (already complete on server, zero transfer)`); }
 		else {
 			done++;
 			console.log(`\r✓ ${rel} (${((r.bytes ?? 0) / 1024).toFixed(0)} KB)                    `);

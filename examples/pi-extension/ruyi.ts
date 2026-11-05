@@ -66,7 +66,7 @@ const RecallParams = Type.Object({
 		Type.Union([Type.Literal("fast"), Type.Literal("deep"), Type.Literal("excavate")], {
 			description:
 				"fast: free keyword scan, no LLM, sub-second — use for tentative probing; " +
-				"deep (default): LLM semantic rerank of the best candidates — use when the answer matters; " +
+				"deep (default): one LLM selector call over the whole-store listing — use when the answer matters; " +
 				"excavate: like fast but also searches absorbed/archived memories (archaeology)",
 		}),
 	),
@@ -173,7 +173,7 @@ export default function (pi: ExtensionAPI) {
 				const nMem = fast.r.memories.length;
 				const payload = formatRecall(fast.r) + ADVISORY;
 				const tokens = Math.round(payload.length / 2); // rough CN/EN mix estimate of the hidden payload, display-only
-				// Visible: headline + a目录行 of id+短名 (no full text — that rides hidden).
+				// Visible: headline + a directory line of id+short-name per item (no full text — that rides hidden).
 				const tag = (s: string) => (s.length > 12 ? `${s.slice(0, 12)}…` : s);
 				const items = [
 					...(fast.r.profiles ?? []).map((p) => `#${p.id} ${p.title}`),

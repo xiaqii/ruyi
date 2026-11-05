@@ -1,80 +1,109 @@
-# ruyi v3 设计推演：纯抽象画像 + 两级索引 + 子代理边界
+# ruyi v3 design exploration: pure abstract profiles + two-level index + subagent boundaries
 
-> 2026-10-15 用户提出的架构方向调研。**状态：已实现（v0.10.0，2026-10-16）**——两级画像树 + 抽象令 + 章节退休机制全部落地；E 项（不自建运行时、不显式两跳）维持结论。
+> Architecture-direction research proposed by the user on 2026-10-15. **Status: implemented
+> (v0.10.0, 2026-10-16)** — two-level profile tree + abstraction mandate + chapter retirement all
+> landed; item E (no self-built runtime, no explicit two-hop) stands as concluded.
+> *Follow-up: v1.4 (2026-11) further replaced the FTS→understand→rerank pipeline with a single
+> selector call over the whole-store listing; the "two-level browse" question (F5) dissolved
+> entirely — the selector reads everything at once.*
 
-## 用户构思的抽象理解
+## The user's conception, abstracted
 
-1. **产物观**：ruyi 的产出 = 纯抽象的"用户画像集"（方法论/习惯/喜好/经验）。
-   项目代号不进画像，至多作为可查询、不重要的历史事实存在。
-2. **组织观**：每个方向先一个分类索引（如编程总索引：性能/文档/命名…），AI 先判索引、
-   再按需加载子分类画像。宁两次请求，换单次请求量下降。
-3. **注入观**：index 与 memory 都不重复注入（按对话去重，两级都进账本）。
-4. **架构观**：拼接/查询/理解过程不污染主对话；考虑子代理甚至自建 AI；
-   问 pi web 能否承载子代理模式。
+1. **Product view**: ruyi's output = a purely abstract "user profile set" (methodology / habits /
+   tastes / experience). Project codenames never enter profiles; at most they exist as queryable,
+   unimportant historical facts.
+2. **Organization view**: each direction starts with a category index (e.g. a programming master
+   index: performance / documentation / naming…); the AI judges the index first, then loads
+   subcategory profiles on demand. Trade two requests for a smaller single request.
+3. **Injection view**: neither index nor memory is injected twice (per-conversation dedup, both
+   levels enter the ledger).
+4. **Architecture view**: the assemble/query/understand process must not pollute the main
+   conversation; consider subagents or even a self-built AI; asked whether pi web can host a
+   subagent pattern.
 
-## 关键实证发现
+## Key empirical findings
 
-### F1. 两级检索已存在，且在服务端——主对话污染为零
-deep recall 全程在 ruyi 服务端完成：FTS 海选 → 查询理解 → LLM 精排（只看 ≤100 条一行索引）
-→ 返回最终选择。主对话从来看不到候选清单，只收结果。
-**"检索拼接不该污染主对话"这个需求已经满足——ruyi 服务端就是那个子代理。**
-用户设想的 ruyi_recall(index) → ruyi_recall(memory) 显式两跳反而更差：
-中间索引会进主对话上下文，且多一次工具往返。
+### F1. Two-level retrieval already exists, server-side — zero main-conversation pollution
+Deep recall happens entirely inside the ruyi server: FTS wide-net → query understanding → LLM
+rerank (reading only ≤100 one-line briefs) → final selection returned. The main conversation never
+sees the candidate list, only the results.
+**The requirement "retrieval assembly must not pollute the main conversation" is already met — the
+ruyi server IS that subagent.** The user's imagined explicit two-hop ruyi_recall(index) →
+ruyi_recall(memory) would actually be worse: the intermediate index would enter the main
+conversation's context, plus an extra tool round-trip.
 
-### F2. pi web 能承载子代理，无需自建 AI
-pi 无内置 task/subagent 工具，但：
-- `pi --mode json --print` 可编程 spawn 一次性会话（已实测：会话出现在 pi web 列表、可人工接管）；
-- SDK `createAgentSession`（Node/TS）可编程创建完整会话。
-做成扩展 delegate 工具即可。"重活外包子代理"在 pi 生态内闭合，自建运行时对这个目标不划算。
-成本核算：子代理自带系统提示+工具开销 ~2-5k tokens/次，只有中间产物远超开销才值得
-（适合"读 20 个文件写总结"，不适合"查一条记忆"）。
+### F2. pi web can host subagents; no self-built AI needed
+pi has no built-in task/subagent tool, but:
+- `pi --mode json --print` can programmatically spawn one-shot sessions (verified live: the session
+  appears in pi web's list and can be taken over by a human);
+- the SDK's `createAgentSession` (Node/TS) creates full sessions programmatically.
+An extension delegate tool wraps it. "Outsource heavy work to a subagent" closes inside the pi
+ecosystem; a self-built runtime is not worth it for this goal.
+Cost math: a subagent carries its own system prompt + tool overhead ~2-5k tokens per run — worth it
+only when intermediate products far exceed that (good for "read 20 files and summarize", bad for
+"look up one memory").
 
-### F3. 项目污染实测（28 章 / 62,413 字符扫描）
-真正需治理的项目代号很少（个位数章节）。
-以下不是污染，是合法词汇，抽象掉反而丢失可执行性：
-- 技术/平台词：引擎、框架、SaaS 平台 —— 用户的活动域；
-- 自有基础设施：ruyi、pi-web、服务器台账 —— 《服务器运维》《ruyi 部署运维》章的
-  端口/路径/机型是可执行性本身，属于"数字房产台账"而非项目内容。
-边界规则：**项目代号（一次性生意/产品名）抽象化；技术平台与自有基础设施保留具体性。**
+### F3. Project pollution, measured (28 chapters / 62,413 chars scanned)
+The project codenames genuinely needing governance are few (single-digit chapters).
+The following are NOT pollution — they're legitimate vocabulary, and abstracting them away would
+destroy executability:
+- technology/platform words: engines, frameworks, SaaS platforms — the user's activity domains;
+- own infrastructure: ruyi, pi-web, server ledgers — the ports/paths/machine models in the
+  "Server Ops" / "ruyi Deployment" chapters are executability itself, "digital real-estate ledgers"
+  rather than project content.
+Boundary rule: **project codenames (one-off ventures / product names) get abstracted; technology
+platforms and own infrastructure keep their concreteness.**
 
-### F4. 收敛机制已生效
-活跃记忆 365 → 109 条（被画像吸收）。两级画像会进一步强化吸收。
+### F4. Convergence is working
+Active memories 365 → 109 (absorbed into profiles). Two-level profiles will strengthen absorption
+further.
 
-### F5. 目录规模决定单跳够用
-28 章标题 ≈ 1.5k 字符，远在精排预算（≤100 行）内。**两级浏览（先领域后子章）在目录
-超过 ~100 行前不是必须的**；但两级存储组织对自动分化和加载粒度有直接价值
-（按需加载 500 字子章，而非 2400 字大章）。
+### F5. Directory scale decides one hop is enough
+28 chapter titles ≈ 1.5k chars, well inside the rerank budget (≤100 lines). **Two-level browsing
+(domain first, then subchapter) is unnecessary until the directory exceeds ~100 lines**; but
+two-level storage organization has direct value for auto-differentiation and load granularity
+(load a 500-char subchapter on demand, not a 2400-char mega-chapter).
 
-## 方案（按价值/风险排序）
+## The plan (ordered by value/risk)
 
-### A. 去项目化治理（低风险高收益，纯 prompt + 内容）
-- synthesize / extract / reorganize 三个 prompt 加入抽象令：
-  画像只装方法论/习惯/喜好/经验；项目代号一律改写为抽象经验
-  （“X 项目要求素材池每账号独立生成” → “内容矩阵运营：共享文案会连坐封号，必须每账号独立生成”）；
-  项目事实只能以 fact/project 类记忆存在：可查询、不作画像原料、不参与常规注入。
-- 一次性清洗：LLM 重写 28 章（28 次便宜调用），**逐章 diff 报告先给用户过目再定稿**。
-- 夜检 reorganize 增量执行同一规则，不再积累。
+### A. De-projectification governance (low risk, high gain, pure prompt + content)
+- synthesize / extract / reorganize prompts gain the abstraction mandate: profiles hold only
+  methodology/habits/tastes/experience; project codenames are rewritten as abstract lessons
+  ("project X requires per-account independently generated material pools" → "content-matrix
+  operations: shared copy gets accounts banned together; every account must generate independently");
+  project facts may exist only as fact/project memories: queryable, never profile material, never
+  routinely injected.
+- One-time cleansing: the LLM rewrites 28 chapters (28 cheap calls), **with a per-chapter diff
+  report shown to the user before finalizing**.
+- The nightly reorganize enforces the same rule incrementally; no new accumulation.
 
-### B. 画像两级组织（迁移 v6，中风险）
-- `profiles.parent_id`（可空）：领域章（总索引）→ 子章。
-- synthesize 先聚领域、密度够再裂子章（延续 v0.9.8 的自动分化，加一层归并）；
-  子章下限 <300 字不独立成章（防切太碎拆散相关经验）。
-- 目录渲染为两级一行树；精排维持单跳（目录 ≤100 行），超预算自动退化两跳。
-- 账本 item = `p:<id>` 不变，领域章/子章都进账本，旧账本继续有效。
+### B. Two-level profile organization (migration v6, medium risk)
+- `profiles.parent_id` (nullable): domain chapters (master index) → subchapters.
+- synthesize clusters domains first, splits subchapters when density suffices (continuing v0.9.8's
+  auto-differentiation, plus a merge layer); subchapters under 300 chars don't stand alone (guard
+  against shredding related experience).
+- The directory renders as a two-level one-line tree; rerank stays single-hop (directory ≤100
+  lines), auto-degrading to two hops over budget.
+- Ledger item = `p:<id>` unchanged; domain chapters and subchapters both enter the ledger; old
+  ledgers stay valid.
 
-### C. 静态菜单（index+目录，~2k 字符/轮）是否改为每对话只注一次
-- 现状：每轮重发但前缀缓存命中，边际成本 ≈ 1/10 价，可忽略。
-- 改为历史消息注入：省的是缓存读取价，但 compaction 后菜单丢失、难检测。
-- **建议维持现状**（与用户的"index 不重复注入"有出入，属有意偏离，需用户拍板）。
+### C. Should the static menu (index+directory, ~2k chars/turn) inject only once per conversation
+- Status quo: re-sent every turn but prefix-cache hits make the marginal cost ≈ 1/10 price —
+  negligible.
+- Switching to historical-message injection: saves the cache-read price, but the menu is lost after
+  compaction, which is hard to detect.
+- **Recommendation: keep the status quo** (this deviates from the user's "index never re-injects" —
+  an intentional deviation requiring the user's call).
 
-### D. delegate 子代理工具（独立小功能，最后做/可不做）
-扩展工具 spawn `pi --mode json` 一次性会话执行重任务，只回结果进主对话。
+### D. delegate subagent tool (independent small feature, last / optional)
+An extension tool spawns a `pi --mode json` one-shot session to execute heavy tasks, returning only
+the result to the main conversation.
 
-### E. 不做
-- 自建 agent 运行时（检索子代理已由 ruyi 服务端承担）；
-- 显式两跳 ruyi_recall(index→memory)（比服务端单跳差，见 F1）。
+### E. Not doing
+- self-built agent runtime (the retrieval subagent is already the ruyi server);
+- explicit two-hop ruyi_recall(index→memory) (worse than server-side single-hop, see F1).
 
-## 风险
-- 过度抽象丢失可执行细节 → F3 白名单 + 清洗 diff 报告人工过目；
-- 子章过碎拆散相关经验 → 300 字下限；
-- 清洗误伤溯源 → 只改画像文本，源记忆不动，可追溯。
+## Risks
+- over-abstraction losing executable detail → F3 whitelist + cleansing diff report for human review;
+- subchapters too fine, shredding related experience → 300-char floor;
+- cleansing damaging traceability → only profile text is rewritten; source memories untouched.

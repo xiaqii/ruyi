@@ -1,86 +1,96 @@
-# ruyi 接口契约（API Contract）
+# ruyi API Contract
 
-本文档是 ruyi 对外接口的**唯一权威定义**，与代码同步维护：每次发布前 `test/api-contract.ts`
-会对运行中的服务逐个端点验证文档里声明的响应结构，不一致则发布失败。
-agent 要自写脚本/扩展对接 ruyi，照本文档实现即可正常工作。
+This document is the **single authoritative definition** of ruyi's external interface, maintained in
+lockstep with the code: before every release, `test/api-contract.ts` verifies the response structure
+of every endpoint declared here against a running service — any mismatch fails the release.
+If your agent wants to integrate with ruyi via its own scripts/extensions, implementing against this
+document is sufficient.
 
-两条接入面，能力等价：
+Two integration surfaces with equivalent capability:
 
-| 接入面 | 适合 | 传输 |
+| Surface | Best for | Transport |
 |---|---|---|
-| **HTTP API** | 任何能发 HTTP 的 agent/脚本（含远程机器） | `http://<host>:<port>`（默认 `127.0.0.1:8899`） |
-| **MCP stdio** | Claude Code / opencode 等原生支持 MCP 的客户端（本机） | `node <repo>/src/cli.ts mcp` |
+| **HTTP API** | any agent/script that can make HTTP requests (incl. remote machines) | `http://<host>:<port>` (default `127.0.0.1:8899`) |
+| **MCP stdio** | clients with native MCP support (Claude Code / opencode, local machine) | `node <repo>/src/cli.ts mcp` |
 
-## 通用约定
+## General conventions
 
-- **鉴权**：鉴权由 ruyi 自己做，与反向代理无关。本机直连（127.0.0.1 且不带代理头）自动放行；
-  经反代/隧道来的请求（带 `X-Real-IP` / `X-Forwarded-For` 头）或局域网来源必须带
-  `Authorization: Bearer <authToken>`（服务端 `config.local.json` 配置），否则 401；服务端未配 token 时远程一律 503（失败即关闭）。
-  `GET /` 与 `GET /health` 恒公开。
-- **owner**：所有接口接受 `owner` 参数（query 或 body），缺省 `"default"`。同一人的多个 agent 用同一个
-  owner 共享记忆池；不同人/需要隔离时用不同 owner。
-- **错误**：统一 `{"error": "..."}` + 非 200 状态码。
-- **超时建议**（重要）：纯 SQL 接口（inject/list/get/forget/stats/profiles/recall-fast）百毫秒内返回，
-  客户端超时 5 秒足够；**带 LLM 的接口**（recall-deep/excavate、POST /memories、ingest、synthesize、distill）
-  耗时取决于 LLM，**客户端超时必须 ≥45 秒**，并建议实现熔断降级——服务不可用时 agent 应照常工作，
-  只是本次没有长期记忆。ruyi 是挂件不是依赖，永远不要让 agent 阻塞在记忆服务上。
+- **Auth**: ruyi does its own auth, independent of any reverse proxy. Local direct connections
+  (127.0.0.1 without proxy headers) are auto-allowed; requests arriving via a proxy/tunnel (carrying
+  `X-Real-IP` / `X-Forwarded-For`) or from the LAN must carry `Authorization: Bearer <authToken>`
+  (configured in the server's `config.local.json`), otherwise 401; if no token is configured,
+  remote requests get 503 (fail-closed). `GET /` and `GET /health` are always public.
+- **owner**: every endpoint accepts an `owner` parameter (query or body), default `"default"`.
+  Multiple agents of the same person share one memory pool via the same owner; use different
+  owners for different people or isolation needs.
+- **Errors**: uniform `{"error": "..."}` + non-200 status code.
+- **Timeout guidance** (important): pure-SQL endpoints (inject/list/get/forget/stats/profiles/
+  recall-fast) return in hundreds of milliseconds — a 5s client timeout is plenty. **LLM-backed
+  endpoints** (recall-deep/excavate, POST /memories, ingest, synthesize, distill) take as long as
+  the LLM takes — **client timeout must be ≥45 seconds**, with circuit-breaking recommended: when
+  the service is unavailable the agent should work exactly as before, just without long-term memory
+  this turn. ruyi is a sidecar, not a dependency; never let an agent block on the memory service.
 
-## HTTP 端点一览
+## HTTP endpoint overview
 
-| 方法 路径 | 作用 | LLM |
+| Method Path | Purpose | LLM |
 |---|---|---|
-| GET `/health` | 存活 + 各状态记忆条数（无需鉴权） | 无 |
-| GET `/inject` | 开场注入包：宪法层 + 记忆索引 + 画像目录 | 无 |
-| POST `/recall` | 语义召回记忆与画像章节 | fast 无 / deep、excavate 有 |
-| GET `/memories` | 列记忆（一行摘要） | 无 |
-| POST `/memories` | 显式写入一条记忆（经 LLM 合并裁决） | 有 |
-| GET `/memories/:id` | 取单条全文 | 无 |
-| POST `/memories/:id/forget` | 归档（软删除，可 excavate 找回） | 无 |
-| POST `/ingest` | 提交原始文本走做梦提炼管线 | 有 |
-| POST `/sync/session` | 推送会话日志增量（偏移量追加，断点续传） | 无 |
-| GET `/sync/state` | 查询某机器各会话的已收字节数（对账） | 无 |
-| GET `/profiles` | 列画像章节（摘要） | 无 |
-| GET `/profiles/:id` | 取画像章节全文 | 无 |
-| POST `/synthesize` | 立即重炼画像（通常由夜间 timer 驱动） | 有 |
-| POST `/distill` | 立即做一次梦（异步，202） | 有 |
-| GET `/stats` | 记忆条数 + token 用量报表 | 无 |
+| GET `/health` | liveness + memory counts by status (no auth) | none |
+| GET `/inject` | opening bundle: profile directory tree | none |
+| POST `/recall` | semantic recall of memories & profile chapters | fast: none / deep, excavate: yes |
+| GET `/memories` | list memories (one-line summaries) | none |
+| POST `/memories` | explicitly write one memory (via LLM merge adjudication) | yes |
+| GET `/memories/:id` | fetch one memory in full | none |
+| POST `/memories/:id/forget` | archive (soft delete, excavatable) | none |
+| POST `/ingest` | submit raw text into the dream distillation pipeline | yes |
+| POST `/sync/session` | push session-log increments (offset append, resumable) | none |
+| GET `/sync/state` | query stored byte counts per session on a machine (reconciliation) | none |
+| GET `/profiles` | list profile chapters (summaries) | none |
+| GET `/profiles/:id` | fetch one profile chapter in full | none |
+| POST `/synthesize` | re-distill profiles now (normally driven by the nightly timer) | yes |
+| POST `/distill` | run one dream now (async, 202) | yes |
+| GET `/stats` | memory counts + token usage report | none |
 
 ---
 
-### GET /inject —— 静态分类索引（每轮会话必调）
+### GET /inject — profile directory tree (cheap, call freely)
 
 ```
 GET /inject?owner=default&cwd=/path/to/project&scope=smart
 ```
 
-| 参数 | 值 | 说明 |
+| Param | Value | Notes |
 |---|---|---|
-| `owner` | string | 缺省 `default` |
-| `cwd` | string | 当前工作目录，用于目录隔离 |
-| `scope` | `smart`(默认) / `cwd` / `all` | smart=全局可见+本目录记忆；cwd=严格本目录；all=全库 |
+| `owner` | string | default `default` |
+| `cwd` | string | current working directory, for directory scoping |
+| `scope` | `smart`(default) / `cwd` / `all` | smart = globally visible + this directory's memories; cwd = strictly this directory; all = whole store |
 
-响应 `200`：
+Response `200`:
 
 ```json
 {
-  "constitution": [],  // v0.10.4 起退役：恒为空。全局铁律请写进 agent 平台自己的 AGENTS.md/CLAUDE.md
-  "profileDirectory": [{ "id": 3, "title": "AI agent 与记忆系统", "maturity": "mature", "parent_id": null },
-                       { "id": 71, "title": "测试与发布纪律", "maturity": "mature", "parent_id": 76 }]
+  "constitution": [],
+  "profileDirectory": [{ "id": 3, "title": "AI agents & memory systems", "maturity": "mature", "parent_id": null },
+                       { "id": 71, "title": "Testing & release discipline", "maturity": "mature", "parent_id": 76 }]
 }
 ```
 
-**用法**：constitution 字段已退役（恒为空）——
-领域内容不该常驻每个对话）；profileDirectory 是画像章节的**分类索引**：两级树（parent_id 为 null 是领域索引章，否则 parent_id 指向所属领域），按 parent_id 分组渲染；要全文用 `/recall` 加载子章。
-不再有静态记忆 index——话题相关的内容一律走逐轮 `/recall` 语义注入。纯 SQL，任意高频调用无负担。
-注意（v0.10.3 起）：目录树默认**只作服务端检索材料**（rerank 每轮读它选章节），pi 客户端不再把它渲染进
-上下文——瘦客户端哲学的终点：agent 只需知道 ruyi_recall 存在，发现与选择全在服务端。需要目录的客户端
-（如一次性会话开场的 Claude hook）仍可自取。
+**Usage**: the `constitution` field is retired (always empty since v0.10.4 — global iron rules belong in the
+agent platform's own AGENTS.md/CLAUDE.md). `profileDirectory` is the **classification index** of profile
+chapters: a two-level tree (`parent_id` null = domain index chapter; otherwise it points at the parent
+domain), render grouped by parent_id; fetch full text via `/recall` or `/profiles/:id`.
+There is no static memory index anymore — topic-relevant content arrives per-turn via `/recall` semantic
+injection. Pure SQL; call at any frequency.
+Since v1.4 the directory tree primarily serves as **server-side selection material** (the selector reads
+the listing to pick chapters); thin clients need not render it into context at all — the pi philosophy is
+zero-resident context, with discovery and selection entirely server-side. Clients that want a directory
+(e.g. a one-shot session-start Claude hook) may still fetch it themselves.
 
-### POST /recall —— 语义召回
+### POST /recall — semantic recall
 
 ```json
 {
-  "query": "当前任务的自然语言描述",
+  "query": "natural-language description of the current task",
   "k": 6,
   "owner": "default",
   "cwd": "/path/to/project",
@@ -89,22 +99,21 @@ GET /inject?owner=default&cwd=/path/to/project&scope=smart
 }
 ```
 
-| 字段 | 说明 |
+| Field | Notes |
 |---|---|
-| `query` | 必填，非空 |
-| `k` | 返回记忆条数上限，缺省由服务端配置（6） |
-| `mode` | `fast`=纯关键词零 LLM 试探；`deep`(默认)=海选+LLM 精选+按需加载画像章节；`excavate`=连已吸收/归档的旧记忆也挖 |
-| `conversation` | 与 `auto` 配合时**必填**，调用方的会话唯一标识（如 `pi:<sessionId>`）。服务端为其分配内部
-  `topic_id`（自增）并为每轮编 `reply_id`，台账记每轮实际注入了哪些条目；`auto=true` 不带它返回 `400` |
-| `auto` | 可选，`true` 表示这是**自动注入**路径：服务端把该对话已注入过的条目滤掉（响应带 `deduped` 计数），
-  且当候选全部已注入时直接短路返回空、跳过 LLM 调用。响应同时带 `topicId`/`replyId`（本轮服务端编号）。
-  agent 主动调用工具查询时**不要**带这两个参数 |
+| `query` | required, non-empty |
+| `k` | max memories returned; server-configured default (6) |
+| `mode` | `fast` = pure keyword probe, zero LLM; `deep` (default) = one selector LLM call over a whole-store listing (every active memory's one-line "mini" + every chapter's abstract), picks what matters; `excavate` = also dig absorbed/archived memories |
+| `conversation` | **required when paired with `auto`** — the caller's unique conversation id (e.g. `pi:<sessionId>`). The server assigns it an internal `topic_id` (autoincrement) and numbers each turn a `reply_id`; the injection ledger records what was actually injected each turn. `auto=true` without it returns `400` |
+| `auto` | optional; `true` marks the **automatic injection** path: the server filters items already injected into this conversation (response carries a `deduped` count), and short-circuits with an empty result — skipping the LLM call entirely — when every candidate was already injected. The response also carries `topicId`/`replyId` (server-assigned turn numbers). **Do not** pass these two parameters for agent-initiated tool queries |
 
-**话题上下文（0.9 起）**：带 `conversation` 的调用，服务端会把该话题的 rolling summary（概要）与最近几轮
-原文一并送入查询理解和精排，裸 follow-up（"哪些不能吃"）按话题主语判读。概要由精排输出顺带刷新（零额外
-调用），长期静默话题由低频增量兜底。对调用方完全透明：不传 `conversation` 行为不变。
+**Topic context (since 0.9)**: calls carrying `conversation` get the topic's rolling summary plus the most
+recent turns' raw text fed into the selector alongside the query, so bare follow-ups ("which ones can't he
+eat?") are judged against the topic's subject. The summary rides along on the selector's output (zero extra
+calls); long-silent topics are backstopped by low-frequency increments. Fully transparent to the caller:
+omit `conversation` and behavior is unchanged.
 
-响应 `200`：
+Response `200`:
 
 ```json
 {
@@ -113,105 +122,111 @@ GET /inject?owner=default&cwd=/path/to/project&scope=smart
                  "origin": "user_stated", "confidence": 0.9, "evidence": 3, "source": null,
                  "pinned": 0, "status": "active", "superseded_by": null, "absorbed_by": null,
                  "created_at": "...", "updated_at": "...", "last_seen_at": "..." }],
-  "profiles": [{ "id": 3, "owner": "default", "theme": "agent-memory", "title": "...", "content": "章节全文",
+  "profiles": [{ "id": 3, "owner": "default", "theme": "agent-memory", "title": "...", "content": "...",
                  "memory_ids": "[...]", "version": 2, "maturity": "mature", "status": "active",
                  "created_at": "...", "updated_at": "..." }]
 }
 ```
 
-无命中时 `memories` 与 `profiles` 均为空数组（不是错误）。
+On no hits, `memories` and `profiles` are both empty arrays (not an error).
 
-### POST /replies/answer —— 上报助手回答（逐轮纪要的原料）
+### POST /replies/answer — report the assistant's answer (raw material for per-turn gists)
 
-agent 每轮回答完后上报（fire-and-forget），服务端把回答附到该会话最新一条未答的 reply 上，并异步生成
-1-2 句 gist（recall 层，不占注入路径）。gist 与回答原文一起成为后续召回的分层话题上下文
-（topic_summary + 逐轮 gist + 最近 3 轮用户原文，32K 预算组装）——裸追问（"那它的价格"）的答案侧
-实体靠这个不漂移。
+After each turn the agent reports its answer (fire-and-forget); the server attaches it to the
+conversation's latest unanswered reply row and asynchronously distills a 1–2 sentence gist (recall tier,
+off the injection path). Gists together with the raw answers form the layered topic context for future
+recall (topic_summary + per-turn gists + the last 3 user turns verbatim, assembled under a 32K budget) —
+answer-side entities of bare follow-ups ("and its price?") stay anchored instead of drifting.
 
 ```json
-{ "conversation": "pi:<sessionId>", "answer": "助手本轮的回答全文" }
+{ "conversation": "pi:<sessionId>", "answer": "the assistant's full answer this turn" }
 ```
 
-| 字段 | 说明 |
+| Field | Notes |
 |---|---|
-| `conversation` | 必填，与 /recall 的会话标识一致 |
-| `answer` | 必填，服务端截断到 20000 字并做密钥脱敏后保存（原文全量保留原则） |
+| `conversation` | required, same identifier as /recall |
+| `answer` | required; truncated to 20000 chars and secret-redacted server-side (raw text kept in full) |
 
-响应：附到待答 reply 返回 `201 {"attached":true}`；该会话没有待答 reply（如本轮未触发召回）返回
-`200 {"attached":false}`，均为正常。gist 生成失败不留空难——组装时该轮退回截断原文。
+Response: `201 {"attached":true}` when attached to a pending reply; `200 {"attached":false}` when the
+conversation has no pending reply (e.g. this turn triggered no recall) — both normal. Gist failure never
+leaves a hole: assembly falls back to truncated raw text for that turn.
 
-夜间做梦管线每周随画像重炼用 dream 层（思考型模型）从原文重写活跃话题的 gist，修复白天快模型的漂移
-（gist 是可再生视图，原文是唯一事实源）。手动触发：`ruyi regen-gists [--days 7] [--limit 150]`。
+The nightly pipeline re-writes gists of active topics weekly from the raw answers using the dream tier
+(thinking model), repairing daytime fast-model drift (gists are a regenerable view; raw text is the only
+source of truth). Manual trigger: `ruyi regen-gists [--days 7] [--limit 150]`.
 
-### POST /injection-log/clear —— 客户端压缩通知（重置注入去重台账）
+### POST /injection-log/clear — client compaction notice (reset the injection ledger)
 
-agent 客户端发生上下文压缩（如 pi 的 session_compact）时调用：已注入的记忆卡片随压缩离开模型
-上下文，但 injection_log 仍记着“已注入”，不清理的话这些记忆永远不会被重发（长会话静默丢记忆）。
-本端点只清空该会话的注入去重台账，使记忆在下一轮可重新注入；topics/replies 对话历史保留不动。
+When an agent client compacts its context (e.g. pi's session_compact), injected memory cards leave the
+model's context, but the injection_log still counts them as injected — without a reset they would silently
+never be re-sent (long conversations quietly lose memory). This endpoint clears only the conversation's
+injection-dedup ledger so memories can be re-injected on the next turn; topics/replies history is kept.
 
 ```json
 { "conversation": "pi:<sessionId>" }
 ```
 
-响应 `200 {"cleared": <删除的行数>}`；缺 conversation 返回 400。pi 扩展在 session_compact 事件里
-fire-and-forget 调用。
+Response `200 {"cleared": <rows deleted>}`; missing conversation returns 400. The pi extension calls this
+fire-and-forget on the session_compact event.
 
-### POST /memories —— 显式写入（"记住这个"）
+### POST /memories — explicit write ("remember this")
 
 ```json
 {
   "kind": "preference",
-  "summary": "一行摘要（≤30词）",
-  "content": "完整内容，具体且自足",
-  "domain": "可选标签",
+  "summary": "one-line summary (≤30 words)",
+  "content": "full content, concrete and self-contained",
+  "domain": "optional tag",
   "owner": "default",
   "cwd": null,
   "confidence": 0.9
 }
 ```
 
-`kind` ∈ `preference | fact | knowledge | lesson | skill_index`（缺省 `fact`）。
-写入前会经与夜间做梦**相同的 LLM 合并裁决**，重复内容变成印证而非新条目。**耗时约 10 秒级，超时务必 ≥45 秒。**
+`kind` ∈ `preference | fact | knowledge | lesson | skill_index` (default `fact`).
+Writes go through the **same LLM merge adjudication** as the nightly dream — duplicate content becomes
+reinforcement rather than a new entry. **Takes ~10s; client timeout must be ≥45 seconds.**
 
-响应 `200/201`：`{ "id": 400, "action": "new" | "reinforced" | "refined" | "superseded" }`
+Response `200/201`: `{ "id": 400, "action": "new" | "reinforced" | "refined" | "superseded" }`
 
-### GET /memories —— 列表
+### GET /memories — list
 
 `GET /memories?owner=default&status=active&limit=100` → `{ "memories": [MemoryRow...] }`
-`status` ∈ `active`(默认) `| absorbed | superseded | archived`。
+`status` ∈ `active`(default) `| absorbed | superseded | archived`.
 
 ### GET /memories/:id
 
-→ `{ "memory": MemoryRow }`，不存在 `404`。
-
+→ `{ "memory": MemoryRow }`, `404` if missing.
 
 ### POST /memories/:id/forget
 
-→ `{ "ok": true, "id": 400, "status": "archived" }`。归档=软删除：不再注入/召回，
-但 `recall mode=excavate` 仍能挖到。同时留下**墓碑**（内容指纹，不存原文）：
-此后任何写入面（做梦/remember/ingest/合并）再遇到同样内容会被拒绝落库，
-防止已遗忘的记忆被重新提炼复活。
+→ `{ "ok": true, "id": 400, "status": "archived" }`. Archiving = soft delete: no longer injected/recalled,
+but still diggable via `recall mode=excavate`. Also leaves a **tombstone** (a content fingerprint, never
+the text): every write path (dream/remember/ingest/merge) rejects the same content thereafter, so a
+forgotten memory can't be re-distilled back to life from old logs.
 
-### POST /ingest —— 提交原料
+### POST /ingest — submit raw material
 
 ```json
-{ "text": "原始对话/笔记文本（≥50字符）", "source": "来源标记", "owner": "default", "cwd": null }
+{ "text": "raw conversation/notes text (≥50 chars)", "source": "origin tag", "owner": "default", "cwd": null }
 ```
 
-同步跑完整提炼管线（triage→提炼→合并），响应为提炼报告（JSON）。适合没有配置
-`sessions` 目录的 agent 主动上交对话记录。
+Runs the full distillation pipeline synchronously (triage → extract → merge); the response is the
+distillation report (JSON). Suitable for agents without a configured `sessions` directory to hand in
+conversation records proactively.
 
 ### GET /profiles · GET /profiles/:id
 
-`/profiles?owner=default` → `{ "profiles": [ProfileRow...] }`（含 content 全文，列表较长）。
-`/profiles/:id?owner=default` → 单个 ProfileRow（含全文）。
+`/profiles?owner=default` → `{ "profiles": [ProfileRow...] }` (full `content` included; the list is long).
+`/profiles/:id?owner=default` → a single ProfileRow (full text).
 
 ### POST /synthesize · POST /distill
 
-管理触发口，通常不需要 agent 调（夜间 timer 自动跑）。`/synthesize` body `{ "owner": "default" }`，
-同步返回重炼报告；`/distill` 异步（`202 {"started": true}`，已有梦在跑则 `409`）。
+Admin triggers; agents normally don't call these (the nightly timer does). `/synthesize` body
+`{ "owner": "default" }`, returns the re-distillation report synchronously; `/distill` is async
+(`202 {"started": true}`, or `409` if a dream is already running).
 
-### GET /stats —— 报表
+### GET /stats — reports
 
 `GET /stats?days=7&owner=default` →
 
@@ -222,44 +237,51 @@ fire-and-forget 调用。
 }
 ```
 
-### POST /sync/session —— 会话日志增量同步
+### POST /sync/session — session-log incremental sync
 
-远程机器把 agent 会话日志推给 ruyi（夜间做梦提炼的原料）。偏移量追加 + 内容寻址去重：
+Remote machines push agent session logs to ruyi (raw material for nightly dreaming). Offset append +
+content-addressed dedup:
 
 ```json
 { "machine": "win11-laptop", "agent": "claude-code", "sessionKey": "proj-a/abc.jsonl",
-  "sessionUid": "从内容提取的会话唯一 ID", "totalSize": 23245,
-  "offset": 12345, "data": "新增的字节" }
+  "sessionUid": "unique session id extracted from content", "totalSize": 23245,
+  "offset": 12345, "data": "the new bytes" }
 ```
 
-- `machine`：来源机器标识（稳定不变，提炼出的环境事实会标注它）；`agent`：日志格式（`claude-code`/`pi`）；
-  `sessionKey`：会话文件的相对路径
-- `sessionUid`：内容寻址的会话身份（claude-code 取首行 `sessionId`，pi 取文件名 uuid）。同一 uid
-  无论从哪条渠道到来都指向同一份服务端存储——手工导入过的会话再经同步协议推送时**零传输跳过**
-  （`{"already": true}`）或只补真实增量
-- `offset` 必须等于服务端已存字节数，否则 `409 {"receivedBytes": <真实值>}`——客户端从该处续传
-- 响应 `200 {"receivedBytes": <新总量>}`；字节必须按 UTF-8 字符边界切分（参考 `examples/sync-sessions.mjs`）
-- **压缩**：请求体 >50KB 时应 gzip（`content-encoding: gzip`），会话文本压缩率约 5-10 倍；
-  服务端解压上限 32MB（防压缩炸弹）
-- 数据落在服务端 `data/synced/<machine>/` 下，自动成为夜间做梦的会话源；已被其他渠道提炼过的
-  重叠部分会继承原字节断点，不会被 LLM 重复提炼
-- 一次性回填：换了新同步机制的机器，先在服务端跑一次 `node src/cli.ts sync-index`
-  把已有会话源注册进 UID 表
+- `machine`: source machine identifier (stable; distilled environment facts are tagged with it);
+  `agent`: log format (`claude-code`/`pi`); `sessionKey`: relative path of the session file
+- `sessionUid`: content-addressed session identity (claude-code: first line's `sessionId`; pi: filename
+  uuid). The same uid arriving via any channel points at the same server-side storage — a session
+  previously imported by hand and later pushed via the sync protocol is **skipped with zero transfer**
+  (`{"already": true}`) or topped up with only the true increment
+- `offset` must equal the server's stored byte count, otherwise `409 {"receivedBytes": <actual>}` —
+  the client resumes from that offset
+- Response `200 {"receivedBytes": <new total>}`; bytes must be split on UTF-8 character boundaries
+  (see `examples/sync-sessions.mjs`)
+- **Compression**: request bodies >50KB should be gzipped (`content-encoding: gzip`) — session text
+  compresses ~5–10×; the server's decompression ceiling is 32MB (zip-bomb guard)
+- Data lands under `data/synced/<machine>/` on the server and automatically becomes a dream session
+  source; portions already distilled via other channels inherit the original byte offset and are not
+  re-distilled by the LLM
+- One-time backfill: a machine switching to the new sync mechanism should first run
+  `node src/cli.ts sync-index` on the server to register existing session sources in the UID table
 
-### GET /sync/state —— 对账
+### GET /sync/state — reconciliation
 
 `GET /sync/state?machine=win11-laptop` → `{ "machine": "...", "sessions": { "proj-a/abc.jsonl": 23245 } }`
 
-参考发送端实现：`examples/sync-sessions.mjs`（增量、进度显示、断点续传、状态对账 `--status`）。
+Reference sender implementation: `examples/sync-sessions.mjs` (incremental, progress display, resumable,
+`--status` reconciliation).
 
 ---
 
-## MCP 工具（stdio）
+## MCP tools (stdio)
 
-启动：`node <repo>/src/cli.ts mcp`。协议版本 `2024-11-05`，标准 JSON-RPC 行式 stdio。
-六个工具，参数与 HTTP 语义一一对应（工具名不含前缀——客户端会自动拼上服务器名，opencode 里显示为 `ruyi_recall`，Claude Code 里为 `mcp__ruyi__recall`）：
+Launch: `node <repo>/src/cli.ts mcp`. Protocol version `2024-11-05`, standard JSON-RPC line-based stdio.
+Six tools, parameters mapping one-to-one onto HTTP semantics (tool names carry no prefix — clients add
+the server name automatically: shown as `ruyi_recall` in opencode, `mcp__ruyi__recall` in Claude Code):
 
-| 工具 | 对应 HTTP | 参数（* 必填） |
+| Tool | HTTP equivalent | Parameters (* required) |
 |---|---|---|
 | `recall` | POST /recall | `query`*, `k`, `mode`(fast/deep/excavate), `owner` |
 | `list` | GET /memories | `limit`, `owner` |
@@ -268,16 +290,24 @@ fire-and-forget 调用。
 | `remember` | POST /memories | `summary`*, `content`*, `kind`, `domain`, `owner` |
 | `admin` | pin/forget/stats/profiles | `action`*(forget/stats/profile), `id`, `days`, `profileId`, `owner` |
 
-客户端配置示例（Claude Code：`claude mcp add ruyi -- node <repo>/src/cli.ts mcp`；
-opencode/其他 MCP 客户端同理，见各自文档）。
+Client config examples (Claude Code: `claude mcp add ruyi -- node <repo>/src/cli.ts mcp`;
+opencode and other MCP clients analogous — see their docs).
 
-## 推荐的 agent 对接姿势（最小可用集成）
+## Recommended minimal agent integration
 
-1. **每轮开场**：调 `/inject`，三段拼进系统提示（零成本，必做）。
-2. **需要回忆时**：`/recall`——试探用 `mode=fast`（免费），重要答案用 `deep`，考古用 `excavate`。
-3. **用户说"记住……"**：`POST /memories`（超时 ≥45 秒）。
-4. **上交对话原料**：要么把会话日志目录写进服务端 `config.local.json` 的 `sessions`（夜间自动做梦，
-   推荐），要么主动 `POST /ingest`。
-5. **故障隔离**：所有调用设超时 + 熔断（连续失败暂停调用几分钟）；服务挂了 agent 必须照常工作。
+1. **Per user turn**: `POST /recall` with `conversation`+`auto:true` — server-side selection, dedup,
+   and topic context all included (the reference implementation races a sync budget and degrades
+   gracefully; see `examples/pi-extension/ruyi.ts`).
+2. **When remembering is needed**: `/recall` — probe with `mode=fast` (free), use `deep` for important
+   answers, `excavate` for archaeology.
+3. **User says "remember …"**: `POST /memories` (timeout ≥45s).
+4. **Hand in conversation material**: either point the server's `config.local.json` `sessions` at the
+   log directory (nightly dreams, recommended), or actively `POST /ingest`, or run
+   `examples/sync-sessions.mjs` from remote machines.
+5. **Fault isolation**: every call gets a timeout + circuit breaker (pause calling for a few minutes
+   after consecutive failures); if the service is down the agent must work exactly as before.
+6. **On client context compaction**: `POST /injection-log/clear` so dedup doesn't permanently silence
+   compacted-away memories.
 
-参考实现：`examples/pi-extension/ruyi.ts`（pi 扩展，含熔断降级、超时分级、异步注入竞速的完整写法）。
+Reference implementation: `examples/pi-extension/ruyi.ts` (pi extension; the full treatment — circuit
+breaking, tiered timeouts, async injection racing, compaction reset, answer reporting).

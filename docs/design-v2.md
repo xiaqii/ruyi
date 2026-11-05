@@ -1,198 +1,250 @@
-# ruyi v2 设计文档
+# ruyi v2 design document
 
-> **状态：历史设计文档。** 本文记录 2026-10 初的 v2 架构决策（海拔分层、消耗分级、收敛机制），
-> 这些机制仍是现行架构的底座。v2 之后的演进见 [CHANGELOG](../CHANGELOG.md)：
-> 0.3 远程 MCP 桥 → 0.4 自说明落地页 → 0.5/0.6 会话同步层 → 0.7 鉴权收归服务端 →
-> 0.8 按对话注入账本 + topics/replies 逐轮台账。
-> 文中个别「将来时」的描述以现状为准。
+> **Status: historical design document.** This records the v2 architecture decisions of early
+> October 2026 (altitude layering, cost tiering, convergence mechanisms) — these mechanisms remain
+> the foundation of the current architecture. Evolution after v2 is tracked in
+> [CHANGELOG](../CHANGELOG.md): 0.3 remote MCP bridge → 0.4 self-describing landing page →
+> 0.5/0.6 session sync layer → 0.7 auth moved server-side → 0.8 per-conversation injection ledger
+> + topics/replies turn-by-turn bookkeeping. **Note: the tiered T0–T4 retrieval described below was
+> superseded in v1.4 by a single selector call reading the whole-store listing (every memory's
+> one-line "mini" + every chapter's abstract) — keyword retrieval no longer gates the candidate
+> pool.** Where individual "future tense" descriptions conflict with the present, the present wins.
 
-> 目标：准确、快、消耗分级、库收敛不散列。
-> 原则不变：LLM all the way down（判断靠语义不靠字符串）；零运行时依赖（node:sqlite + node:http）；对宿主 agent 完全可选（挂了不影响）。
+> Goals: accurate, fast, cost-tiered, a store that converges instead of sprawling.
+> Unchanged principles: LLM all the way down (judgement by semantics, not strings); zero runtime
+> dependencies (node:sqlite + node:http); fully optional for the host agent (its failure changes nothing).
 
-## 0. 核心心智模型：记忆有海拔
+## 0. Core mental model: memory has altitude
 
-人脑不是几十万条情景记忆的反复加载，而是「情景 → 语义 → 图式」的逐层抽象。
-ruyi v2 的存储按海拔分四层：
+The human brain doesn't reload hundreds of thousands of episodic memories; it abstracts
+"episode → semantic → schema" layer by layer. ruyi v2 stores by altitude in four layers:
 
 ```
-L3 宪法层   ~10-20 条   pinned + 毕业习惯(evidence≥5的高信度偏好) + 画像目录指针
-                        每次会话无条件注入（纯 SQL，0 tokens，<50ms）
+L3 constitution   ~10-20 entries   pinned + graduated habits (high-confidence preferences with
+                                   evidence≥5) + profile directory pointers
+                                   unconditionally injected per session (pure SQL, 0 tokens, <50ms)
 
-L2 抽象层   ~5-15 章    主题画像（编程习惯 / 性能技巧 / 基础设施拓扑 / 购物流派…）
-                        LLM 从 L1 反思蒸馏而来；按需加载，单次至多 1 章
+L2 abstraction    ~5-15 chapters   thematic profiles (coding habits / performance tricks /
+                                   infrastructure topology / shopping philosophy…)
+                                   distilled by the LLM reflecting over L1; loaded on demand,
+                                   at most 1 chapter per turn
 
-L1 情景层   目标 ≤300 条 active
-                        原子记忆（preference/fact/lesson/knowledge/skill_index），
-                        带 keywords、证据数、置信度、时间戳。检索主力，全部进 FTS。
+L1 episode        target ≤300 active
+                                   atomic memories (preference/fact/lesson/knowledge/skill_index),
+                                   with keywords, evidence count, confidence, timestamps.
+                                   The retrieval workhorse; everything in FTS.
 
-L0 沉积层   行数不限     absorbed（已被画像吸收）/ superseded / archived
-                        永不自动加载，但保留在 FTS 里，可「考古」。
+L0 sediment       unlimited rows   absorbed (folded into profiles) / superseded / archived
+                                   never auto-loaded, but kept in FTS for "archaeology".
 ```
 
-**核心不变量：每次加载的量与库总量脱钩。** 活跃集（L3+L2+L1-active）有界收敛；L0 随便长。
+**Core invariant: the amount loaded per turn is decoupled from total store size.** The active set
+(L3+L2+L1-active) converges bounded; L0 grows freely.
 
-## 1. 消耗分级：token 只在值得的时候花
+## 1. Cost tiering: tokens are spent only when worth it
 
-一次查找的成本按深度爬升，浅层试探**零 token**：
+Lookup cost climbs with depth; shallow probes cost **zero tokens**:
 
-| 层级 | 机制 | 延迟 | token 成本 | 用途 |
+| Tier | Mechanism | Latency | Token cost | Use |
 |---|---|---|---|---|
-| T0 注入 | 纯 SQL：宪法 + 最近/高证据索引 + 画像目录 | <50ms | 0 | 每次会话启动 |
-| T1 快查 | trigram FTS 全库 BM25 ∪ 最近 ∪ pinned，融合打分 | <100ms | 0 | 试探性查找（fast 模式） |
-| T2 查询理解 | 1 次小 LLM 调用（关思考）：query → {领域, 类型, 时间窗, 同义关键词×3-5} | +1 调用 | ~500 in / ~150 out | 仅当 T1 命中稀薄时自适应触发 |
-| T3 语义重排 | 1 次 LLM 调用（关思考）：≤100 条简介 → 精选 ids + ≤1 画像章 | +1 调用 | ~4k in / ~300 out | deep 模式主路径 |
-| T4 兜底深挖 | T3 返回不足且有未入选 FTS 命中时，补候选再排一轮 | +1 调用 | 少见 | 长尾问题 |
+| T0 inject | pure SQL: constitution + recent/high-evidence index + profile directory | <50ms | 0 | every session start |
+| T1 fast lookup | trigram FTS whole-store BM25 ∪ recent ∪ pinned, fused scoring | <100ms | 0 | tentative probes (fast mode) |
+| T2 query understanding | 1 small LLM call (thinking off): query → {domain, kind, time window, 3-5 synonymous keywords} | +1 call | ~500 in / ~150 out | adaptively triggered only when T1 hits are thin |
+| T3 semantic rerank | 1 LLM call (thinking off): ≤100 one-line briefs → chosen ids + ≤1 profile chapter | +1 call | ~4k in / ~300 out | deep mode main path |
+| T4 fallback deep-dig | when T3 returns too few and unscored FTS hits remain, add candidates and rerank again | +1 call | rare | long-tail questions |
 
-`ruyi_recall` 工具三个模式：
+The `ruyi_recall` tool's three modes:
 
-- **fast**：只跑 T1，0 token，亚秒返回。agent 做大量初级试探时用它；返回里带 `score_hint`，agent 自行判断是否升级。
-- **deep**（默认）：T1 →（稀薄时 T2）→ T3 →（不足时 T4）。一次典型 deep = 1 次 LLM 调用。
-- **excavate**：fast + `include_archived`，检索 L0 沉积层——「我以前怎么处理 X 的」考古专用。
+- **fast**: T1 only, 0 tokens, sub-second. For the agent's bulk preliminary probing; returns a
+  `score_hint` so the agent can decide whether to upgrade.
+- **deep** (default): T1 → (T2 when thin) → T3 → (T4 when insufficient). A typical deep = 1 LLM call.
+- **excavate**: fast + `include_archived`, digging the L0 sediment — archaeology for "how did I
+  handle X before".
 
-**会话启动零前摇**（pi 扩展改造）：`before_agent_start` 只同步等 T0 注入；deep 召回后台跑，结果就绪后以会话内消息补投。LLM 端点再慢也不卡启动。
+**Zero-wait session start** (pi extension rework): `before_agent_start` synchronously awaits only
+T0 injection; deep recall runs in the background and is delivered as an in-conversation message when
+ready. However slow the LLM endpoint, startup never stalls.
 
-## 2. 检索：全库可及，信号融合
+## 2. Retrieval: whole store reachable, fused signals
 
-### 2.1 地基修复（现行 bug）
+### 2.1 Foundation repair (live bug)
 
-FTS5 默认 unicode61 分词把整段中文视为单 token，中文关键字匹配命中率为 0。
-v2 重建 FTS 为 **trigram** 分词（CJK 子串可匹配），索引列：`summary + keywords + content`。
+FTS5's default unicode61 tokenizer treats an entire Chinese passage as one token — Chinese keyword
+matching had a 0% hit rate. v2 rebuilds FTS as **trigram** tokenization (CJK substrings matchable),
+index columns: `summary + keywords + content`.
 
-### 2.2 取消候选资格门槛
+### 2.2 Candidate eligibility gates removed
 
-旧设计：`evidence≥3 OR 60天内` 才有资格进候选，超 300 才启用 FTS——
-恰恰会丢掉「两年前踩过一次的坑」这类最有价值的记忆。
-v2：**全部 active 记忆无条件参与 FTS 检索**（倒排索引成本 ∝ 命中数，与总量无关）。
+Old design: only `evidence≥3 OR within 60 days` qualified for candidacy, FTS enabled only past
+300 entries — precisely the design to lose "the trap I stepped into once two years ago", the most
+valuable kind of memory. v2: **all active memories participate in FTS unconditionally** (inverted
+index cost ∝ matches, independent of total size).
 
-### 2.3 融合打分
-
-```
-score = BM25相关度 × (1 + 时间衰减加分 + log(1+evidence)加分 + pinned加分 + scope匹配加分)
-```
-
-- 相关度主导：强线索唤旧忆（两年前精确命中的教训 > 昨天弱相关的笔记）
-- 时间是弱提升与决胜手，不是门槛
-- L2 查询理解提取到显式时间暗示（「最近」「去年」）时，时间才成为硬过滤条件
-
-候选并集：`FTS top-60 ∪ 最近20 ∪ pinned ∪ (T2触发时: 同domain/时间窗补充)`，去重截断 ≤100 条简介给 T3。
-
-### 2.4 为什么不上向量
-
-个人记忆规模（L0 到几万条量级）下，trigram FTS（字面/子串）+ LLM 查询扩展（同义/语义）+ LLM 重排（最终判断）已经覆盖向量的价值；引入 sqlite-vec / embedding 服务会破坏零依赖原则并增加部署复杂度。列为 v3 候选，届时以 A/B 数据说话。
-
-## 3. 收敛与抽象：库不无限长大
-
-### 3.1 已有机制（保留并对齐新状态机）
-
-- **merge**（每晚）：NEW / REINFORCE / REFINE / SUPERSEDE，增量防重
-- **reorganize**（每晚）：全库视角去重、解冲突、archive 不值钱的；targetSize 超出时加大力度
-- **decay**（每晚）：低置信推断 90 天无再见 → archived
-
-### 3.2 吸收机制（v2 新增的核心一环）
-
-synthesize 升级为「深睡」反思（每周 / 大导入后）：
-
-1. **聚类**：对 active 记忆做语义聚类（不按 domain 标签，按意义——Python 的教训和 PHP 的教训会聚进同一个「编程习惯」主题），产出 ≤10 个主题
-2. **著章**：每个主题用成员全文写/刷新画像章（现有逻辑），version+1
-3. **吸收**：被章节完整覆盖的成员记忆 → `status='absorbed', absorbed_by=profile_id`：
-   - 豁免：pinned、毕业习惯（evidence≥5）、30 天内仍温热的
-   - 被吸收者留在 L0，FTS 可考古，不再占用活跃检索面
-4. **主题演化**：聚类是每次全量重跑的，主题自然合并（Python+PHP→编程习惯）与分裂；消失的主题保留旧章（stale 好过消失），重现时刷新
-
-### 3.3 稳态循环
+### 2.3 Fused scoring
 
 ```
-白天：使用 → 会话日志累积
-夜梦：triage→extract→verify→merge→reorganize→decay   （L1 增量治理）
-周梦：synthesize + absorb                                （L1 → L2 向上抽象）
-结果：L1 active 收敛在目标水位（默认300），
-      人的「记忆、经验、技能」以 L2 画像章 + L3 宪法为终态，
-      L0 只进不出但永不自动加载。
+score = BM25 relevance × (1 + recency boost + log(1+evidence) boost + pinned boost + scope-match boost)
 ```
 
-## 4. 技能槽位与需求闭环
+- Relevance dominates: a strong clue recalls an old memory (a two-year-old exact-hit lesson beats
+  yesterday's weakly related note)
+- Time is a weak boost and tiebreaker, never a gate
+- Only when T2 query understanding extracts an explicit time hint ("recently", "last year") does
+  time become a hard filter
 
-### 4.1 原理：空槽位不加载"默认通用技能"
+Candidate union: `FTS top-60 ∪ recent 20 ∪ pinned ∪ (when T2 fires: same-domain/time-window
+supplements)`, deduped and truncated to ≤100 one-line briefs for T3.
 
-LLM 的通用知识在训练时已固化进权重，随每次调用免费携带。槽位为空时塞"通用教程"是花钱重复已有能力，还会稀释真正值钱的用户增量。ruyi 的价值 = 用户在通用知识之上的增量（环境、习惯、坑）。
+### 2.4 Why no vectors
 
-### 4.2 槽位生命周期
+At personal-memory scale (L0 up to tens of thousands), trigram FTS (literal/substring) + LLM query
+expansion (synonym/semantics) + LLM rerank (final judgement) already cover the value of vectors;
+introducing sqlite-vec / an embedding service would break the zero-dependency principle and add
+deployment complexity. Listed as a v3 candidate, to be decided by A/B data.
+
+## 3. Convergence and abstraction: the store doesn't grow forever
+
+### 3.1 Existing mechanisms (kept, aligned to the new state machine)
+
+- **merge** (nightly): NEW / REINFORCE / REFINE / SUPERSEDE — incremental dedup
+- **reorganize** (nightly): whole-store dedup, conflict resolution, archiving the worthless;
+  pushes harder when over targetSize
+- **decay** (nightly): low-confidence inferences unseen for 90 days → archived
+
+### 3.2 The absorption mechanism (v2's core addition)
+
+synthesize upgrades to "deep sleep" reflection (weekly / after large imports):
+
+1. **Cluster**: semantically cluster active memories (not by domain tag, by meaning — a Python
+   lesson and a PHP lesson cluster into the same "coding habits" theme), producing ≤10 themes
+2. **Author chapters**: write/refresh a profile chapter per theme from members' full text (existing
+   logic), version+1
+3. **Absorb**: member memories fully covered by a chapter → `status='absorbed', absorbed_by=profile_id`:
+   - exemptions: pinned, graduated habits (evidence≥5), anything still warm within 30 days
+   - the absorbed stay in L0, diggable via FTS, no longer occupying the active retrieval surface
+4. **Theme evolution**: clustering reruns from scratch each time; themes merge naturally
+   (Python+PHP → coding habits) and split; vanished themes keep their old chapters (stale beats
+   gone) and refresh on reappearance
+
+### 3.3 Steady-state loop
 
 ```
-gap(缺口) → seeding(育苗) → mature(成熟) → (久不刷新则 stale)
+Daytime: use → session logs accumulate
+Night dream: triage→extract→verify→merge→reorganize→decay   (L1 incremental governance)
+Week dream: synthesize + absorb                              (L1 → L2 upward abstraction)
+Result: L1 active converges at the target waterline (default 300);
+        one's "memories, experience, skills" end state = L2 profile chapters + L3 constitution;
+        L0 is write-only and never auto-loads.
 ```
 
-- **gap**：有需求无积累，登记在册，注入侧不动作
-- **seeding**：成员记忆不足著章阈值——它们就是普通 L1 记忆走正常检索；需求强烈时夜梦可提前写"育苗章"，头部标注 `成熟度: 部分经验`
-- **mature**：正式画像章，每次会话至多加载 1 章，仅在对话正好落入该领域时
+## 4. Skill slots and the demand loop
 
-### 4.3 注入语气按成熟度分级
+### 4.1 Principle: an empty slot does not load a "default generic skill"
 
-防止部分经验以"规则"姿态带偏 LLM（instruction hierarchy 污染）：
+An LLM's general knowledge was frozen into its weights at training time and comes free with every
+call. Stuffing "generic tutorials" into an empty slot pays to duplicate existing capability and
+dilutes the truly valuable user increment. ruyi's value = the user's increment over general
+knowledge (environment, habits, traps).
 
-- 育苗章：「部分过往经验，仅供参考，不作为规则」
-- 成熟章：「长期形成的习惯与经验，默认遵循，除非与当前需求冲突」
-- 一切注入的底线：「永不覆盖用户当下说的话」
-
-### 4.4 需求闭环
+### 4.2 Slot lifecycle
 
 ```
-白天：recall_log 记录每次查找 {判定领域, 命中数, 质量, 延迟}
-       命中稀薄领域 → 需求计数+1
-夜梦：triage 对需求领域段落降低放行阈值（优先捕获原料）
-      synthesize 按 (需求计数, 成员数) 排序著章（优先补缺口）
-周梦：缺口积累够 → 育苗章 → 成熟章，版本演化
+gap → seeding → mature → (stale if unrefreshed for long)
 ```
 
-用进废退：需求信号驱动巩固方向，槽位系统由此成为"待完善池子"的生产侧引擎。
+- **gap**: demand without accumulation; registered, no injection-side action
+- **seeding**: member memories below the chapter threshold — they're ordinary L1 memories on the
+  normal retrieval path; under strong demand the night dream may pre-write a "seeding chapter"
+  headed `maturity: partial experience`
+- **mature**: a formal profile chapter, at most 1 loaded per session, only when the conversation
+  lands in its domain
 
-### 4.5 领域隔离
+### 4.3 Injection tone graded by maturity
 
-画像按语义主题分章（编程/摄影/运维/语言学习互不干扰）：T3 重排只看标题目录（约10行）挑至多 1 章；L3 宪法层只放目录不放内容；agent 可用工具主动调取任意章。
+Preventing partial experience from steering the LLM in the posture of "rules" (instruction
+hierarchy pollution):
 
-## 5. 多协议 LLM 适配
+- seeding chapter: "partial past experience, for reference only, not rules"
+- mature chapter: "long-formed habits and experience; follow by default unless they conflict with
+  current needs"
+- the floor under all injection: "never overrides what the user says right now"
+
+### 4.4 The demand loop
+
+```
+Daytime: recall_log records each lookup {judged domain, hit count, quality, latency}
+         thin-hit domains → demand count +1
+Night dream: triage lowers the pass threshold on demand-domain passages (capture material first)
+         synthesize orders chapter-writing by (demand count, member count) (fill gaps first)
+Week dream: enough gap accumulation → seeding chapter → mature chapter, versions evolve
+```
+
+Use it or lose it: demand signals drive the direction of consolidation; the slot system becomes the
+production-side engine of a "to-be-completed pool".
+
+### 4.5 Domain isolation
+
+Profiles chapter by semantic theme (coding/photography/ops/language-learning don't interfere):
+T3 rerank reads only the title directory (~10 lines) and picks at most 1 chapter; the L3
+constitution layer holds the directory, not the content; the agent can pull any chapter via tools.
+
+## 5. Multi-protocol LLM adaptation
 
 ```jsonc
 "llm": {
   "protocol": "anthropic",           // "anthropic" | "openai"
   "baseUrl": "...", "apiKey": "...", "model": "...",
-  "thinking": "off",                 // "off" | "default" | 数字(budget)；尽力而为，被拒则降级
-  "steps": {                         // 两档覆盖：回忆用快/便宜模型，做梦用聪明模型
+  "thinking": "off",                 // "off" | "default" | number(budget); best-effort, degrades on rejection
+  "steps": {                         // two-tier override: recall on a fast/cheap model, dream on a smart one
     "recall": { "model": "...", "protocol": "...", "baseUrl": "...", "apiKey": "..." },
     "dream":  { "model": "..." }
   }
 }
 ```
 
-- openai 协议：`/v1/chat/completions`，覆盖 DeepSeek / 通义 / OpenAI / Moonshot / vLLM / Ollama；`max_tokens` 被拒时自动换 `max_completion_tokens`；支持 `response_format: json_object` 的端点自动启用
-- anthropic 协议：保留现状；thinking 关/预算已实测可用
-- step 分类：`recall` 档 = T2 查询理解 + T3 重排；`dream` 档 = triage/extract/verify/merge/reorganize/synthesize
-- token 记账两协议归一化，token_log 增加 `latency_ms` 列
+- openai protocol: `/v1/chat/completions`, covering DeepSeek / Qwen / OpenAI / Moonshot / vLLM /
+  Ollama; auto-switches to `max_completion_tokens` when `max_tokens` is rejected; auto-enables
+  `response_format: json_object` where supported
+- anthropic protocol: as before; thinking off/budget verified live
+- step classification: `recall` tier = selection-side steps; `dream` tier =
+  triage/extract/verify/merge/reorganize/synthesize
+- token accounting normalized across both protocols; token_log gains a `latency_ms` column
 
-## 6. 健壮性与运维
+## 6. Robustness and operations
 
-- **断路器分级**：注入超时不再连累 `ruyi_remember`；按操作类型独立断路；超时档 inject 2s / recall 30s / remember 45s
-- **schema migration**：`PRAGMA user_version` 驱动；v2 迁移 = 加 keywords/absorbed_by 列 + trigram FTS 重建 + keywords 回填（存量每 20 条一批调 LLM 生成）
-- **ruyi doctor**：服务存活 / DB 计数 / FTS 中文自检 / LLM 连通+延迟实测 / 扩展安装检测
-- **备份**：每次 dream 前 `VACUUM INTO` 快照，保留 7 份
-- **安全**：默认绑 127.0.0.1；config.local.json 权限 600；data/ logs/ profiles/ 全部 gitignore
-- **首梦成本控制**：`dream.initialMaxDays`（默认 14 天），放全量前提示预估量
-- **多用户**：pi 扩展读 `RUYI_OWNER` 环境变量（schema 已留 owner 字段，当前恒为 default，未来可恢复多用户）
+- **Graded circuit breakers**: injection timeouts no longer drag down `ruyi_remember`; independent
+  breakers per operation type; timeouts inject 2s / recall 30s / remember 45s
+- **schema migration**: driven by `PRAGMA user_version`; the v2 migration = add keywords/absorbed_by
+  columns + trigram FTS rebuild + keywords backfill (existing entries batched 20 per LLM call)
+- **ruyi doctor**: service liveness / DB counts / FTS Chinese self-check / LLM connectivity+latency
+  live test / extension install detection
+- **Backups**: `VACUUM INTO` snapshot before every dream, 7 retained
+- **Security**: binds 127.0.0.1 by default; config.local.json mode 600; data/ logs/ profiles/ all
+  gitignored
+- **First-dream cost control**: `dream.initialMaxDays` (default 14 days); estimated volume is shown
+  before unleashing the full corpus
+- **Multi-user**: the pi extension reads the `RUYI_OWNER` env var (schema already carries the owner
+  field, currently always default; multi-user can return in future)
 
-## 7. 发布形态
+## 7. Release form
 
-- `scripts/install.sh`：环境检测 → 配置引导 → systemd（有 root）或 nohup+cron（无 root）→ 冒烟测试
-- **AGENT.README.md**：写给 agent 的自安装手册（检测→分支→命令→每步验证→回退）；人类 README 走"讲体验不讲技术"路线（新对话聊老问题零摩擦、不重复注入、五类知识、画像收敛），细节全部留在 AGENT 文档
-- pi 扩展同步更新：L0 零前摇注入、三模式 recall 工具、RUYI_OWNER
+- `scripts/install.sh`: environment check → config guidance → systemd (with root) or nohup+cron
+  (without) → smoke test
+- **AGENT.README.md**: the self-install manual written for agents (detect → branch → commands →
+  verify each step → fallbacks); the human README takes the "experience, not technology" route
+  (zero-friction old topics in new chats, no repeat injection, five knowledge kinds, profile
+  convergence); all details live in the AGENT doc
+- pi extension updated in step: L0 zero-wait injection, three-mode recall tool, RUYI_OWNER
 
-## 8. 实施分期
+## 8. Implementation phases
 
-| 期 | 内容 | 验证 |
+| Phase | Content | Verification |
 |---|---|---|
-| P1 地基 | migration 框架、trigram FTS 重建、keywords 列+回填、absorbed_by 列、断路器分级、latency_ms、recall_log | doctor 全绿；「阿里云」用例命中 |
-| P2 召回 | T1 融合打分、fast/deep/excavate 三模式、T2 自适应、扩展零前摇改造 | 真实 query 集 A/B：新旧命中率对比；延迟分布 |
-| P3 抽象 | synthesize v2 吸收机制、主题演化、槽位生命周期、需求闭环（triage 倾斜 + 缺口优先）、语气分级 | 模拟两轮周梦：active 数下降、画像覆盖、缺口优先补、考古可查 |
-| P4 兼容 | openai 协议、steps 两档、thinking 控制 | DeepSeek 端点实测 extract+recall 全链路 |
-| P5 发布 | install.sh、AGENT.README.md、systemd 模板化、gitignore 收尾、推送 | 干净机器 clone → agent 自装成功 |
+| P1 foundation | migration framework, trigram FTS rebuild, keywords column+backfill, absorbed_by column, graded breakers, latency_ms, recall_log | doctor all green; the "Aliyun" use case hits |
+| P2 recall | T1 fused scoring, fast/deep/excavate modes, adaptive T2, extension zero-wait rework | real query-set A/B: old vs new hit rates; latency distribution |
+| P3 abstraction | synthesize v2 absorption, theme evolution, slot lifecycle, demand loop (triage tilt + gap priority), tone grading | two simulated week-dreams: active count drops, profile coverage, gaps filled first, archaeology works |
+| P4 compatibility | openai protocol, two steps tiers, thinking control | DeepSeek endpoint live-tested through extract+recall end to end |
+| P5 release | install.sh, AGENT.README.md, systemd templating, gitignore finish, push | clean-machine clone → agent self-installs successfully |
 
-旧召回路径保留为 `recall.pipeline: "legacy"` 开关一个版本周期，用于回退与 A/B。
+The old recall pipeline was kept as the `recall.pipeline: "legacy"` switch for one version cycle,
+for rollback and A/B.

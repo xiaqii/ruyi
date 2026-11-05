@@ -27,7 +27,7 @@ async function api(path, { method = "GET", body, timeoutMs = 5_000 } = {}) {
 export const inject = (cwd = "") =>
 	api(`/inject?owner=${OWNER}&cwd=${encodeURIComponent(cwd)}&scope=smart`);
 
-// 2. Recall: mode fast (free) | deep (LLM rerank) | excavate (dig absorbed/archived too)
+// 2. Recall: mode fast (free) | deep (one LLM selector call over the whole-store listing) | excavate (dig absorbed/archived too)
 export const recall = (query, mode = "deep", k = 6) =>
 	api("/recall", { method: "POST", body: { query, k, owner: OWNER, mode }, timeoutMs: 45_000 });
 

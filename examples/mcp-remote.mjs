@@ -23,7 +23,7 @@ const TOKEN = process.env.RUYI_TOKEN ?? "";
 const OWNER = process.env.RUYI_OWNER ?? "default";
 
 const TOOLS = [
-	{ name: "recall", description: "Search long-term memory (past conversations) for preferences, facts, project context and lessons relevant to the current task. mode=fast: free keyword probe; deep (default): LLM rerank; excavate: also dig absorbed/archived memories.", inputSchema: { type: "object", properties: { query: { type: "string" }, k: { type: "number" }, mode: { type: "string", enum: ["fast", "deep", "excavate"] } }, required: ["query"] } },
+	{ name: "recall", description: "Search long-term memory (past conversations) for preferences, facts, project context and lessons relevant to the current task. mode=fast: free keyword probe; deep (default): LLM semantic selection over the whole-store listing; excavate: also dig absorbed/archived memories.", inputSchema: { type: "object", properties: { query: { type: "string" }, k: { type: "number" }, mode: { type: "string", enum: ["fast", "deep", "excavate"] } }, required: ["query"] } },
 	{ name: "list", description: "List recent long-term memory entries (one-line summaries with ids).", inputSchema: { type: "object", properties: { limit: { type: "number" } } } },
 	{ name: "get", description: "Get a memory entry by id.", inputSchema: { type: "object", properties: { id: { type: "number" } }, required: ["id"] } },
 	{ name: "ingest", description: "Submit raw conversation text or notes; ruyi distills durable memories from it.", inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } },

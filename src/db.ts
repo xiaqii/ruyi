@@ -550,13 +550,19 @@ export function insertMemory(
 		logMemoryAction(d, null, "BLOCKED_TOMBSTONE", { summary: c.summary, owner: scope.owner });
 		return -1;
 	}
+	// kind whitelist at the single chokepoint: every write path (HTTP /memories,
+	// dream merge, ingest, MCP) funnels here, and LLM merge output picks kinds
+	// freely — an out-of-enum kind (e.g. "engineering-practice") once slipped in
+	// and silently evaded every kind-based consumer. Unknown → lesson.
+	const VALID_KINDS = new Set(["preference", "fact", "knowledge", "lesson", "skill_index"]);
+	const kind = VALID_KINDS.has(c.kind as string) ? c.kind : "lesson";
 	const t = now();
 	const r = d
 		.prepare(
 			`INSERT INTO memories (owner, cwd, kind, domain, summary, mini, content, keywords, origin, confidence, evidence, source, created_at, updated_at, last_seen_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
 		)
-		.run(scope.owner, scope.cwd, c.kind, c.domain ?? null, c.summary, c.mini ?? "", c.content, (c.keywords ?? []).join(" "), c.origin, c.confidence, c.source ?? null, t, t, t);
+		.run(scope.owner, scope.cwd, kind, c.domain ?? null, c.summary, c.mini ?? "", c.content, (c.keywords ?? []).join(" "), c.origin, c.confidence, c.source ?? null, t, t, t);
 	return Number(r.lastInsertRowid);
 }
 

@@ -8,20 +8,22 @@ So I built ruyi. Used it, tweaked it, kept using it — and somewhere along the 
 
 My agent remembers now. Work feels normal again. Putting it here in case friends find it useful.
 
+*作者：将军 (xiaqii)*
+
 - **It knows you better over time** — you work by day; overnight it merges duplicates, drops what's stale, and distills your habits into profiles
 - **New chat, old topic, zero catch-up** — no re-explaining your setup, your tastes, or the traps you've already paid for
 - **No nagging** — unrelated chats get zero memories; relevant ones arrive once, never on repeat
 
-## Core techniques (关键词速览)
+## Core techniques
 
-- **Distill the person, not the episode（画像提炼）** — the store holds abstractions (style, rules, lessons, environment), never project state or code; a four-stage LLM pipeline does it: **triage → extract → verify → merge**（二审可否决、quote 强制溯源、origin/confidence 诚实标注）
-- **Two-level profile tree（两级画像树）** — domain index → on-demand subchapters, re-synthesized weekly; project codenames are abstracted away by iron rule
-- **Forget tombstone（遗忘墓碑）** — forgetting leaves a content hash (never the text); every write path checks it, so a forgotten memory can't be re-distilled from old logs. Zero LLM, pure enforcement
-- **Confidence gate（置信度门禁）** — a high-confidence user-stated entry can only be retired by another high-confidence user-stated one; inferences demote to reinforce. Policy in code, judgement in the LLM
-- **Self-eating guard（防自噬）** — injected memory envelopes are stripped from session logs before distillation, so the system never manufactures circular evidence from its own output
-- **Tiered retrieval（分级召回）** — fast keyword probe → LLM semantic rerank with topic anchoring → excavate mode for archived/superseded history, labelled as such; per-conversation injection ledger guarantees each item arrives once
-- **Semantic decay（语义衰减）** — user-stated facts never decay; only low-confidence inferences expire — and even then they archive (excavatable), never delete
-- **Contract-tested releases（契约测试）** — tsc + 59 zero-LLM smoke tests + 40 API contract tests gate every tag; the daily self-update rolls back on any failure
+- **Distill the person, not the episode** — the store holds abstractions (style, rules, lessons, environment), never project state or code; a four-stage LLM pipeline does it: **triage → extract → verify → merge** (the verifier can veto, quotes force source-grounding, origin/confidence are honestly labelled)
+- **Two-level profile tree** — domain index → on-demand subchapters, re-synthesized weekly; project codenames are abstracted away by iron rule
+- **Forget tombstone** — forgetting leaves a content hash (never the text); every write path checks it, so a forgotten memory can't be re-distilled from old logs. Zero LLM, pure enforcement
+- **Confidence gate** — a high-confidence user-stated entry can only be retired by another high-confidence user-stated one; inferences demote to reinforce. Policy in code, judgement in the LLM
+- **Self-eating guard** — injected memory envelopes are stripped from session logs before distillation, so the system never manufactures circular evidence from its own output
+- **One-call semantic selection** — a small fast model reads the whole store as a listing (every memory's one-line positioning note + every chapter's abstract) plus the current topic, and picks what matters for this turn. No keyword gatekeeping: at human scale the entire store fits one listing, and mis-filed items can't be shut out. Keyword FTS survives only as the degraded fallback when the LLM is down; a per-conversation injection ledger guarantees each item arrives once
+- **Semantic decay** — user-stated facts never decay; only low-confidence inferences expire — and even then they archive (excavatable), never delete
+- **Contract-tested releases** — tsc + 63 zero-LLM smoke tests + 44 API contract tests gate every tag; the daily self-update rolls back on any failure
 
 ## Install ruyi
 
@@ -85,5 +87,5 @@ More (config, troubleshooting, every client): [AGENT.README.md](AGENT.README.md)
 
 - `src/` — the service (Node ≥ 23.6, TypeScript, SQLite)
 - `scripts/` — `install.sh` (install), `self-update.sh` (self-update), `release.sh` (release pipeline), `compare-distill.ts` (distill A/B helper)
-- `test/` — `smoke.ts` (34 zero-LLM tests), `llm-smoke.ts` (LLM-path smoke), `api-contract.ts`
+- `test/` — `smoke.ts` (63 zero-LLM tests), `llm-smoke.ts` (LLM-path smoke), `api-contract.ts`
 - `prompts/`, `docs/`, `examples/` — prompts, design docs, client connectors
