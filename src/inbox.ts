@@ -1,7 +1,10 @@
-/** inbox.ts — 原料收件箱：用户把大文件（zip/tar.gz/jsonl/txt/md）丢进 ~/ruyi-inbox，
- *  夜梦开始前自动 瘦身(纯程序) → 筛选(flash 只判留/丢) → kept 文本进入正常做梦管线(k3 提取)。
- *  原则:flash 永远不提取记忆(只做筛选);提取质量永远走 dream 层。
- *  断点:inbox_files 表按 (文件×镜片) 记录字符偏移,重传/续传/多镜片互不干扰。 */
+/** inbox.ts — raw-material intake: drop big files (zip/tar.gz/jsonl/txt/md) into ~/ruyi-inbox;
+ *  before each dream run: slim (pure code) → filter (flash keep/drop only) → kept text joins
+ *  the normal dream pipeline (k3 extraction). Principle: flash NEVER extracts memories — it
+ *  only filters; extraction quality always lives in the dream tier.
+ *  Resume: inbox_files records per-(file×lens) char offsets; re-drops/lenses don't interfere.
+ *  Dialogue guard: ruyi extracts from conversations — text with no speaker structure (books,
+ *  notes) is skipped unless the user opts in with an explicit .lens.md. */
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, appendFileSync, openSync, readSync, closeSync } from "node:fs";
@@ -18,9 +21,9 @@ import { complete } from "./llm.ts";
 import { loadPrompt } from "./prompts.ts";
 import { now, getDb } from "./db.ts";
 
-// ---------- 格式识别与解包（零依赖） ----------
+// ---------- format detection & unpacking (zero deps) ----------
 
-/** 快速指纹:大小+mtime+首尾 64K 哈希（GB 级文件秒级完成;替换/追加都能识别） */
+/** Fast fingerprint: size + mtime + head/tail 64K hash — seconds even for GB files; catches both replacement and appends. */
 function fingerprint(path: string): string {
 	const st = statSync(path);
 	const h = createHash("sha256").update(String(st.size)).update(String(st.mtimeMs));
@@ -38,7 +41,7 @@ function fingerprint(path: string): string {
 
 interface UnpackedEntry { name: string; data: Buffer }
 
-/** zip 顺序扫描 local headers——中央目录在文件尾,截断的 zip 也能救出完整部分 */
+/** zip: scan local headers sequentially — the central directory lives at the tail, so a truncated zip still yields its intact prefix. */
 export function unpackZip(data: Buffer): UnpackedEntry[] {
 	const out: UnpackedEntry[] = [];
 	let pos = 0;
@@ -57,15 +60,15 @@ export function unpackZip(data: Buffer): UnpackedEntry[] {
 		const start = pos + 30 + nlen + elen;
 		try {
 			if (flag & 0x08) {
-				// data descriptor: 用 inflate 流自终止找数据尾
+				// data descriptor: the inflate stream self-terminates at the data end
 				const chunk = data.subarray(start);
-				// inflateRawSync 需要知道结束——用流式逐块试探不划算,直接尝试到文件尾
-				const content = inflateRawSync(chunk, { finishFlush: 4 /* Z_SYNC_FLUSH 无效时抛 */ , maxOutputLength: 512 * 1024 * 1024 });
+				// inflateRawSync needs an end; probing chunk-by-chunk isn't worth it — just try to EOF
+				const content = inflateRawSync(chunk, { finishFlush: 4 /* throws when Z_SYNC_FLUSH can't end it */ , maxOutputLength: 512 * 1024 * 1024 });
 				out.push({ name, data: content });
-				break; // descriptor 模式下无法可靠继续扫描,到此为止（截断场景已救出大头）
+				break; // can't reliably resync after a descriptor entry — stop (truncated zips already salvaged the bulk)
 			}
 			const raw = data.subarray(start, start + csize);
-			if (raw.length < csize) break; // 文件体截断
+			if (raw.length < csize) break; // file body truncated
 			out.push({ name, data: method === 0 ? raw : inflateRawSync(raw) });
 			pos = start + csize;
 		} catch { break; }
@@ -73,7 +76,7 @@ export function unpackZip(data: Buffer): UnpackedEntry[] {
 	return out;
 }
 
-/** tar.gz = gunzip + 512 字节头 walk（ustar） */
+/** tar.gz = gunzip + 512-byte header walk (ustar) */
 export function unpackTarGz(data: Buffer): UnpackedEntry[] {
 	const tar = gunzipSync(data, { maxOutputLength: 4 * 1024 * 1024 * 1024 });
 	const out: UnpackedEntry[] = [];
@@ -92,7 +95,7 @@ export function unpackTarGz(data: Buffer): UnpackedEntry[] {
 	return out;
 }
 
-// ---------- 瘦身（纯程序） ----------
+// ---------- slimming (pure code) ----------
 
 const B64_RE = /data:image\/[a-zA-Z0-9+]+;base64,[A-Za-z0-9+/=\s]{200,}/g;
 const CODE_RE = /```[a-zA-Z]*\n[\s\S]*?```/g;
@@ -122,7 +125,7 @@ function extractTexts(content: unknown): string[] {
 	return out;
 }
 
-/** 会话 jsonl（claude-code / pi 通用）→ 【用户】/【AI】对话流；思考、工具、代码全丢 */
+/** Session jsonl (claude-code / pi) → 【用户】/【AI】 dialogue stream; thinking, tools, code all dropped. */
 function slimJsonl(text: string): string {
 	const out: string[] = [];
 	for (const line of text.split("\n")) {
@@ -140,7 +143,7 @@ function slimJsonl(text: string): string {
 	return out.join("\n\n");
 }
 
-/** 判断一段文本是不是会话 jsonl（采样前 50 行找消息行——文件头常是元信息行） */
+/** Is this text a session jsonl? Sample the first 50 lines for a message line — headers are often metadata lines. */
 function looksLikeSessionJsonl(text: string): boolean {
 	let checked = 0;
 	for (const line of text.split("\n")) {
@@ -156,7 +159,7 @@ function looksLikeSessionJsonl(text: string): boolean {
 
 function slimOne(name: string, data: Buffer): { format: string; text: string } | null {
 	const ext = name.toLowerCase();
-	if (!/\.(jsonl|txt|md|log)$/.test(ext) && !ext.includes(".")) { /* 无扩展名也试 */ }
+	if (!/\.(jsonl|txt|md|log)$/.test(ext) && !ext.includes(".")) { /* extensionless files get a try too */ }
 	else if (!/\.(jsonl|txt|md|log)$/.test(ext)) return null;
 	const text = data.toString("utf8");
 	if (looksLikeSessionJsonl(text)) {
@@ -167,7 +170,7 @@ function slimOne(name: string, data: Buffer): { format: string; text: string } |
 	return cleaned.length >= 50 ? { format: "text", text: cleaned } : null;
 }
 
-// ---------- 收件箱主流程 ----------
+// ---------- inbox main flow ----------
 
 export interface InboxReport {
 	scanned: number;
@@ -178,7 +181,7 @@ export interface InboxReport {
 	errors: string[];
 }
 
-/** 今天 inbox-filter 已花的人民币（token_log 按当日 step 聚合 × 单价表） */
+/** CNY spent on inbox-filter today (token_log aggregated by step × price table). */
 function spentTodayCny(d: DatabaseSync, pricePerMIn: number, pricePerMOut: number): number {
 	const day = now().slice(0, 10);
 	const row = d.prepare(
@@ -205,7 +208,7 @@ export async function runInbox(opts: { verbose?: boolean } = {}): Promise<InboxR
 	);
 
 	for (const f of readdirSync(dir)) {
-		if (f.endsWith(".lens.md")) continue; // 镜片伴生文件不是原料
+		if (f.endsWith(".lens.md")) continue; // lens sidecars are not raw material
 		const path = join(dir, f);
 		if (!statSync(path).isFile()) continue;
 		report.scanned++;
@@ -215,15 +218,22 @@ export async function runInbox(opts: { verbose?: boolean } = {}): Promise<InboxR
 		insert.run(f, fp, "", statSync(path).size, now(), now());
 	}
 
-	// 逐文件处理 pending/slimmed
-	const pending = d.prepare("SELECT * FROM inbox_files WHERE status IN ('pending','slimmed','filtering') ORDER BY id").all() as Array<{
+	// process pending/slimmed files one by one ('skipped' is re-checked every run: adding a
+	// .lens.md later revives a skipped book — the opt-in must not be a one-way door)
+	const pending = d.prepare("SELECT * FROM inbox_files WHERE status IN ('pending','slimmed','filtering','skipped') ORDER BY id").all() as Array<{
 		id: number; path: string; status: string; lens_offsets: string; filter_stats: string;
 	}>;
 	for (const row of pending) {
 		const path = join(dir, row.path);
 		if (!existsSync(path)) continue;
 		try {
-			// ① 瘦身（pending 状态才做）
+			// A skipped file without a lens stays skipped (cheap no-op until a lens appears).
+			if (row.status === "skipped" && !existsSync(join(dir, row.path.replace(/\.[^.]+$/, "") + ".lens.md"))) continue;
+			if (row.status === "skipped") {
+				d.prepare("UPDATE inbox_files SET status='slimmed', updated_at=? WHERE id=?").run(now(), row.id);
+				row.status = "slimmed";
+			}
+			// ① slim (deterministic, zero LLM)
 			if (row.status === "pending") {
 				const raw = readFileSync(path);
 				let entries: UnpackedEntry[];
@@ -241,14 +251,26 @@ export async function runInbox(opts: { verbose?: boolean } = {}): Promise<InboxR
 					.run(total.length, "auto", now(), row.id);
 				report.slimmed++;
 				row.status = "slimmed";
-				if (opts.verbose) console.log(`[inbox] slimmed ${row.path}: ${(statSync(path).size / 1e6).toFixed(1)}MB → ${(total.length / 1e3).toFixed(0)}K字`);
+				if (opts.verbose) console.log(`[inbox] slimmed ${row.path}: ${(statSync(path).size / 1e6).toFixed(1)}MB → ${(total.length / 1e3).toFixed(0)}K chars`);
 			}
 
-			// ② 筛选（flash 判留/丢;镜片决定留什么）
+			// ② filter (flash keep/drop; lenses decide what passes)
 			const slimPath = join(slimDir, row.path.replace(/[^\w.-]+/g, "_") + ".slim.txt");
 			if (!existsSync(slimPath)) continue;
 			const slimText = readFileSync(slimPath, "utf8");
 			const lensFile = join(dir, row.path.replace(/\.[^.]+$/, "") + ".lens.md");
+			// Dialogue guard: ruyi distills the USER — speaker turns are the authority signal.
+			// Books/notes have no speakers; letting them through would file external knowledge as
+			// personal memory and break convergence. Explicit .lens.md = user opted in (e.g.
+			// a lens of "keep only my margin notes").
+			const hasDialogue = /【(?:用户|AI)】|^(?:User|Human|Assistant)\s*[:：]/m.test(slimText);
+			if (!hasDialogue && !existsSync(lensFile)) {
+				d.prepare("UPDATE inbox_files SET status='skipped', error=?, updated_at=? WHERE id=?")
+					.run("no dialogue structure — ruyi extracts from conversations; books/notes need an explicit .lens.md to be processed", now(), row.id);
+				report.errors.push(row.path + ": skipped (no dialogue structure)");
+				if (opts.verbose) console.log(`[inbox] skipped ${row.path}: no dialogue structure (books need a .lens.md)`);
+				continue;
+			}
 			const lenses = existsSync(lensFile)
 				? readFileSync(lensFile, "utf8").split("\n").map((l) => l.trim()).filter(Boolean)
 				: ["default"];
@@ -301,6 +323,6 @@ async function completeSafe(system: string, user: string): Promise<{ keep?: bool
 		const r = await complete({ system, user, step: "inbox-filter", maxTokens: 400 });
 		return JSON.parse(r.text) as { keep?: boolean };
 	} catch {
-		return { keep: true }; // 筛选器故障时保守放行（宁多留不漏）
+		return { keep: true }; // filter failure errs toward keeping (a miss is forever, extra cost isn't)
 	}
 }
