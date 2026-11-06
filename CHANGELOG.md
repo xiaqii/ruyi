@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.5.4] - 2026-11-06
+
+- readme: npm install = curl the release tarball then install the local file — npm 12 blocks remote URL/git installs entirely (EALLOWREMOTE/EALLOWGIT defaults), local files unaffected; verified end-to-end on npm 12.1
 ## [1.5.3] - 2026-11-06
 
 - npm-installable for real: bin now points at compiled dist/cli.js (node refuses type-stripping inside node_modules), prepare builds on pack; release.sh attaches a prebuilt ruyi.tgz to every GitHub release so npm i -g <tarball URL> needs zero flags on npm 12 (git installs are EALLOWGIT + scripts-blocked there)
