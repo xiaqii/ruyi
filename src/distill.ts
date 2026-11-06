@@ -2,6 +2,7 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync
 import { readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { loadConfig, STATE_ROOT } from "./config.ts";
+import { inboxKeptDir } from "./inbox.ts";
 import {
 	activeCandidates,
 	archiveMemory,
@@ -386,6 +387,17 @@ export interface DreamOptions {
 }
 
 export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
+	// Raw-material inbox first: slim (deterministic) → filter (flash keep/drop).
+	// Kept text lands in inbox-kept/ and flows through the normal session machinery below.
+	try {
+		const { runInbox } = await import("./inbox.ts");
+		const ir = await runInbox();
+		if (ir.scanned > 0)
+			console.log(`[inbox] scanned=${ir.scanned} slimmed=${ir.slimmed} filtered=${ir.windowsFiltered} kept=${ir.windowsKept}${ir.budgetStopped ? " (daily budget reached)" : ""}${ir.errors.length ? " errors=" + ir.errors.length : ""}`);
+	} catch (e) {
+		console.warn(`[inbox] failed, continuing dream without it: ${String(e).slice(0, 150)}`);
+	}
+
 	const config = loadConfig();
 	const db = getDb(config.dbPath);
 	const backup = backupDb(config.dbPath, config.dream.keepBackups ?? 7);
@@ -425,6 +437,7 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 			: sessionFiles([
 					...config.sessions.map((s) => ({ agent: s.agent, dir: s.dir, owner: s.owner ?? "default" })),
 					...syncedSessionDirs(config), // remote machines' synced session logs
+					{ agent: "text", dir: inboxKeptDir(), owner: "default" }, // inbox: filtered raw-material drops
 				]);
 
 		for await (const { agent, file, owner } of stream) {

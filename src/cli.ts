@@ -99,6 +99,14 @@ async function main(): Promise<void> {
 			startMcpServer();
 			break;
 
+		case "inbox": {
+			const { runInbox } = await import("./inbox.ts");
+			const r = await runInbox({ verbose: true });
+			console.log(`inbox: scanned=${r.scanned} slimmed=${r.slimmed} filtered=${r.windowsFiltered} kept=${r.windowsKept}${r.budgetStopped ? " budget-stopped" : ""}`);
+			for (const e of r.errors) console.warn("  error:", e);
+			break;
+		}
+
 		case "distill": {
 			const report = await runDream({
 				dryRun: flags["dry-run"] === true,

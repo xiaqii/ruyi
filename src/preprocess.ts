@@ -236,12 +236,29 @@ export function readClaudeCodeSessionDelta(file: string, offset: number, maxChar
 }
 
 /** Pluggable per-agent session parsers. Add opencode etc. here. */
+/** Plain text (inbox-kept material): the slimmed file is already conversation-shaped
+ *  (【用户】/【AI】 markers); just read line-by-line from the byte offset. */
+export function readPlainTextDelta(file: string, offset: number, maxChars: number): SessionDelta {
+	const out: string[] = [];
+	let total = 0;
+	let newOffset = offset;
+	for (const { line, end } of iterLines(file, offset)) {
+		newOffset = end;
+		out.push(line);
+		total += line.length + 1;
+		if (total >= maxChars) break;
+	}
+	return { text: out.join("\n"), newOffset };
+}
+
 export function readSessionDelta(agent: string, file: string, offset: number, maxChars: number): SessionDelta {
 	switch (agent) {
 		case "pi":
 			return readPiSessionDelta(file, offset, maxChars);
 		case "claude-code":
 			return readClaudeCodeSessionDelta(file, offset, maxChars);
+		case "text":
+			return readPlainTextDelta(file, offset, maxChars);
 		default:
 			throw new Error(`unsupported agent session format: ${agent}`);
 	}

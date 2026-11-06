@@ -1,5 +1,5 @@
-// session-start.mjs — Claude Code SessionStart hook: fetches the profile directory once per session, 3s timeout, silent degradation.
 #!/usr/bin/env node
+// session-start.mjs — Claude Code SessionStart hook: fetches the profile directory once per session, 3s timeout, silent degradation.
 /**
  * Claude Code SessionStart hook — gives Claude the same zero-cost opening
  * injection pi gets (constitution + memory index + profile directory).

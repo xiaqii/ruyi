@@ -52,5 +52,17 @@
   "decay": {
     "inferredArchiveDays": 90,
     "inferredArchiveConfidenceBelow": 0.7
+  },
+  "inbox": {
+    "dir": "~/ruyi-inbox",
+    "windowChars": 8000,
+    "nightlyFilterChars": 2000000,
+    "dailyBudgetCny": 80,
+    "prices": {
+      "qwen3.7-flash": [
+        0.2,
+        0.8
+      ]
+    }
   }
 }

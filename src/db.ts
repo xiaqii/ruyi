@@ -17,8 +17,10 @@ const dbs = new Map<string, DatabaseSync>();
  * v7 = topics.summary_at (reply_id of last gist refresh — piggyback + incremental fallback).
  * v8 = profiles.parent_id (two-level profile tree: domain index -> subchapters).
  * v9 = tombstones table (forget leaves a content fingerprint; distill never resurrects it).
+ * v10 = replies.answer/gist (layered topic context). v11 = memories.mini + profiles.abstract
+ *       (selector listing). v12 = inbox_files (raw-material inbox: per-file×lens offsets).
  */
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 
 function migrate(d: DatabaseSync, from: number): void {
 	if (from < 1) {
@@ -88,6 +90,9 @@ function migrate(d: DatabaseSync, from: number): void {
 		const cols = d.prepare(`SELECT name FROM pragma_table_info('replies')`).all() as unknown as { name: string }[];
 		if (!cols.some((c) => c.name === "answer")) d.exec(`ALTER TABLE replies ADD COLUMN answer TEXT NOT NULL DEFAULT ''`);
 		if (!cols.some((c) => c.name === "gist")) d.exec(`ALTER TABLE replies ADD COLUMN gist TEXT NOT NULL DEFAULT ''`);
+	}
+	if (from < 12) {
+		createInboxFiles(d);
 	}
 	if (from < 11) {
 		// v11: one-line positioning handles. memories.mini (≤50 chars) is what the
@@ -169,6 +174,23 @@ CREATE TABLE IF NOT EXISTS injection_log (
 }
 
 /** Topic registry + per-turn reply ledger (auto-inject bookkeeping; topics never pruned). */
+function createInboxFiles(d: DatabaseSync): void {
+	d.exec(`CREATE TABLE IF NOT EXISTS inbox_files (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  path         TEXT NOT NULL UNIQUE,
+  content_hash TEXT NOT NULL,
+  format       TEXT NOT NULL DEFAULT '',
+  raw_bytes    INTEGER NOT NULL DEFAULT 0,
+  slim_chars   INTEGER NOT NULL DEFAULT 0,
+  status       TEXT NOT NULL DEFAULT 'pending',
+  lens_offsets TEXT NOT NULL DEFAULT '{}',
+  filter_stats TEXT NOT NULL DEFAULT '{}',
+  error        TEXT,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+)`);
+}
+
 function createTopics(d: DatabaseSync): void {
 	d.exec(`
 CREATE TABLE IF NOT EXISTS topics (
@@ -489,6 +511,21 @@ CREATE TABLE IF NOT EXISTS token_log (
 );
 CREATE INDEX IF NOT EXISTS idx_token_log_at ON token_log(at);
 
+CREATE TABLE IF NOT EXISTS inbox_files (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  path         TEXT NOT NULL UNIQUE,
+  content_hash TEXT NOT NULL,
+  format       TEXT NOT NULL DEFAULT '',
+  raw_bytes    INTEGER NOT NULL DEFAULT 0,
+  slim_chars   INTEGER NOT NULL DEFAULT 0,
+  status       TEXT NOT NULL DEFAULT 'pending',
+  lens_offsets TEXT NOT NULL DEFAULT '{}',
+  filter_stats TEXT NOT NULL DEFAULT '{}',
+  error        TEXT,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS memory_log (
   id      INTEGER PRIMARY KEY AUTOINCREMENT,
   at      TEXT NOT NULL,
@@ -521,6 +558,7 @@ CREATE TABLE IF NOT EXISTS profiles (
 	createSlotDemands(db);
 	createSessionRegistry(db);
 	createInjectionLog(db);
+	createInboxFiles(db); // idempotent, same rationale
 	createTopics(db); // idempotent; migrate() is a no-op for fresh DBs (user_version already current)
 	createTombstones(db);
 

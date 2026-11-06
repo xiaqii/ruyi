@@ -86,8 +86,22 @@ export interface Config {
 		maxTokens: number;
 		requestTimeoutMs: number;
 		thinking?: "off" | "default" | number;
-		/** Per-tier overrides: "recall" = understand+rerank (cheap/fast), "dream" = everything else. */
+		/** Per-tier overrides: "recall" = selection-side steps (pick/topic-summary/reply-gist/inbox-filter — cheap/fast), "dream" = everything else. */
 		steps?: { recall?: LlmTierConfig; dream?: LlmTierConfig };
+	};
+	inbox: {
+		/** Drop directory: users toss raw material (zip/tar.gz/jsonl/txt/md) here; the nightly
+		 *  dream slims (deterministic) → filters (flash keep/drop) → feeds kept text to the
+		 *  normal pipeline. Optional <file>.lens.md sidecar narrows what the filter keeps. */
+		dir: string;
+		/** Filter window size in chars (kept well under the flash model's 32K-token tier). */
+		windowChars: number;
+		/** Per-night cap on slimmed chars sent to the filter (big files chew over nights). */
+		nightlyFilterChars: number;
+		/** Daily cost cap in CNY for the inbox-filter step; stops filtering when exceeded. */
+		dailyBudgetCny: number;
+		/** Yuan per million tokens [input, output] per model, for budget accounting. */
+		prices: Record<string, [number, number]>;
 	};
 	dream: {
 		pipeline: "full" | "single";

@@ -63,6 +63,7 @@ export function loadConfig(): Config {
 	const config = merged as unknown as Config;
 	config.dbPath = expandPath(config.dbPath);
 	for (const s of config.sessions) s.dir = expandPath(s.dir);
+	if (config.inbox?.dir) config.inbox.dir = expandPath(config.inbox.dir);
 	config.llm.baseUrl = config.llm.baseUrl.replace(/\/+$/, "");
 
 	if (!localPath) {
