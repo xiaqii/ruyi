@@ -169,7 +169,12 @@ export async function wikiAsk(opts: { question: string; library?: string; deep?:
 	// L1: which book? (book cards are question-oriented — written for exactly this glance)
 	const bookList = books.map((b) => `[${b.library}#${b.id}] 《${b.title}》${b.author ? `（${b.author}）` : ""}：${b.card}`).join("\n");
 	const p1 = await llmJson("wiki-pick", loadPrompt("wiki-pick-book"), `问题：${opts.question}\n\n藏书：\n${bookList}`);
-	const chosen = books.find((b) => b.library === String(p1.library ?? "") && b.id === Number(p1.book));
+	// Models fumble compound fields (e.g. {"library": null, "book": 2}) — match on the id
+	// first and only use the library string to disambiguate, never as a hard requirement.
+	const bookId = Number(p1.book);
+	const libGuess = /^([a-z0-9_-]+)/i.exec(String(p1.library ?? ""))?.[1] ?? "";
+	const byId = Number.isInteger(bookId) && bookId > 0 ? books.filter((b) => b.id === bookId) : [];
+	const chosen = byId.find((b) => b.library === libGuess) ?? (byId.length === 1 ? byId[0] : undefined);
 	if (!chosen) return `(没有哪本书适合回答这个问题${books.length > 0 ? "；馆员理由：" + String(p1.reason ?? "") : ""})`;
 
 	// L2: which sections? (chapter minis, one glance)
@@ -179,7 +184,10 @@ export async function wikiAsk(opts: { question: string; library?: string; deep?:
 		.all(chosen.id) as unknown as SectionRow[];
 	const secList = sections.map((s) => `${s.id}. ${s.title}${s.mini ? " — " + s.mini : ""}`).join("\n");
 	const p2 = await llmJson("wiki-pick", loadPrompt("wiki-pick-section"), `问题：${opts.question}\n\n《${chosen.title}》章节：\n${secList}`);
-	const ids = (Array.isArray(p2.sections) ? p2.sections : []).map(Number).filter((n) => Number.isInteger(n)).slice(0, MAX_SECTIONS);
+	// Validate against the listing we actually showed — flash sometimes hallucinates ids
+	// that belong to another book; an unvalidated IN() would silently read the wrong chapter.
+	const validIds = new Set(sections.map((s) => s.id));
+	const ids = (Array.isArray(p2.sections) ? p2.sections : []).map(Number).filter((n) => validIds.has(n)).slice(0, MAX_SECTIONS);
 	const picked = ids.length > 0
 		? (db.prepare(`SELECT id, ord, title, text FROM sections WHERE id IN (${ids.map(() => "?").join(",")}) ORDER BY ord`).all(...ids) as unknown as Array<SectionRow & { text: string }>)
 		: [];
