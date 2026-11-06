@@ -1,3 +1,4 @@
+/** decay.ts — nightly semantic decay: low-confidence inferences age out to archived; user-stated facts never decay. */
 import type { DatabaseSync } from "node:sqlite";
 import { archiveMemory, logMemoryAction } from "./db.ts";
 import type { Config } from "./types.ts";

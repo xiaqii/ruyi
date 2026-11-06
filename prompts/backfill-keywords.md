@@ -18,3 +18,5 @@ Return ONLY a JSON object:
   ]
 }
 ```
+
+<!-- prompt: edit freely; the service reads this file live from disk on every call — no restart needed. -->

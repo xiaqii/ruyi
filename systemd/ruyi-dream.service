@@ -1,3 +1,4 @@
+# Nightly dream one-shot — driven by ruyi-dream.timer.
 [Unit]
 Description=ruyi nightly dream (memory distillation)
 

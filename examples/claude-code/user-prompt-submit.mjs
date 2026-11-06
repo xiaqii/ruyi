@@ -1,3 +1,4 @@
+// user-prompt-submit.mjs — Claude Code UserPromptSubmit hook: per-turn semantic injection with server-side per-conversation dedup.
 #!/usr/bin/env node
 /**
  * Claude Code UserPromptSubmit hook — per-turn semantic recall, same behavior

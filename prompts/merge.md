@@ -23,3 +23,5 @@ Return ONLY a JSON array, one entry per new candidate, in the same order. Every 
 ```
 
 Keywords are for full-text retrieval: the exact words someone would search with to find this memory — include both Chinese and English forms when both are natural.
+
+<!-- prompt: edit freely; the service reads this file live from disk on every call — no restart needed. -->

@@ -1,3 +1,4 @@
+# Weekly profile re-synthesis one-shot — driven by ruyi-synthesize.timer.
 [Unit]
 Description=ruyi weekly profile synthesis (memory store -> theme profiles)
 After=network.target

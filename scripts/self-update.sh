@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# self-update.sh — daily cron: upgrade to the latest tagged release only, local tsc+smoke gate, auto-rollback on failure.
 # ruyi self-update — daily, safe, boring.
 #
 # Updates ONLY to the latest release tag (every tag passed the full release

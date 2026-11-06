@@ -1,3 +1,4 @@
+/** reorganize.ts — nightly whole-store governance: dedup, conflict resolution, archiving the worthless. */
 import type { DatabaseSync } from "node:sqlite";
 import { completeJson } from "./llm.ts";
 import { loadPrompt } from "./prompts.ts";

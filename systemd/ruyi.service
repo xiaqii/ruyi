@@ -1,3 +1,4 @@
+# Installed variant of ruyi.service.template (install.sh substitutes __ROOT__/__NODE__).
 [Unit]
 Description=ruyi (如忆) long-term memory service for AI agents
 After=network.target

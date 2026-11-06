@@ -19,3 +19,5 @@ Return ONLY a JSON array, one entry per candidate, in the same order:
   { "index": 1, "verdict": "drop", "reason": "one-off task detail" }
 ]
 ```
+
+<!-- prompt: edit freely; the service reads this file live from disk on every call — no restart needed. -->

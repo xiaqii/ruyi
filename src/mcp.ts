@@ -1,3 +1,4 @@
+/** mcp.ts — stdio MCP server (JSON-RPC lines): the six tools, reading the same SQLite store as the HTTP service. */
 import { createInterface } from "node:readline";
 import { loadConfig } from "./config.ts";
 import {

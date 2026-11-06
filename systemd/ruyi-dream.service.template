@@ -1,3 +1,4 @@
+# Template — nightly dream one-shot; install.sh substitutes __ROOT__/__NODE__.
 # Template — install.sh substitutes __ROOT__/__NODE__ and installs into systemd.
 [Unit]
 Description=ruyi nightly dream (memory distillation)

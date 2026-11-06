@@ -9,3 +9,5 @@ Rules:
 - Output ONLY the summary text, no JSON, no preamble.
 
 OLD SUMMARY:
+
+<!-- prompt: edit freely; the service reads this file live from disk on every call — no restart needed. -->

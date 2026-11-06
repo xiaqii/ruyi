@@ -16,3 +16,5 @@ Return ONLY a JSON object:
 ```json
 { "worth": false, "reason": "one short sentence" }
 ```
+
+<!-- prompt: edit freely; the service reads this file live from disk on every call — no restart needed. -->

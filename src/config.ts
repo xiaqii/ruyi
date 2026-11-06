@@ -1,3 +1,4 @@
+/** config.ts — layered config loading (defaults ← config.example.json ← config.local.json) and the ResolvedConfig shape. */
 import { existsSync, readFileSync, mkdirSync, copyFileSync, chmodSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";

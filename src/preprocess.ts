@@ -1,3 +1,4 @@
+/** preprocess.ts — session-log parsers (pi jsonl / claude-code jsonl) and byte-offset incremental reading for the dream pipeline. */
 import { openSync, readSync, closeSync, fstatSync } from "node:fs";
 
 /** Read the cwd recorded in the session header (first {"type":"session"} line). */

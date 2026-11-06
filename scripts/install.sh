@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# install.sh — environment check → npm install → config.local.json → systemd/cron → doctor.
 # ruyi (如忆) installer — designed to be run BY an agent (see AGENT.README.md)
 # or a human. Idempotent: safe to re-run.
 set -euo pipefail

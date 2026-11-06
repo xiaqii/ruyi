@@ -1,3 +1,4 @@
+// opencode MCP registration — merge into ~/.config/opencode/opencode.jsonc with the repo's absolute path.
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
