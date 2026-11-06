@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.5.2] - 2026-11-06
+
+- npm-installable straight from GitHub (bin entry, files whitelist, repo metadata — npm i -g github:xiaqii/ruyi works, zero npmjs involvement); bare 'ruyi' now prints usage instead of starting a server; USAGE text English + current; stale serve-default comment fixed
 ## [1.5.1] - 2026-11-06
 
 - two-tier model expectation now explicit: doctor WARNs on single-model setups (every turn would pay thinking-model latency/cost for selection) and on recall tier with thinking left on; AGENT.README §0 presents the cheap-selection + strong-dream split upfront incl. free-quota route; config.example _llm_notes; stale step names in doctor advisory fixed
