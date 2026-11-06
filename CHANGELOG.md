@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.6.1] - 2026-11-06
+
+- wiki robustness from live two-book testing: book-pick JSON fumbles tolerated (match by id, library string only disambiguates — models emit {"library":null,"book":2}); picked section ids validated against the shown listing (flash hallucinated ids from the OTHER book, silently reading wrong chapters); pick prompt writes reason before the decision
 ## [1.6.0] - 2026-11-06
 
 - wiki: pull-based book libraries — one SQLite per domain under STATE_ROOT/wiki, 3-level flash drill-down (question-oriented book cards → chapter minis → verbatim passages), quick/deep answer modes with an iron verbatim-quote rule for doses and figures; ingest rides the strong dream tier (resumable), ruyi_wiki_ask MCP tool lazy-loaded so a broken wiki can never take memory tools down; verified on 《治病法轨》 (49 chapters, 366K chars): dose lookups quote exactly, off-domain questions rejected at the book-pick level, ~¥0.01 per query
