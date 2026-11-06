@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.6.4] - 2026-11-06
+
+- wiki term-hit lane: any book with a chapter keyword appearing verbatim in the question is always a candidate (deterministic complement to card-pick, not a gate) — book-level keywords can't cover every term a book argues about, and card-pick alone rejected 牛蒡子 questions despite two chapters warning against it; book cards enriched to 400 chars + 50 keywords incl. famously-criticized items
 ## [1.6.3] - 2026-11-06
 
 - wiki keyword lane (user's design, replaces my FTS entity lane): k3 now writes an 80-char mini + 1-20 verbatim keywords per chapter (drugs/formulas/diseases/persons — including terms the chapter only WARNS against); flash's chapter listing carries keywords, so a question about 牛蒡子 finds the chapter whose mini never mentions it; per-chapter ingest failures skip instead of aborting the run; wiki-reindex CLI rewrites in place, resumable
