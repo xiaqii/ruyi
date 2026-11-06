@@ -1,13 +1,13 @@
-# ruyi docker compose — 数据库永远在真实硬盘上（~/ruyi-docker/），
-# 容器删除/重建/升级镜像都不丢。这是默认且唯一的推荐姿势。
+# ruyi docker compose — the database always lives on a real host directory (~/ruyi-docker/);
+# deleting/rebuilding the container or upgrading the image loses nothing. This is the default and only recommended posture.
 #
-#   docker compose up -d --build        # 首次构建+启动
-#   编辑 ~/ruyi-docker/config.local.json 填 LLM key（首跑后自动生成模板）
-#   docker compose restart              # 改完配置重启生效
-#   docker compose --profile dream up -d   # 可选：容器内夜间做梦
-#   docker compose pull && docker compose up -d --build   # 升级镜像
+#   docker compose up -d --build        # first build + start
+#   edit ~/ruyi-docker/config.local.json to fill in the LLM key (a template is auto-generated on first run)
+#   docker compose restart              # restart after config changes
+#   docker compose --profile dream up -d   # optional: in-container nightly dreaming
+#   docker compose pull && docker compose up -d --build   # upgrade the image
 #
-# 不用 compose 也行：docker build -t ruyi . && docker run -d --name ruyi \
+# Compose is optional: docker build -t ruyi . && docker run -d --name ruyi \
 #   -v ~/ruyi-docker:/data -p 127.0.0.1:8899:8899 ruyi serve -h 0.0.0.0
 
 services:
@@ -15,7 +15,7 @@ services:
     build: .
     image: ruyi:latest
     container_name: ruyi
-    # 容器内必须绑 0.0.0.0，-p 端口映射才能进来；token 用 -t 或配置 authToken
+    # the container must bind 0.0.0.0 for the -p port mapping to work; token via -t or the authToken config
     command: ["serve", "-h", "0.0.0.0"]
     ports:
       - "127.0.0.1:8899:8899"
@@ -23,9 +23,9 @@ services:
       - ~/ruyi-docker:/data
     restart: unless-stopped
 
-  # 可选：夜间做梦（triage→extract→merge→reorganize）。默认关闭，用
-  # docker compose --profile dream up -d 开启。与主服务共享 /data，
-  # 同一时间只有一个在提炼（dream.lock 互斥）。
+  # optional: nightly dreaming (triage→extract→merge→reorganize). Off by default; enable with
+  # docker compose --profile dream up -d. Shares /data with the main service;
+  # only one distiller runs at a time (dream.lock mutual exclusion).
   dream:
     image: ruyi:latest
     profiles: ["dream"]
