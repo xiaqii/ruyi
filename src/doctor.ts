@@ -85,17 +85,21 @@ export async function runDoctor(): Promise<void> {
 	const recallCheck = await checkLlm("rerank");
 	const dreamCheck = await checkLlm("extract");
 	ok = recallCheck.ok && dreamCheck.ok && ok;
-	// Advisory (never auto-mutates config): a slow recall tier on the SAME model
-	// as dream means selection work is paying thinking-model latency for nothing.
+	// Advisory (never auto-mutates config): per-turn selection (pick/inbox-filter) runs every
+	// user turn — on a thinking-capable or premium model that's silent latency + cost.
 	{
-		const recallLlm = resolveLlm("rerank");
+		const recallLlm = resolveLlm("pick");
 		const dreamLlm = resolveLlm("extract");
-		if (recallCheck.ms > 3000 && recallLlm.model === dreamLlm.model) {
-			line("WARN", "recall tier shares the dream model", `${recallCheck.ms}ms — selection work (understand/rerank) does not need a thinking model`);
-			console.log(`  Suggestion: point the recall tier at a cheap fast model in config.local.json:`);
+		const singleTier = recallLlm.model === dreamLlm.model && recallLlm.baseUrl === dreamLlm.baseUrl;
+		if (singleTier) {
+			line("WARN", "single model for both tiers", `${recallLlm.model} — every user turn pays for selection on this model (${recallCheck.ms}ms just now)`);
+			console.log(`  Suggestion: keep the strong model for the dream tier, point recall at a cheap thinking-off model:`);
 			console.log(`  "steps": { "recall": { "protocol": "openai", "baseUrl": "<provider>", "apiKey": "<key>",`);
 			console.log(`              "model": "qwen3.7-flash | deepseek-chat | claude-haiku-4-5", "thinking": "off" } }`);
-			console.log(`  (measured: no quality loss on selection tasks, ~3x faster)`);
+			console.log(`  (measured: no quality loss on selection tasks, ~3x faster; new DashScope accounts get 1M free tokens on qwen flash models)`);
+		} else if (recallLlm.thinking !== "off") {
+			line("WARN", "recall tier thinking not off", `${recallLlm.model} runs selection with thinking enabled — latency per turn for zero selection-quality gain`);
+			console.log(`  Fix: set "thinking": "off" in llm.steps.recall (maps to enable_thinking:false on OpenAI-compatible endpoints).`);
 		}
 	}
 

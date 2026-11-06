@@ -21,7 +21,13 @@
     "model": "claude-sonnet-4-5",
     "maxTokens": 8192,
     "requestTimeoutMs": 180000,
-    "thinking": "default"
+    "thinking": "default",
+    "_notes": [
+      "ruyi works best with TWO models: a cheap thinking-OFF model for per-turn selection (llm.steps.recall), and your strong model for nightly distillation (base llm).",
+      "Single-model setups work but every user turn pays thinking-model latency/cost — doctor will WARN.",
+      "Cheap-and-good recall options: qwen3.7-flash (new DashScope accounts get 1M free tokens), deepseek-chat, claude-haiku-4-5. Remember thinking:'off'.",
+      "OpenAI-compatible endpoints (DashScope/qwen): thinking:'off' is sent as enable_thinking:false automatically."
+    ]
   },
   "_llm_notes": {
     "protocol": "'anthropic' (Anthropic, Kimi coding endpoint, ...) or 'openai' (DeepSeek, OpenAI, Qwen, Moonshot, vLLM, Ollama, ...). For openai put the base up to /v1 or the host root, e.g. https://api.deepseek.com",

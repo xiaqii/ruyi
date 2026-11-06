@@ -44,12 +44,14 @@ the §4b manual Windows path is much faster than fighting bash.
 
 Before starting, confirm with the user (all three required):
 
-1. **LLM endpoint triple**: `baseUrl`, `apiKey`, `model`
-   - ruyi speaks two protocols — ask which one the user's endpoint is:
+1. **LLM endpoints — ideally TWO models** (this is the one design expectation ruyi makes):
+   - a **cheap fast model with thinking off** for the per-turn selection tier (`steps.recall`) — it runs on every user message, so thinking-mode latency/cost would be paid dozens of times a day for zero quality gain (measured: no quality loss on selection tasks, ~3x faster)
+   - a **strong model** for the nightly distillation tier (base `llm`) — extraction quality is where money matters
+   - One model alone works, but doctor will WARN: you'd be running every turn's selection on your premium model
+   - Free route for the recall tier: new DashScope accounts get 1M free tokens on qwen3.7-flash; deepseek-chat and claude-haiku-4-5 also work well
+   - ruyi speaks two protocols — ask which one each endpoint is:
      - `anthropic` protocol: Anthropic official, Kimi coding endpoint, etc. (path style `/v1/messages`)
      - `openai` protocol: DeepSeek, OpenAI official, Qwen, Moonshot, vLLM, Ollama, etc. (`/v1/chat/completions`)
-   - If the user has two models (one smart, one cheap), recommended: smart for the dream tier,
-     cheap for the recall tier (see `steps` in §3)
 2. **Session log directory**: ruyi dreams by reading your session logs.
    - pi: usually `~/.pi/agent/sessions` (pi web deployments may differ — confirm!)
    - Claude Code: `~/.claude/projects`
