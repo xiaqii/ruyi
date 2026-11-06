@@ -46,6 +46,8 @@ NEW="$(node -e "const p='$OLD'.split('.').map(Number); const l='$LEVEL';
   console.log(p.join('.'))" 2>/dev/null || true)"
 [ -n "$NEW" ] || { say "bad level: $LEVEL"; exit 1; }
 node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json'));p.version='$NEW';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+# keep the lockfile version in step (it drifted to 0.2.0 once and showed as a fossil)
+node -e "const fs=require('fs');const l=JSON.parse(fs.readFileSync('package-lock.json'));l.version='$NEW';if(l.packages&&l.packages[''])l.packages[''].version='$NEW';fs.writeFileSync('package-lock.json',JSON.stringify(l,null,2)+'\n')"
 say "version $OLD → $NEW"
 
 # 5. CHANGELOG (values via env: interpolating $NOTE into JS source breaks on apostrophes)
@@ -60,8 +62,10 @@ fs.writeFileSync('CHANGELOG.md', idx===-1 ? cl.trimEnd()+'\n\n'+entry : cl.slice
 
 
 # 6. commit + tag + push
-git add package.json CHANGELOG.md
-git commit -q -m "release: v$NEW — $NOTE"
+git add package.json package-lock.json CHANGELOG.md
+# commit message carries no version number (GitHub's file list shows it per file);
+# the version lives in the tag and CHANGELOG
+git commit -q -m "release: $NOTE"
 git tag -a "v$NEW" -m "v$NEW: $NOTE"
 git push --follow-tags
 

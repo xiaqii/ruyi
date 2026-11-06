@@ -3,6 +3,8 @@
 # not shipped). State lives in /data (env RUYI_STATE) — always bind-mount a
 # host directory there, or the database dies with the container.
 
+LABEL org.opencontainers.image.source="https://github.com/xiaqii/ruyi"
+
 FROM node:24-slim
 
 WORKDIR /app

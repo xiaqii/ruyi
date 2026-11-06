@@ -1,3 +1,4 @@
+// TypeScript config — JSONC: comments are legal here, tsc strips them.
 {
   "compilerOptions": {
     "target": "es2023",

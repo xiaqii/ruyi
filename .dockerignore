@@ -7,3 +7,6 @@ dist
 *.tgz
 Dockerfile
 docker-compose.yml
+*.bak
+.DS_Store
+privacy-gate

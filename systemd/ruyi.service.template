@@ -1,3 +1,4 @@
+# Template — install.sh substitutes __ROOT__/__NODE__ and installs into systemd.
 [Unit]
 Description=ruyi (如忆) long-term memory service for AI agents
 After=network.target
