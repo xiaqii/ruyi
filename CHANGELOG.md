@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.6.5] - 2026-11-06
+
+- recall tool-call discipline: the directory line made the agent re-fetch injected memories on every follow-up (374 calls/day vs 30) — tool description now states memories are auto-injected every turn and to call only for uncovered angles; 'more can be searched via ruyi_recall' footer dropped from non-empty injections (discovery lives in the tool description)
 ## [1.6.4] - 2026-11-06
 
 - wiki term-hit lane: any book with a chapter keyword appearing verbatim in the question is always a candidate (deterministic complement to card-pick, not a gate) — book-level keywords can't cover every term a book argues about, and card-pick alone rejected 牛蒡子 questions despite two chapters warning against it; book cards enriched to 400 chars + 50 keywords incl. famously-criticized items
