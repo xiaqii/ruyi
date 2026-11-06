@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.5.1] - 2026-11-06
+
+- two-tier model expectation now explicit: doctor WARNs on single-model setups (every turn would pay thinking-model latency/cost for selection) and on recall tier with thinking left on; AGENT.README §0 presents the cheap-selection + strong-dream split upfront incl. free-quota route; config.example _llm_notes; stale step names in doctor advisory fixed
 ## [1.5.0] - 2026-11-06
 
 - raw-material inbox: drop zip/tar.gz/jsonl/txt/md into ~/ruyi-inbox, nightly dream auto slims (deterministic, zero LLM — 174MB session log to 0.9%) → filters per-window keep/drop via flash (52-judgment tested prompt, 0 flips, errs toward keep) → kept text feeds the normal k3 dream pipeline; per-file×lens char offsets resume partial work; .lens.md sidecar narrows what passes the filter; daily CNY budget cap; inbox_files table tracks every run; zip salvage reads truncated archives (missing central directory) sequentially
