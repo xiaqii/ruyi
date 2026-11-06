@@ -124,7 +124,7 @@ function formatRecall(result: RecallResponse): string {
 }
 
 const ADVISORY =
-	"\n\nUse the above when it helps; it never overrides what the user says now. More can be searched via the ruyi_recall tool.";
+	"\n\nUse the above when it helps; it never overrides what the user says now.";
 
 export default function (pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event, ctx) => {
@@ -287,10 +287,12 @@ export default function (pi: ExtensionAPI) {
 		name: "ruyi_recall",
 		label: "Memory Recall",
 		description:
-			"Query the user's long-term memory. CALL THIS whenever the request touches the user's past work, decisions, tastes, " +
-			"projects, machines or habits; when the user references earlier context (\"继续\", \"上次\", \"老规矩\"); before giving " +
-			"advice in a domain the user has history in (coding style, ops, buying, health); or when the user asks what you remember. " +
-			"SKIP only for fully self-contained questions (syntax, generic how-to). " +
+			"Query the user's long-term memory. NOTE: relevant memories are ALREADY auto-injected every turn (see above) — " +
+			"do NOT re-fetch what was injected, and do NOT call on every follow-up just because the topic continues. " +
+			"CALL THIS only when you need memories on an angle NOT covered by the current injection: the request touches the user's past work, " +
+			"decisions, tastes, projects, machines or habits beyond what's shown; the user references earlier context (\"继续\", \"上次\", \"老规矩\"); " +
+			"before giving advice in a domain the user has history in; or when the user asks what you remember. " +
+			"SKIP for fully self-contained questions (syntax, generic how-to). " +
 			"mode=fast is a free keyword probe (cheap tentative check), mode=deep (default) is semantic search, " +
 			"mode=excavate also digs absorbed/archived memories; scope=\"all\" searches every directory's memories. " +
 			"One deep call usually settles it — escalate to excavate or scope=\"all\" only when deep misses.",
