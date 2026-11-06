@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.5.5] - 2026-11-06
+
+- inbox dialogue guard: text without speaker structure (books/notes) is skipped — ruyi distills the user, not their library; explicit .lens.md opts in and is re-checked every run (skip is not a one-way door); inbox.ts comments fully English
 ## [1.5.4] - 2026-11-06
 
 - readme: npm install = curl the release tarball then install the local file — npm 12 blocks remote URL/git installs entirely (EALLOWREMOTE/EALLOWGIT defaults), local files unaffected; verified end-to-end on npm 12.1
