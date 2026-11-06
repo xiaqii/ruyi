@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.5.0] - 2026-11-06
+
+- raw-material inbox: drop zip/tar.gz/jsonl/txt/md into ~/ruyi-inbox, nightly dream auto slims (deterministic, zero LLM — 174MB session log to 0.9%) → filters per-window keep/drop via flash (52-judgment tested prompt, 0 flips, errs toward keep) → kept text feeds the normal k3 dream pipeline; per-file×lens char offsets resume partial work; .lens.md sidecar narrows what passes the filter; daily CNY budget cap; inbox_files table tracks every run; zip salvage reads truncated archives (missing central directory) sequentially
 ## [1.4.2] - 2026-11-05
 
 - docs: full English rewrite of API.md/AGENT.README.md/design-v2/design-v3 (author credit stays Chinese), staleness sweep (selector replaces understand/rerank descriptions, test counts, examples comments); db: kind whitelist at insertMemory chokepoint (an out-of-enum kind once slipped in via LLM merge and evaded all kind-based consumers)
