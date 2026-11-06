@@ -110,6 +110,23 @@ async function main(): Promise<void> {
 			break;
 		}
 
+		case "wiki-reindex": {
+			const { wikiDb, wikiSummarizeBook } = await import("./wiki.ts");
+			const library = String(flags.library ?? "");
+			if (!library) {
+				console.error("usage: wiki-reindex --library=tcm");
+				process.exit(1);
+			}
+			const db = wikiDb(library);
+			const books = db.prepare("SELECT id, title FROM books").all() as Array<{ id: number; title: string }>;
+			for (const b of books) {
+				console.log(`[wiki] reindexing 《${b.title}》...`);
+				const r = await wikiSummarizeBook(library, b.id, true);
+				console.log(`[wiki]   ${r.summarized} chapters rewritten`);
+			}
+			break;
+		}
+
 		case "wiki-ask": {
 			const { wikiAsk } = await import("./wiki.ts");
 			const q = rest.join(" ");

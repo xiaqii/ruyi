@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS sections (
 	ord INTEGER NOT NULL,
 	title TEXT NOT NULL,
 	mini TEXT NOT NULL DEFAULT '',
+	keywords TEXT NOT NULL DEFAULT '',
 	text TEXT NOT NULL,
 	chars INTEGER NOT NULL
 );
@@ -53,6 +54,10 @@ export function wikiDb(library: string): DatabaseSync {
 	if (!db) {
 		db = new DatabaseSync(join(wikiDir(), library + ".db"));
 		db.exec(SCHEMA);
+		db.exec("DROP TABLE IF EXISTS sections_fts"); // entity lane retired: keywords ride the flash listing instead
+		// keywords column for dbs created before it existed
+		const cols = (db.prepare("PRAGMA table_info(sections)").all() as Array<{ name: string }>).map((c) => c.name);
+		if (!cols.includes("keywords")) db.exec("ALTER TABLE sections ADD COLUMN keywords TEXT NOT NULL DEFAULT ''");
 		dbs.set(library, db);
 	}
 	return db;
@@ -122,19 +127,26 @@ export async function wikiSummarizeBook(
 ): Promise<{ summarized: number; card: string }> {
 	const db = wikiDb(library);
 	const sections = db
-		.prepare("SELECT id, ord, title, mini, text FROM sections WHERE book_id=? ORDER BY ord")
-		.all(bookId) as Array<{ id: number; ord: number; title: string; mini: string; text: string }>;
-	const upd = db.prepare("UPDATE sections SET mini=? WHERE id=?");
+		.prepare("SELECT id, ord, title, mini, keywords, text FROM sections WHERE book_id=? ORDER BY ord")
+		.all(bookId) as Array<{ id: number; ord: number; title: string; mini: string; keywords: string; text: string }>;
+	const upd = db.prepare("UPDATE sections SET mini=?, keywords=? WHERE id=?");
 	const sysSection = loadPrompt("wiki-ingest-section");
 	let summarized = 0;
 	for (const s of sections) {
-		if (s.mini) continue;
-		const r = await llmJson("wiki-ingest", sysSection, `章节标题：${s.title}\n\n原文：\n${s.text}`, 400);
-		const mini = String(r.mini ?? "").trim().slice(0, 80);
-		upd.run(mini, s.id);
-		s.mini = mini;
-		summarized++;
-		if (verbose) console.log(`[wiki]   §${s.ord} ${s.title} → ${mini}`);
+		if (s.mini && (s as { keywords?: string }).keywords) continue;
+		try {
+			const r = await llmJson("wiki-ingest", sysSection, `章节标题：${s.title}\n\n原文：\n${s.text}`, 600);
+			const mini = String(r.mini ?? "").trim().slice(0, 100);
+			const kw = (Array.isArray(r.keywords) ? r.keywords : []).map((k) => String(k).trim()).filter(Boolean).slice(0, 20).join(" ");
+			if (!mini) throw new Error("empty mini");
+			upd.run(mini, kw, s.id);
+			s.mini = mini;
+			summarized++;
+			if (verbose) console.log(`[wiki]   §${s.ord} ${s.title} → ${mini}${kw ? " 【" + kw + "】" : ""}`);
+		} catch (e) {
+			// One bad chapter must not kill a 112-chapter run — leave it for the next pass.
+			if (verbose) console.warn(`[wiki]   §${s.ord} ${s.title} FAILED: ${String(e).slice(0, 100)}`);
+		}
 	}
 	const book = db.prepare("SELECT title, author FROM books WHERE id=?").get(bookId) as { title: string; author: string };
 	const listing = sections.map((s) => `${s.ord}. ${s.title} — ${s.mini}`).join("\n");
@@ -148,7 +160,7 @@ export async function wikiSummarizeBook(
 // ---------- query (3-level drill-down, all flash) ----------
 
 interface BookRow { id: number; title: string; author: string; card: string; library: string }
-interface SectionRow { id: number; ord: number; title: string; mini: string; text?: string }
+interface SectionRow { id: number; ord: number; title: string; mini: string; keywords: string; text?: string }
 
 const MAX_SECTIONS = 5;
 const MAX_ANSWER_CHARS = 60_000; // total source text fed to the answer step
@@ -214,10 +226,10 @@ async function askOneBook(
 ): Promise<{ book: BookRow; sections: Array<{ title: string; text: string }>; answer: string } | null> {
 	const db = wikiDb(book.library);
 	const sections = db
-		.prepare("SELECT id, ord, title, mini FROM sections WHERE book_id=? ORDER BY ord")
+		.prepare("SELECT id, ord, title, mini, keywords FROM sections WHERE book_id=? ORDER BY ord")
 		.all(book.id) as unknown as SectionRow[];
 	if (sections.length === 0) return null;
-	const secList = sections.map((s) => `${s.id}. ${s.title}${s.mini ? " — " + s.mini : ""}`).join("\n");
+	const secList = sections.map((s) => `${s.id}. ${s.title}${s.mini ? " — " + s.mini : ""}${s.keywords ? `【${s.keywords}】` : ""}`).join("\n");
 	const p2 = await llmJson("wiki-pick", loadPrompt("wiki-pick-section"), `问题：${question}\n\n《${book.title}》章节：\n${secList}`);
 	// Validate against the listing we actually showed — flash sometimes hallucinates ids
 	// that belong to another book; an unvalidated IN() would silently read the wrong chapter.
