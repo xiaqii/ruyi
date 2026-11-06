@@ -32,6 +32,8 @@ No vector database. No embeddings. No babysitting. One Node process, one SQLite 
 
 ## Install
 
+Best paired with [pi](https://github.com/earendil-works/pi) / [pi web](https://github.com/agegr/pi-web) — the prebuilt extension unlocks the full experience (per-turn auto-injection, tools, graceful degradation). Other agents work too.
+
 Easiest: hand the repo URL to your agent.
 
 > Install https://github.com/xiaqii/ruyi for me.
