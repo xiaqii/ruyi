@@ -8,8 +8,8 @@ import { startMcpServer } from "./mcp.ts";
 
 /**
  * Flag parser: long `--key=v` / bare `--flag`, short `-h v` / `-h=v` / `-h`
- * (short keys: h=host p=port t=token — bare `ruyi` defaults to serve, so -h is
- * "host" here, not "help"; use --help/-? for usage).
+ * (short keys: h=host p=port t=token — on `ruyi serve`, -h is "host", not "help";
+ * use --help/-? for usage).
  */
 function parseFlags(args: string[]): { rest: string[]; flags: Record<string, string | boolean> } {
 	const flags: Record<string, string | boolean> = {};
@@ -35,17 +35,14 @@ function parseFlags(args: string[]): { rest: string[]; flags: Record<string, str
 	return { rest: positional, flags };
 }
 
-const USAGE = `ruyi (如忆) - long-term memory service for AI agents
+const USAGE = `ruyi — cross-conversation memory for AI agents
 
-Usage: node src/cli.ts [command] [options]   (全局安装后可直接 \`ruyi\`)
-
-Running bare (or any leading -h/-p/-t flag) starts the server:
-  ruyi                         Start the HTTP API server (default command)
-  ruyi serve [-h host] [-p port] [-t token]
-                               -t sets a one-off bearer token (config file wins on restart)
+Usage: ruyi [command] [options]
 
 Commands:
-  serve                        Start the HTTP API server (default when bare \`ruyi\`)
+  serve                        Start the HTTP API server (this is what systemd/docker run)
+                               ruyi serve [-h host] [-p port] [-t token]
+                               -t sets a one-off bearer token (config file wins on restart)
   mcp                          Start the MCP stdio server (for Claude Code, opencode, ...)
   distill                      Run one dream pass (nightly memory distillation)
     --pipeline=full|single     Override distillation pipeline
@@ -53,7 +50,7 @@ Commands:
                                after an outage that skipped segments)
     --dry-run                  Extract without writing to the store
   recall <query> [--k=5] [--mode=fast|deep|excavate]
-                               Recall memories (deep = LLM rerank, fast = free keyword scan)
+                               Recall memories (deep = LLM selection, fast = free keyword scan)
   list [--limit=30]            List active memories
   forget <id>                  Archive a memory
   add --kind=K --summary="S" <content>
@@ -68,14 +65,14 @@ Commands:
 
 async function main(): Promise<void> {
 	const argv = process.argv.slice(2);
-	// Named command, or bare `ruyi` / leading flags → serve.
-	// (`-h` is HOST here on purpose — `ruyi -h x -p y -t z` is the launch form.)
+	// Named command, or bare `ruyi` → usage. Starting the server is always explicit (`ruyi serve`).
+	// (`-h` is HOST, not help, on `ruyi serve` — use --help/-? for usage.)
 	const named = argv[0] !== undefined && !argv[0].startsWith("-") ? argv[0] : undefined;
 	if (named === "help" || argv[0] === "--help" || argv[0] === "-?") {
 		console.log(USAGE);
 		process.exit(0);
 	}
-	const cmd = named ?? "serve";
+	const cmd = named ?? "help"; // bare `ruyi` prints usage; starting a server is always explicit
 	const { rest, flags } = parseFlags(named ? argv.slice(1) : argv);
 	const config = loadConfig();
 	const db = getDb(config.dbPath);

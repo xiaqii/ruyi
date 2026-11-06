@@ -50,6 +50,12 @@ bash scripts/install.sh
 
 A local service runs at `http://127.0.0.1:8899`. (Node ≥ 23.6; custom directory: `bash scripts/install.sh /opt/ruyi`)
 
+**With npm, straight from GitHub** (this repo IS the registry — no npmjs account needed on either side):
+
+```bash
+npm i -g github:xiaqii/ruyi   # puts `ruyi` on your PATH: ruyi serve / ruyi doctor / ruyi distill
+```
+
 **With Docker** (no Node needed on the host):
 
 ```bash

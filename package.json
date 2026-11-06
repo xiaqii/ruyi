@@ -1,7 +1,7 @@
 {
   "name": "ruyi",
   "version": "1.5.1",
-  "description": "如忆 (ruyi) - an agent-agnostic long-term memory service: nightly LLM distillation, precise recall, graceful degradation",
+  "description": "Cross-conversation memory for AI agents — learns how you think and what you prefer. Zero deps, one SQLite file.",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -17,5 +17,38 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "typescript": "^5.8.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xiaqii/ruyi.git"
+  },
+  "bin": {
+    "ruyi": "src/cli.ts"
+  },
+  "files": [
+    "src",
+    "prompts",
+    "docs",
+    "examples",
+    "scripts",
+    "systemd",
+    "config.example.json",
+    "AGENT.README.md",
+    "API.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "docker-compose.yml",
+    "Dockerfile"
+  ],
+  "keywords": [
+    "llm",
+    "ai-agents",
+    "memory",
+    "long-term-memory",
+    "agent-memory",
+    "mcp",
+    "claude-code",
+    "sqlite",
+    "personalization"
+  ]
 }
