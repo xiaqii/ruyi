@@ -1,6 +1,7 @@
 /**
  * A/B comparison: run both distillation pipelines ("single" one-shot vs "full"
  * extract→verify→merge) on the same session and print both action sets side by side.
+ * Dev tool only — not part of the release gate.
  *
  * Usage: node scripts/compare-distill.ts <session-file.jsonl>
  */

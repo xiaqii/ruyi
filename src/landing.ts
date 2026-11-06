@@ -1,6 +1,7 @@
 /**
  * Landing page for GET / — the service URL doubles as its own manual.
  * Humans get HTML (Accept: text/html), agents/curl get Markdown.
+ * Keep it secret-free: this page is public by design.
  * NEVER put secrets here: no tokens, no internal IPs. Public by design.
  */
 

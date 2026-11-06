@@ -1,6 +1,6 @@
 /**
  * Session sync layer — remote machines push their agent session logs here,
- * the nightly dream distills them. Design answers:
+ * the nightly dream distills them (see examples/sync-sessions.mjs for the sender). Design answers:
  *
  * - Incremental: offset-based append. Client sends only new bytes; server
  *   enforces offset continuity (409 + receivedBytes on mismatch → client resumes).
