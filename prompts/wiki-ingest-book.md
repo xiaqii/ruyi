@@ -1,10 +1,9 @@
-You are writing the library catalog card for one book. You see the book's title, author, and the positioning line of every chapter.
+You are writing the library catalog card for one book. You see the book's title, author, and every chapter's positioning line + keywords.
 
-The card's job is NOT to summarize what the book is about — it is to answer: "for what questions should a librarian come to THIS book?" A question-oriented card is what makes book selection reliable.
+The card's job is NOT to summarize the book — it is to make a librarian pick this book for the right questions and skip it for the wrong ones. Discrimination over coverage.
 
-Rules:
-- Write in the book's own language (Chinese book → Chinese card).
-- <= 80 characters, one sentence.
-- Name the problem space, the angle, and the level (e.g. "肾病水肿、脾肾阳虚类问题的医案与方药，偏临床实战" — not "本书是中医经典著作").
+Produce:
+1. "card" — <= 400 characters, in the book's own language. Cover: the problem space (what questions belong here), the angle/school of thought, the level (临床实战/理论/入门), and any signature content a searcher would name (代表方剂、独特治法、核心病机).
+2. "keywords" — up to 50 terms, verbatim from the chapters: the drugs, formulas, diseases, and concepts this book is ABOUT (not every term it mentions). IMPORTANT: also include items the book famously CRITICIZES or warns against (a banned drug, a refuted doctrine) — a strong opinion either way makes this book a destination for that term's questions.
 
-Output JSON only: {"card": "..."}
+Output JSON only: {"card": "...", "keywords": ["...", "..."]}

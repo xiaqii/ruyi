@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS books (
 	title TEXT NOT NULL,
 	author TEXT NOT NULL DEFAULT '',
 	card TEXT NOT NULL DEFAULT '',
+	keywords TEXT NOT NULL DEFAULT '',
 	chapters INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL
 );
@@ -55,9 +56,11 @@ export function wikiDb(library: string): DatabaseSync {
 		db = new DatabaseSync(join(wikiDir(), library + ".db"));
 		db.exec(SCHEMA);
 		db.exec("DROP TABLE IF EXISTS sections_fts"); // entity lane retired: keywords ride the flash listing instead
-		// keywords column for dbs created before it existed
-		const cols = (db.prepare("PRAGMA table_info(sections)").all() as Array<{ name: string }>).map((c) => c.name);
-		if (!cols.includes("keywords")) db.exec("ALTER TABLE sections ADD COLUMN keywords TEXT NOT NULL DEFAULT ''");
+		// keywords columns for dbs created before they existed
+		const sCols = (db.prepare("PRAGMA table_info(sections)").all() as Array<{ name: string }>).map((c) => c.name);
+		if (!sCols.includes("keywords")) db.exec("ALTER TABLE sections ADD COLUMN keywords TEXT NOT NULL DEFAULT ''");
+		const bCols = (db.prepare("PRAGMA table_info(books)").all() as Array<{ name: string }>).map((c) => c.name);
+		if (!bCols.includes("keywords")) db.exec("ALTER TABLE books ADD COLUMN keywords TEXT NOT NULL DEFAULT ''");
 		dbs.set(library, db);
 	}
 	return db;
@@ -149,17 +152,18 @@ export async function wikiSummarizeBook(
 		}
 	}
 	const book = db.prepare("SELECT title, author FROM books WHERE id=?").get(bookId) as { title: string; author: string };
-	const listing = sections.map((s) => `${s.ord}. ${s.title} — ${s.mini}`).join("\n");
-	const r = await llmJson("wiki-ingest", loadPrompt("wiki-ingest-book"), `书名：《${book.title}》${book.author ? ` 作者：${book.author}` : ""}\n\n章节定位句：\n${listing}`, 400);
-	const card = String(r.card ?? "").trim().slice(0, 200);
-	db.prepare("UPDATE books SET card=? WHERE id=?").run(card, bookId);
+	const listing = sections.map((s) => `${s.ord}. ${s.title} — ${s.mini}${s.keywords ? `【${s.keywords}】` : ""}`).join("\n");
+	const r = await llmJson("wiki-ingest", loadPrompt("wiki-ingest-book"), `书名：《${book.title}》${book.author ? ` 作者：${book.author}` : ""}\n\n章节定位句：\n${listing}`, 1200);
+	const card = String(r.card ?? "").trim().slice(0, 500);
+	const kw = (Array.isArray(r.keywords) ? r.keywords : []).map((k) => String(k).trim()).filter(Boolean).slice(0, 50).join(" ");
+	db.prepare("UPDATE books SET card=?, keywords=? WHERE id=?").run(card, kw, bookId);
 	if (verbose) console.log(`[wiki] book card: ${card}`);
 	return { summarized, card };
 }
 
 // ---------- query (3-level drill-down, all flash) ----------
 
-interface BookRow { id: number; title: string; author: string; card: string; library: string }
+interface BookRow { id: number; title: string; author: string; card: string; keywords: string; library: string }
 interface SectionRow { id: number; ord: number; title: string; mini: string; keywords: string; text?: string }
 
 const MAX_SECTIONS = 5;
@@ -170,7 +174,7 @@ export async function wikiAsk(opts: { question: string; library?: string; deep?:
 	const books: BookRow[] = [];
 	for (const lib of libs) {
 		try {
-			const rows = wikiDb(lib).prepare("SELECT id, title, author, card FROM books").all() as Array<Omit<BookRow, "library">>;
+			const rows = wikiDb(lib).prepare("SELECT id, title, author, card, keywords FROM books").all() as Array<Omit<BookRow, "library">>;
 			for (const r of rows) books.push({ ...r, library: lib });
 		} catch {
 			// a broken library db must not break the others
@@ -179,7 +183,7 @@ export async function wikiAsk(opts: { question: string; library?: string; deep?:
 	if (books.length === 0) return "(wiki is empty — no books ingested yet)";
 
 	// L1: which books? (up to 3, search-engine style — different angles all count)
-	const bookList = books.map((b) => `[${b.library}#${b.id}] 《${b.title}》${b.author ? `（${b.author}）` : ""}：${b.card}`).join("\n");
+	const bookList = books.map((b) => `[${b.library}#${b.id}] 《${b.title}》${b.author ? `（${b.author}）` : ""}：${b.card}${b.keywords ? `【${b.keywords}】` : ""}`).join("\n");
 	const p1 = await llmJson("wiki-pick", loadPrompt("wiki-pick-book"), `问题：${opts.question}\n\n藏书：\n${bookList}`);
 	const rawList = Array.isArray(p1.books) ? (p1.books as Array<Record<string, unknown>>) : [];
 	const chosen: BookRow[] = [];
@@ -190,6 +194,19 @@ export async function wikiAsk(opts: { question: string; library?: string; deep?:
 		const b = byId.find((x) => x.library === libGuess) ?? (byId.length === 1 ? byId[0] : undefined);
 		if (b && !chosen.includes(b)) chosen.push(b);
 	}
+	// Term-hit lane (deterministic, complement not gate): if any chapter's keywords appear
+	// verbatim in the question ("讲解牛蒡子"), that book is ALWAYS a candidate — card-level
+	// keywords can't cover every term a book argues about, and a missed book is lost forever.
+	const hinted = new Set<BookRow>();
+	for (const b of books) {
+		try {
+			const kws = wikiDb(b.library).prepare("SELECT keywords FROM sections WHERE book_id=? AND keywords != ''").all(b.id) as Array<{ keywords: string }>;
+			let hits = 0;
+			for (const row of kws) for (const kw of row.keywords.split(" ")) if (kw.length >= 2 && opts.question.includes(kw)) { hits++; break; }
+			if (hits > 0) hinted.add(b);
+		} catch { /* ignore */ }
+	}
+	for (const b of hinted) if (!chosen.includes(b) && chosen.length < 3) chosen.push(b);
 	if (chosen.length === 0) return `(没有哪本书适合回答这个问题${p1.reason ? "；馆员理由：" + String(p1.reason) : ""})`;
 
 	// L2+L3 per book, in parallel. quick: one short answer per book. deep: one merged
