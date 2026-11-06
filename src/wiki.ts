@@ -166,49 +166,85 @@ export async function wikiAsk(opts: { question: string; library?: string; deep?:
 	}
 	if (books.length === 0) return "(wiki is empty — no books ingested yet)";
 
-	// L1: which book? (book cards are question-oriented — written for exactly this glance)
+	// L1: which books? (up to 3, search-engine style — different angles all count)
 	const bookList = books.map((b) => `[${b.library}#${b.id}] 《${b.title}》${b.author ? `（${b.author}）` : ""}：${b.card}`).join("\n");
 	const p1 = await llmJson("wiki-pick", loadPrompt("wiki-pick-book"), `问题：${opts.question}\n\n藏书：\n${bookList}`);
-	// Models fumble compound fields (e.g. {"library": null, "book": 2}) — match on the id
-	// first and only use the library string to disambiguate, never as a hard requirement.
-	const bookId = Number(p1.book);
-	const libGuess = /^([a-z0-9_-]+)/i.exec(String(p1.library ?? ""))?.[1] ?? "";
-	const byId = Number.isInteger(bookId) && bookId > 0 ? books.filter((b) => b.id === bookId) : [];
-	const chosen = byId.find((b) => b.library === libGuess) ?? (byId.length === 1 ? byId[0] : undefined);
-	if (!chosen) return `(没有哪本书适合回答这个问题${books.length > 0 ? "；馆员理由：" + String(p1.reason ?? "") : ""})`;
+	const rawList = Array.isArray(p1.books) ? (p1.books as Array<Record<string, unknown>>) : [];
+	const chosen: BookRow[] = [];
+	for (const item of rawList.slice(0, 3)) {
+		const id = Number(item.id);
+		const libGuess = /^([a-z0-9_-]+)/i.exec(String(item.library ?? ""))?.[1] ?? "";
+		const byId = Number.isInteger(id) && id > 0 ? books.filter((b) => b.id === id) : [];
+		const b = byId.find((x) => x.library === libGuess) ?? (byId.length === 1 ? byId[0] : undefined);
+		if (b && !chosen.includes(b)) chosen.push(b);
+	}
+	if (chosen.length === 0) return `(没有哪本书适合回答这个问题${p1.reason ? "；馆员理由：" + String(p1.reason) : ""})`;
 
-	// L2: which sections? (chapter minis, one glance)
-	const db = wikiDb(chosen.library);
+	// L2+L3 per book, in parallel. quick: one short answer per book. deep: one merged
+	// distilled answer over all books' passages (synthesis IS the point of deep).
+	const perBook = await Promise.all(chosen.map((b) => askOneBook(b, opts.question, opts.deep === true)));
+	const hit = perBook.filter((r) => r !== null) as Array<NonNullable<(typeof perBook)[number]>>;
+	if (hit.length === 0) return `选出的书里没有定位到相关章节（${chosen.map((b) => `《${b.title}》`).join("、")}）`;
+
+	if (opts.deep) {
+		const source = hit
+			.map((h) => h.sections.map((s) => `【${h.book.title} · ${s.title}】\n${s.text}`).join("\n\n"))
+			.join("\n\n");
+		const r = await complete({
+			system: loadPrompt("wiki-answer"),
+			user: `问题：${opts.question}\n模式：deep（综合所有书的原文，写出蒸馏详解/示例）\n\n原文：\n${source}`,
+			step: "wiki-answer",
+			maxTokens: 4000,
+		});
+		const addr = hit.map((h) => `《${h.book.title}》（${h.book.author || "佚名"}）${h.sections.map((s) => s.title).join("、")}`).join("；");
+		return `${r.text.trim()}\n\n——出处：${addr}`;
+	}
+
+	// quick: one block per book, search-results style, each with book + author
+	return hit
+		.map((h) => `▍《${h.book.title}》${h.book.author ? `（${h.book.author}）` : ""}\n${h.answer}\n  ——${h.sections.map((s) => s.title).join("、")}`)
+		.join("\n\n");
+}
+
+/** L2 chapter-pick + L3 quick-answer for one book. Returns null when no chapter fits. */
+async function askOneBook(
+	book: BookRow,
+	question: string,
+	deep: boolean,
+): Promise<{ book: BookRow; sections: Array<{ title: string; text: string }>; answer: string } | null> {
+	const db = wikiDb(book.library);
 	const sections = db
 		.prepare("SELECT id, ord, title, mini FROM sections WHERE book_id=? ORDER BY ord")
-		.all(chosen.id) as unknown as SectionRow[];
+		.all(book.id) as unknown as SectionRow[];
+	if (sections.length === 0) return null;
 	const secList = sections.map((s) => `${s.id}. ${s.title}${s.mini ? " — " + s.mini : ""}`).join("\n");
-	const p2 = await llmJson("wiki-pick", loadPrompt("wiki-pick-section"), `问题：${opts.question}\n\n《${chosen.title}》章节：\n${secList}`);
+	const p2 = await llmJson("wiki-pick", loadPrompt("wiki-pick-section"), `问题：${question}\n\n《${book.title}》章节：\n${secList}`);
 	// Validate against the listing we actually showed — flash sometimes hallucinates ids
 	// that belong to another book; an unvalidated IN() would silently read the wrong chapter.
 	const validIds = new Set(sections.map((s) => s.id));
-	const ids = (Array.isArray(p2.sections) ? p2.sections : []).map(Number).filter((n) => validIds.has(n)).slice(0, MAX_SECTIONS);
+	const cap = deep ? 3 : MAX_SECTIONS; // deep reads several books — keep each book's share small
+	const ids = (Array.isArray(p2.sections) ? p2.sections : []).map(Number).filter((n) => validIds.has(n)).slice(0, cap);
 	const picked = ids.length > 0
 		? (db.prepare(`SELECT id, ord, title, text FROM sections WHERE id IN (${ids.map(() => "?").join(",")}) ORDER BY ord`).all(...ids) as unknown as Array<SectionRow & { text: string }>)
 		: [];
-	if (picked.length === 0) return `《${chosen.title}》里没有定位到相关章节（馆员理由：${String(p2.reason ?? "无")}）`;
+	if (picked.length === 0) return null;
 
-	// L3: answer from the exact passages (deep = read thoroughly, write a distilled explanation)
-	let budget = MAX_ANSWER_CHARS;
-	const source = picked
+	let budget = Math.floor(MAX_ANSWER_CHARS / (deep ? 3 : 1));
+	const secs = picked
 		.map((s) => {
 			const t = s.text.slice(0, Math.max(0, budget));
 			budget -= t.length;
-			return `【${chosen.title} · ${s.title}】\n${t}`;
+			return { title: s.title, text: t };
 		})
-		.filter((x) => x.length > 10)
-		.join("\n\n");
-	const addr = picked.map((s) => `《${chosen.title}》${s.title}`).join("、");
+		.filter((x) => x.text.length > 10);
+	if (secs.length === 0) return null;
+	if (deep) return { book, sections: secs, answer: "" }; // merged later
+
 	const r = await complete({
 		system: loadPrompt("wiki-answer"),
-		user: `问题：${opts.question}\n模式：${opts.deep ? "deep（精读并写出蒸馏详解/示例）" : "quick（快答）"}\n\n原文：\n${source}`,
+		user: `问题：${question}\n模式：quick（快答）\n\n原文：\n${secs.map((s) => `【${book.title} · ${s.title}】\n${s.text}`).join("\n\n")}`,
 		step: "wiki-answer",
-		maxTokens: opts.deep ? 4000 : 1200,
+		maxTokens: 1200,
 	});
-	return `${r.text.trim()}\n\n——出处：${addr}`;
+	return { book, sections: secs, answer: r.text.trim() };
 }
