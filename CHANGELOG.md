@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.6.3] - 2026-11-06
+
+- wiki keyword lane (user's design, replaces my FTS entity lane): k3 now writes an 80-char mini + 1-20 verbatim keywords per chapter (drugs/formulas/diseases/persons — including terms the chapter only WARNS against); flash's chapter listing carries keywords, so a question about 牛蒡子 finds the chapter whose mini never mentions it; per-chapter ingest failures skip instead of aborting the run; wiki-reindex CLI rewrites in place, resumable
 ## [1.6.2] - 2026-11-06
 
 - wiki multi-book answers: book-pick now returns up to 3 books (search-engine style — different angles all count), quick mode answers per book in parallel blocks headed by title+author, deep mode merges all books' passages into one synthesized answer; off-domain rejection intact
