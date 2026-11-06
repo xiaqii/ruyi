@@ -1,39 +1,44 @@
-# Ruyi (如忆) — Long-term Memory for AI Agents
+# Ruyi — Cross-Conversation Memory for AI Agents
 
-**I tried several heavyweight agent-memory products. None felt right. So I wrote my own.**
+**Your agent's soul, distilled.**
 
-They all arrived with vector databases, embeddings, pages of config. After all that setup, my agent forgot things just the same.
+Every new chat starts from zero. Your setup, your tastes, the traps you already paid for — gone. Ruyi fixes that. It reads your session logs overnight and learns how you think and what you prefer. The next morning, your agent shows up knowing you.
 
-So I built ruyi. Used it, tweaked it, kept using it — and somewhere along the way realized: this actually works.
+No vector database. No embeddings. No babysitting. One Node process, one SQLite file.
 
-My agent remembers now. Work feels normal again. Putting it here in case friends find it useful.
+## What you get
 
-*作者：将军 (xiaqii)*
+- **It knows you** — your style, your rules, your hardware, your allergies. Distilled into a short book about you, chapter by chapter
+- **New chat, old topic, zero catch-up** — pick up right where you left off, weeks later
+- **Cross-domain, not just code** — how you buy things, how you parent, how you manage your health. Any domain that shows up in your life grows its own chapter
+- **No nagging** — an unrelated chat gets exactly 0 memories. A relevant one arrives once per conversation, never on repeat
 
-- **It knows you better over time** — you work by day; overnight it merges duplicates, drops what's stale, and distills your habits into profiles
-- **New chat, old topic, zero catch-up** — no re-explaining your setup, your tastes, or the traps you've already paid for
-- **No nagging** — unrelated chats get zero memories; relevant ones arrive once, never on repeat
+## The numbers
 
-## Core techniques
+| | |
+|---|---|
+| Memory store | **Converges, never sprawls** — raw entries get absorbed into profiles (one real store: 365 → 109 entries after one synthesis round) |
+| Per-turn cost | one small-model call, ~2s, ~13K tokens of listing in / ~100 tokens out — fractions of a cent |
+| Unrelated turns | selector returns empty = nothing injected, nothing wasted |
+| Repeat injection | 0 — a per-conversation ledger guarantees each item arrives once |
+| Dependencies | **0** runtime deps. `node:sqlite` + `node:http`. That's the whole stack |
+| Uninstall | delete one directory — your agent keeps working, it just stops remembering |
 
-- **Distill the person, not the episode** — the store holds abstractions (style, rules, lessons, environment), never project state or code; a four-stage LLM pipeline does it: **triage → extract → verify → merge** (the verifier can veto, quotes force source-grounding, origin/confidence are honestly labelled)
-- **Two-level profile tree** — domain index → on-demand subchapters, re-synthesized weekly; project codenames are abstracted away by iron rule
-- **Forget tombstone** — forgetting leaves a content hash (never the text); every write path checks it, so a forgotten memory can't be re-distilled from old logs. Zero LLM, pure enforcement
-- **Confidence gate** — a high-confidence user-stated entry can only be retired by another high-confidence user-stated one; inferences demote to reinforce. Policy in code, judgement in the LLM
-- **Self-eating guard** — injected memory envelopes are stripped from session logs before distillation, so the system never manufactures circular evidence from its own output
-- **One-call semantic selection** — a small fast model reads the whole store as a listing (every memory's one-line positioning note + every chapter's abstract) plus the current topic, and picks what matters for this turn. No keyword gatekeeping: at human scale the entire store fits one listing, and mis-filed items can't be shut out. Keyword FTS survives only as the degraded fallback when the LLM is down; a per-conversation injection ledger guarantees each item arrives once
-- **Semantic decay** — user-stated facts never decay; only low-confidence inferences expire — and even then they archive (excavatable), never delete
-- **Contract-tested releases** — tsc + 63 zero-LLM smoke tests + 44 API contract tests gate every tag; the daily self-update rolls back on any failure
+## How it works (3 moving parts)
 
-## Install ruyi
+1. **Daytime — select.** A cheap fast model reads your whole store as a one-line-per-item listing plus your current topic, and points at what matters. At human scale the whole store fits in one glance — no keyword gatekeeping, nothing gets shut out.
+2. **Night — distill.** A stronger model re-reads the day's session logs: extracts lessons, merges duplicates, archives the stale. Duplicates become reinforcement, not clutter.
+3. **Weekly — write the book.** Everything worth keeping gets distilled into profile chapters: your identity card, your working style, your health, your craft domains. Memories are raw material; **profiles are the product**.
 
-**From source.** Easiest: hand the repo URL to your agent:
+## Install
+
+Easiest: hand the repo URL to your agent.
 
 > Install https://github.com/xiaqii/ruyi for me.
 
 It reads [AGENT.README.md](AGENT.README.md) and sets everything up itself. It will ask you for exactly one thing: an LLM API key.
 
-Or do it manually:
+Or manually:
 
 ```bash
 git clone https://github.com/xiaqii/ruyi
@@ -52,6 +57,20 @@ docker compose up -d --build
 
 The database lives in a mounted volume at `~/ruyi-docker/` — delete the container, lose nothing.
 
+**Have old conversation logs?** Drop the file into `~/ruyi-inbox/` — zip, tar.gz, jsonl, txt, md, even a truncated archive. Overnight it gets slimmed (a 174MB log becomes ~1.5MB of actual human signal), filtered, and distilled. Bring your own history.
+
+## Connect an agent
+
+Don't wire anything yourself — let your agent do it. One sentence:
+
+> Connect ruyi for me at `http://<host>:8899`, token is `<your-token>`.
+
+The service itself is the manual — your agent fetches it, reads [AGENT.README.md](AGENT.README.md), picks the right connector (pi extension / MCP / single-file bridge), and wires itself up. Works with pi, Claude Code, opencode, and anything that speaks HTTP or MCP.
+
+Then start a fresh chat and casually bring up an old problem from last month.
+
+The moment it picks up right where you left off — you'll get it.
+
 ## Uninstall
 
 ```
@@ -59,33 +78,17 @@ systemctl disable --now ruyi ruyi-dream.timer ruyi-synthesize.timer 2>/dev/null
 rm -rf ~/ruyi
 ```
 
-**Your agent keeps working — it just stops remembering.** Ruyi is a sidecar, not a dependency: down or gone, your agent behaves exactly as before.
-
-## Connect an agent
-
-Don't wire anything yourself — let your agent do it. Give it one sentence:
-
-> Connect ruyi for me at `http://<host>:8899`, token is `<your-token>`.
-
-Same machine as the install? Even simpler:
-
-> Connect ruyi for me at `http://127.0.0.1:8899`.
-
-The service itself is the manual — your agent fetches it, reads [AGENT.README.md](AGENT.README.md), picks the right connector (pi extension / MCP / single-file bridge), and wires itself up. It will tell you when it's done; ask it to recall something old to prove it.
-
-Prefer to wire things by hand? The connectors live in [examples/](examples/): pi extension, Claude Code MCP, opencode config, and a single-file remote bridge.
-
-Once connected, start a fresh chat and casually bring up an old problem from last month.
-
-The moment it picks up right where you left off — you'll get it.
-
----
-
-More (config, troubleshooting, every client): [AGENT.README.md](AGENT.README.md) · Changelog: [CHANGELOG.md](CHANGELOG.md) · MIT
+Ruyi is a sidecar, not a dependency: down or gone, your agent behaves exactly as before.
 
 ## Repo map
 
 - `src/` — the service (Node ≥ 23.6, TypeScript, SQLite)
-- `scripts/` — `install.sh` (install), `self-update.sh` (self-update), `release.sh` (release pipeline), `compare-distill.ts` (distill A/B helper)
-- `test/` — `smoke.ts` (63 zero-LLM tests), `llm-smoke.ts` (LLM-path smoke), `api-contract.ts`
-- `prompts/`, `docs/`, `examples/` — prompts, design docs, client connectors
+- `scripts/` — `install.sh` (install), `self-update.sh` (daily self-update to tagged releases, auto-rollback), `release.sh` (release pipeline)
+- `test/` — `smoke.ts` (59 zero-LLM tests), `llm-smoke.ts` (LLM-path smoke), `api-contract.ts` (47 contract tests)
+- `prompts/`, `docs/`, `examples/` — prompts (live-reload, edit without restart), design docs, client connectors
+
+---
+
+*ruyi takes its name from the Chinese 如忆 — "as remembered".*
+
+*作者：将军 (xiaqii) · MIT*

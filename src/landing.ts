@@ -5,10 +5,11 @@
  * NEVER put secrets here: no tokens, no internal IPs. Public by design.
  */
 
-const MD = (host: string) => `# ruyi — long-term memory for AI agents
+const MD = (host: string) => `# ruyi — cross-conversation memory for AI agents
 
 ruyi is a standalone memory API service. It doesn't remember what you said — it learns how
-you work: your habits, preferences and hard-won lessons, carried into every new session.
+you think and what you prefer: your habits, tastes and hard-won lessons, distilled into
+profiles and carried into every new session.
 All the intelligence (extraction, merging, curation) lives server-side, so any agent that
 speaks HTTP or MCP — Claude Code, pi, opencode, your own scripts — plugs in as a thin client.
 
@@ -75,7 +76,7 @@ function mdToHtml(md: string): string {
 	html = html.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
 	return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ruyi — long-term memory for AI agents</title>
+<title>ruyi — cross-conversation memory for AI agents</title>
 <style>
 body{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#0f141b;color:#c9d4e3;margin:0;padding:2em;line-height:1.65}
 main{max-width:860px;margin:0 auto;background:#161e29;border:1px solid #263144;border-radius:12px;padding:2em 2.5em}
