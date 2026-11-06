@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.5.3] - 2026-11-06
+
+- npm-installable for real: bin now points at compiled dist/cli.js (node refuses type-stripping inside node_modules), prepare builds on pack; release.sh attaches a prebuilt ruyi.tgz to every GitHub release so npm i -g <tarball URL> needs zero flags on npm 12 (git installs are EALLOWGIT + scripts-blocked there)
 ## [1.5.2] - 2026-11-06
 
 - npm-installable straight from GitHub (bin entry, files whitelist, repo metadata — npm i -g github:xiaqii/ruyi works, zero npmjs involvement); bare 'ruyi' now prints usage instead of starting a server; USAGE text English + current; stale serve-default comment fixed
