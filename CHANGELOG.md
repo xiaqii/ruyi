@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.6.2] - 2026-11-06
+
+- wiki multi-book answers: book-pick now returns up to 3 books (search-engine style — different angles all count), quick mode answers per book in parallel blocks headed by title+author, deep mode merges all books' passages into one synthesized answer; off-domain rejection intact
 ## [1.6.1] - 2026-11-06
 
 - wiki robustness from live two-book testing: book-pick JSON fumbles tolerated (match by id, library string only disambiguates — models emit {"library":null,"book":2}); picked section ids validated against the shown listing (flash hallucinated ids from the OTHER book, silently reading wrong chapters); pick prompt writes reason before the decision
