@@ -12,7 +12,8 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node src/cli.ts serve",
     "mcp": "node src/cli.ts mcp",
-    "distill": "node src/cli.ts distill"
+    "distill": "node src/cli.ts distill",
+    "prepare": "npm run build"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
@@ -23,10 +24,10 @@
     "url": "git+https://github.com/xiaqii/ruyi.git"
   },
   "bin": {
-    "ruyi": "src/cli.ts"
+    "ruyi": "dist/cli.js"
   },
   "files": [
-    "src",
+    "dist",
     "prompts",
     "docs",
     "examples",

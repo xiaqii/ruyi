@@ -50,10 +50,11 @@ bash scripts/install.sh
 
 A local service runs at `http://127.0.0.1:8899`. (Node ≥ 23.6; custom directory: `bash scripts/install.sh /opt/ruyi`)
 
-**With npm, straight from GitHub** (this repo IS the registry — no npmjs account needed on either side):
+**With npm** (installs the release tarball — no npmjs account needed on either side, works on npm ≥12 where git installs are restricted):
 
 ```bash
-npm i -g github:xiaqii/ruyi   # puts `ruyi` on your PATH: ruyi serve / ruyi doctor / ruyi distill
+npm i -g https://github.com/xiaqii/ruyi/releases/latest/download/ruyi.tgz
+ruyi serve    # ruyi doctor / ruyi distill / ruyi recall …
 ```
 
 **With Docker** (no Node needed on the host):

@@ -69,5 +69,20 @@ git commit -q -m "release: $NOTE"
 git tag -a "v$NEW" -m "v$NEW: $NOTE"
 git push --follow-tags
 
+# 7. attach an installable tarball to the GitHub release.
+# Why: npm i -g github:… is blocked twice over on npm ≥12 (git fetches need --allow-git,
+# install scripts need --allow-scripts) — a prebuilt tarball over https needs neither.
+say "pack + upload release asset ruyi.tgz"
+rm -f ruyi-*.tgz ruyi.tgz
+npm pack >/dev/null
+mv ruyi-*.tgz ruyi.tgz
+if gh release view "v$NEW" >/dev/null 2>&1; then
+	gh release upload "v$NEW" ruyi.tgz --clobber
+else
+	gh release create "v$NEW" ruyi.tgz --notes "$NOTE"
+fi
+rm -f ruyi.tgz
+
 say "released v$NEW and pushed with tag"
+say "npm install: npm i -g https://github.com/xiaqii/ruyi/releases/latest/download/ruyi.tgz"
 say "NOTE: production deploy (/app/ruyi pull + restart) is a separate, user-confirmed step"
