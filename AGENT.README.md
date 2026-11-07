@@ -84,6 +84,14 @@ Without root/systemd, follow the fallback printed by install.sh (nohup residency
 
 ## 3. Configure `config.local.json`
 
+**Credentials never pass through chat.** API keys typed into a conversation end up in session logs
+forever. Instead: write the config template yourself, then tell the user — "fill your key(s) into
+`<dir>/config.local.json` (`llm.apiKey`, and `llm.steps.recall.apiKey` if you have a second model),
+tell me when done." The file is chmod 600. When they say done, run `ruyi doctor` — it verifies both
+tiers against the live endpoints and WARNs with exact fix suggestions if the recall tier is missing
+or thinking isn't off. If the user says their keys already live in a local file, read that file
+yourself (file reads are fine) — just never echo the key back into the conversation.
+
 Minimal viable config (replace example values with the user's):
 
 ```jsonc
