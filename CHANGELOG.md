@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.6.8] - 2026-11-07
+
+- inbox default dir: ~/ruyi-inbox → ~/ruyi/inbox (subdirectory discipline — everything ruyi lives under the one state root: data/, wiki/, inbox/); inbox dirs gitignored since the repo often IS the state root
 ## [1.6.7] - 2026-11-07
 
 - release pipeline now prunes old GitHub releases after publishing (tags kept for version archaeology; the Releases page carries only the latest package)
