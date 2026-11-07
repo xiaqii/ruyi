@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.6.7] - 2026-11-07
+
+- release pipeline now prunes old GitHub releases after publishing (tags kept for version archaeology; the Releases page carries only the latest package)
 ## [1.6.6] - 2026-11-07
 
 - main returns to pure memory: the experimental wiki (book-library lookup) moves to a long-term local branch to prove itself; public repo stays the focused memory system
