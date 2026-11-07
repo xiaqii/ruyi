@@ -1,4 +1,4 @@
-/** inbox.ts — raw-material intake: drop big files (zip/tar.gz/jsonl/txt/md) into ~/ruyi-inbox;
+/** inbox.ts — raw-material intake: drop big files (zip/tar.gz/jsonl/txt/md) into <state>/inbox (default ~/ruyi/inbox);
  *  before each dream run: slim (pure code) → filter (flash keep/drop only) → kept text joins
  *  the normal dream pipeline (k3 extraction). Principle: flash NEVER extracts memories — it
  *  only filters; extraction quality always lives in the dream tier.
