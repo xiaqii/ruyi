@@ -39,6 +39,7 @@ const TIMEOUTS = {
 	answer: 10_000,
 	remember: 45_000, // POST /memories runs LLM merge synchronously (~10s)
 	stats: 1_500,
+	wiki_ask: 60_000, // deep mode = 3 librarian calls + a distilled answer
 } as const;
 
 type Op = keyof typeof TIMEOUTS;
@@ -535,6 +536,47 @@ export default function (pi: ExtensionAPI) {
 				: new Text(theme.fg("success", "done"), 0, 0);
 		},
 	})
-;
+	const WikiParams = Type.Object({
+		question: Type.String({ description: "Self-contained question for the librarian (no project context needed)" }),
+		library: Type.Optional(Type.String({ description: "Limit to one library (e.g. 'tcm'); omit to search all" })),
+		deep: Type.Optional(Type.Boolean({ description: "true = librarian reads the sections thoroughly and writes a distilled explanation/example" })),
+	});
+
+	pi.registerTool({
+		name: "ruyi_wiki_ask",
+		label: "Ask book library",
+		description:
+			"Ask the local book library (domain manuals the user has ingested — e.g. TCM classics). Use when a task needs exact passages from reference books: formulas, dosages, specifications. Pull-based: returns a distilled answer with verbatim quotes and its source address. deep=true for a thorough distilled explanation instead of a quick answer.",
+		parameters: WikiParams,
+
+		async execute(_id, params, _signal, _onUpdate, _ctx) {
+			const result = await api<{ answer?: string }>("wiki_ask", `/wiki-ask`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ question: params.question, library: params.library, deep: params.deep === true }),
+			});
+			if (!result?.answer) {
+				return {
+					content: [{ type: "text", text: "Wiki service is unavailable right now; continue without it." }],
+					details: { unavailable: true },
+				};
+			}
+			return { content: [{ type: "text", text: result.answer }], details: {} };
+		},
+
+		renderCall(args, theme) {
+			return new Text(
+				theme.fg("toolTitle", theme.bold("ruyi_wiki_ask ")) + theme.fg("accent", `"${args.question}"`),
+				0,
+				0,
+			);
+		},
+
+		renderResult(result, theme) {
+			const first = result.content[0];
+			const text = first?.type === "text" ? first.text : "";
+			return new Text(theme.fg("dim", text.split("\n")[0]?.slice(0, 80) ?? ""), 0, 0);
+		},
+	});
 ;
 }
