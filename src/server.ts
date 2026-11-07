@@ -107,6 +107,16 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 				return send(res, 200, getInject(ownerOf(url), cwdOf(url), scopeOf(url) ?? "smart"));
 			}
 
+			// Agent-initiated probe: cheap relevance check, returns one-line pointers only.
+			if (req.method === "POST" && path === "/probe") {
+				const body = await readBody(req);
+				const question = typeof body.question === "string" ? body.question.trim() : "";
+				if (!question) return send(res, 400, { error: "question is required" });
+				const { probe } = await import("./recall.ts");
+				const result = await probe(question, ownerOf(url, body), cwdOf(url, body));
+				return send(res, 200, result);
+			}
+
 			if (req.method === "POST" && path === "/recall") {
 				const body = await readBody(req);
 				const query = typeof body.query === "string" ? body.query : "";
@@ -120,7 +130,14 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 					conversation,
 					auto,
 				});
-				return send(res, 200, result);
+				// The store map rides every recall response: the agent sees what the
+				// store COVERS, not just what was picked — so it knows when to probe.
+				let storeCard: string | null = null;
+				try {
+					const { getStoreCard } = await import("./storecard.ts");
+					storeCard = getStoreCard(ownerOf(url, body));
+				} catch { /* card is optional, never breaks recall */ }
+				return send(res, 200, { ...result, storeCard });
 			}
 
 			// Assistant-answer report (client fire-and-forget, after each agent run):

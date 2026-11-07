@@ -91,7 +91,11 @@ function appendUsageLog(entry: Record<string, unknown>): void {
 }
 
 /** Steps served by the (cheap, fast, thinking-off) "recall" tier; everything else is "dream". */
-const RECALL_STEPS = new Set(["pick", "rerank", "topic-summary", "reply-gist", "inbox-filter", "wiki-pick", "wiki-answer"]);
+const RECALL_STEPS = new Set(["pick", "rerank", "topic-summary", "reply-gist", "inbox-filter"]);
+// Probe tier (steps.probe): agent-initiated probe / deep-recall selection. Recall matters
+// more than precision here — the output is one-line hints the agent filters itself, so an
+// over-eager strong-but-cheap model (e.g. qwen3.8-max thinking-off) beats a timid one.
+const PROBE_STEPS = new Set(["probe-pick"]);
 
 interface ResolvedLlm {
 	protocol: "anthropic" | "openai";
@@ -103,14 +107,15 @@ interface ResolvedLlm {
 	maxTokens: number;
 	requestTimeoutMs: number;
 	thinking: "off" | "default" | number;
+	temperature?: number;
 }
 
 /** Merge base llm config with the per-tier override for this step. */
 export function resolveLlm(step: string): ResolvedLlm {
 	const config = loadConfig();
 	const base = config.llm;
-	const tier = RECALL_STEPS.has(step) ? "recall" : "dream";
-	const override: LlmTierConfig | undefined = base.steps?.[tier];
+	const tier = RECALL_STEPS.has(step) ? "recall" : PROBE_STEPS.has(step) ? "probe" : "dream";
+	const override: LlmTierConfig | undefined = base.steps?.[tier] ?? (tier === "probe" ? base.steps?.recall : undefined);
 	const keys = (override?.apiKeys ?? base.apiKeys ?? [override?.apiKey ?? base.apiKey]).filter((k) => !!k);
 	if (keys.length === 0) keys.push(base.apiKey);
 	return {
@@ -119,6 +124,7 @@ export function resolveLlm(step: string): ResolvedLlm {
 		apiKey: keys[0] ?? base.apiKey,
 		apiKeys: keys,
 		model: override?.model ?? base.model,
+		temperature: override?.temperature ?? base.temperature,
 		maxTokens: override?.maxTokens ?? base.maxTokens,
 		requestTimeoutMs: override?.requestTimeoutMs ?? base.requestTimeoutMs,
 		// Selection work (recall tier) never needs a thinking model — default it
@@ -151,8 +157,8 @@ function buildBody(llm: ResolvedLlm, opts: CompleteOptions, fixes: Set<string>):
 		if (!fixes.has("response_format") && opts.json !== false) body.response_format = { type: "json_object" };
 		// Recall tier defaults to near-deterministic sampling: selection is a
 		// judgement that should not flip between identical calls.
-		if (!fixes.has("temperature") && (opts.temperature !== undefined || RECALL_STEPS.has(opts.step)))
-			body.temperature = opts.temperature ?? 0.2;
+		const temp = opts.temperature ?? llm.temperature ?? (PROBE_STEPS.has(opts.step) ? 0 : RECALL_STEPS.has(opts.step) ? 0.2 : undefined);
+		if (!fixes.has("temperature") && temp !== undefined) body.temperature = temp;
 		// DashScope-style switch for thinking-capable OpenAI-compatible models
 		// (qwen3.x): dropped on 400 via the "thinking" downgrade fix.
 		if (llm.thinking === "off" && !fixes.has("thinking")) body.enable_thinking = false;
@@ -169,8 +175,8 @@ function buildBody(llm: ResolvedLlm, opts: CompleteOptions, fixes: Set<string>):
 		if (llm.thinking === "off") body.thinking = { type: "disabled" };
 		else if (typeof llm.thinking === "number") body.thinking = { type: "enabled", budget_tokens: llm.thinking };
 	}
-	if (!fixes.has("temperature") && (opts.temperature !== undefined || RECALL_STEPS.has(opts.step)))
-		body.temperature = opts.temperature ?? 0.2;
+	const temp = opts.temperature ?? llm.temperature ?? (PROBE_STEPS.has(opts.step) ? 0 : RECALL_STEPS.has(opts.step) ? 0.2 : undefined);
+	if (!fixes.has("temperature") && temp !== undefined) body.temperature = temp;
 	return body;
 }
 

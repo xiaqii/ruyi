@@ -23,6 +23,7 @@ const TOKEN = process.env.RUYI_TOKEN ?? "";
 const OWNER = process.env.RUYI_OWNER ?? "default";
 
 const TOOLS = [
+	{ name: "probe", description: "Cheap relevance probe of the memory store. Call liberally — before changing configs/architecture/infra or when the task might touch the user's past. Returns one-line pointers only; follow up with recall for full entries.", inputSchema: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } },
 	{ name: "recall", description: "Search long-term memory (past conversations) for preferences, facts, project context and lessons relevant to the current task. mode=fast: free keyword probe; deep (default): LLM semantic selection over the whole-store listing; excavate: also dig absorbed/archived memories.", inputSchema: { type: "object", properties: { query: { type: "string" }, k: { type: "number" }, mode: { type: "string", enum: ["fast", "deep", "excavate"] } }, required: ["query"] } },
 	{ name: "list", description: "List recent long-term memory entries (one-line summaries with ids).", inputSchema: { type: "object", properties: { limit: { type: "number" } } } },
 	{ name: "get", description: "Get a memory entry by id.", inputSchema: { type: "object", properties: { id: { type: "number" } }, required: ["id"] } },
@@ -49,6 +50,11 @@ const text = (t) => ({ content: [{ type: "text", text: t }] });
 async function callTool(name, args = {}) {
 	if (!BASE) return text("RUYI_URL is not set — point it at your ruyi service, e.g. https://ruyi.example.com");
 	switch (name) {
+		case "probe": {
+			const r = await api("/probe", { method: "POST", timeoutMs: 30_000, body: { question: String(args.question ?? ""), owner: OWNER } });
+			const lines = [...(r.profiles ?? []).map((x) => `[profile ${x.id}] ${x.title}`), ...(r.hints ?? []).map((h) => `#${h.id} (${h.kind}) ${h.line}`)];
+			return text(lines.length ? `Relevant pointers (fetch full entries with recall if needed):\n${lines.join("\n")}` : "No relevant memories found.");
+		}
 		case "recall": {
 			const r = await api("/recall", { method: "POST", timeoutMs: 60_000, body: { query: String(args.query ?? ""), k: args.k, owner: OWNER, mode: args.mode ?? "deep" } });
 			const parts = [];

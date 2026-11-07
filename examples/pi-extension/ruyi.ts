@@ -38,6 +38,7 @@ const TIMEOUTS = {
 	recall: 30_000,
 	answer: 10_000,
 	remember: 45_000, // POST /memories runs LLM merge synchronously (~10s)
+	probe: 30_000,
 	stats: 1_500,
 } as const;
 
@@ -113,6 +114,9 @@ function profileIntro(p: RecallProfile): string {
 
 function formatRecall(result: RecallResponse): string {
 	const parts: string[] = [];
+	if (typeof res.storeCard === "string" && res.storeCard.trim()) {
+		parts.push("STORE MAP (what this memory store covers — probe via ruyi_probe when the task touches these domains):\n" + res.storeCard.trim());
+	}
 	for (const p of result.profiles ?? [])
 		parts.push(`${profileIntro(p)} (v${p.version}):\n${p.content.slice(0, 3000)}`);
 	if (result.memories.length > 0) {
@@ -282,15 +286,43 @@ export default function (pi: ExtensionAPI) {
 		});
 	});
 
+	const ProbeParams = Type.Object({
+		question: Type.String({ description: "Self-contained question, e.g. 'how is the user's network entry point set up'" }),
+	});
+
+	pi.registerTool({
+		name: "ruyi_probe",
+		label: "ruyi probe",
+		description:
+			"Cheap relevance probe of the user's long-term memory. CALL THIS LIBERALLY — before changing configs/architecture/infra, " +
+			"when the task touches a domain the store map mentions, or whenever the user's past might matter. Probing injects nothing " +
+			"and returns only one-line pointers (#id + short title). Follow up with ruyi_recall to fetch full entries for pointers " +
+			"that look relevant.",
+		parameters: ProbeParams,
+		async execute(_toolCallId, params) {
+			const r = await api<{ hints?: Array<{ id: number; kind: string; line: string }>; profiles?: Array<{ id: number; title: string }> }>(
+				"probe", `/probe`, { method: "POST", body: { question: params.question, owner: OWNER } },
+			);
+			const lines = [
+				...(r.profiles ?? []).map((x) => `[profile ${x.id}] ${x.title}`),
+				...(r.hints ?? []).map((h) => `#${h.id} (${h.kind}) ${h.line}`),
+			];
+			const text = lines.length
+				? `Relevant pointers (fetch full entries with ruyi_recall if needed):\n${lines.join("\n")}`
+				: "No relevant memories found — safe to proceed without memory context.";
+			return { content: [{ type: "text", text }], details: { hints: r.hints?.length ?? 0 } };
+		},
+	});
+
 	pi.registerTool({
 		name: "ruyi_recall",
 		label: "Memory Recall",
 		description:
-			"Query the user's long-term memory. NOTE: relevant memories are ALREADY auto-injected every turn (see above) — " +
-			"do NOT re-fetch what was injected, and do NOT call on every follow-up just because the topic continues. " +
-			"CALL THIS only when you need memories on an angle NOT covered by the current injection: the request touches the user's past work, " +
-			"decisions, tastes, projects, machines or habits beyond what's shown; the user references earlier context (\"继续\", \"上次\", \"老规矩\"); " +
-			"before giving advice in a domain the user has history in; or when the user asks what you remember. " +
+			"Query the user's long-term memory for FULL entries. Relevant memories are auto-injected every turn (see above) — " +
+			"never re-fetch what was injected. A store map (domains the store covers) also rides each injection: when the task " +
+			"touches one of those domains, or you are about to change configs/architecture/infra, probe first with ruyi_probe " +
+			"(cheap, injects nothing), then use this tool to fetch the entries that matter. Also use it when the user references " +
+			"earlier context (\"继续\", \"上次\", \"老规矩\") or asks what you remember. " +
 			"SKIP for fully self-contained questions (syntax, generic how-to). " +
 			"mode=fast is a free keyword probe (cheap tentative check), mode=deep (default) is semantic search, " +
 			"mode=excavate also digs absorbed/archived memories; scope=\"all\" searches every directory's memories. " +
