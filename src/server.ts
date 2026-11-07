@@ -107,24 +107,6 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 				return send(res, 200, getInject(ownerOf(url), cwdOf(url), scopeOf(url) ?? "smart"));
 			}
 
-			if (req.method === "POST" && path === "/wiki-ask") {
-				// Lazy-loaded: a broken wiki must never affect the memory endpoints.
-				const body = await readBody(req);
-				const question = typeof body.question === "string" ? body.question.trim() : "";
-				if (!question) return send(res, 400, { error: "question is required" });
-				try {
-					const { wikiAsk } = await import("./wiki.ts");
-					const answer = await wikiAsk({
-						question,
-						library: typeof body.library === "string" ? body.library : undefined,
-						deep: body.deep === true,
-					});
-					return send(res, 200, { answer });
-				} catch (e) {
-					return send(res, 200, { answer: `(wiki unavailable: ${String(e).slice(0, 120)})` });
-				}
-			}
-
 			if (req.method === "POST" && path === "/recall") {
 				const body = await readBody(req);
 				const query = typeof body.query === "string" ? body.query : "";

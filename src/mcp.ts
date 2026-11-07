@@ -100,20 +100,6 @@ const TOOLS = [
 		},
 	},
 	{
-		name: "wiki_ask",
-		description:
-			"Ask the local book library (domain manuals the user has ingested — e.g. TCM classics). Use when a task needs exact passages from reference books: formulas, dosages, specifications. Pull-based: returns a distilled answer with verbatim quotes and its source address. deep=true for a thorough distilled explanation instead of a quick answer.",
-		inputSchema: {
-			type: "object",
-			properties: {
-				question: { type: "string", description: "Self-contained question for the librarian (no project context needed)" },
-				library: { type: "string", description: "Limit to one library (e.g. 'tcm'); omit to search all" },
-				deep: { type: "boolean", description: "true = librarian reads the sections thoroughly and writes a distilled explanation/example" },
-			},
-			required: ["question"],
-		},
-	},
-	{
 		name: "admin",
 		description:
 			"Manage long-term memory. action=forget archives a memory by id (recoverable via recall mode=excavate); stats returns the token usage report; profile lists synthesized profile chapters or shows one chapter (pass profileId).",
@@ -211,18 +197,6 @@ async function handleToolCall(
 			if (result.action === "blocked")
 				return reply(id, toolResult(`Blocked: this content was previously forgotten (tombstone) — not re-saved. If it genuinely matters now, say so explicitly and rephrase it.`));
 			return reply(id, toolResult(`Saved to long-term memory as #${result.id} (${result.action}): ${summary}`));
-		}
-		case "wiki_ask": {
-			// Lazy-loaded and self-contained: a broken wiki must never take the memory tools down.
-			const { wikiAsk } = await import("./wiki.ts");
-			const question = String(args.question ?? "").trim();
-			if (!question) return replyError(id, -32602, "question is required");
-			const text = await wikiAsk({
-				question,
-				library: typeof args.library === "string" ? args.library : undefined,
-				deep: args.deep === true,
-			});
-			return reply(id, toolResult(text));
 		}
 		case "admin": {
 			const action = String(args.action ?? "");
