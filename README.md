@@ -7,11 +7,15 @@ It reads your session logs overnight, learns how you think and what you prefer, 
 
 ## Install
 
-Hand your agent one line:
+**First machine — the one that hosts your memory.** Hand its agent one line:
 
 > Install and connect https://github.com/xiaqii/ruyi for me, dir: ~/ruyi, token: random.
 
 It reads [AGENT.README.md](AGENT.README.md), installs everything, generates a token, and wires itself in — the only thing you do yourself is fill your LLM key into the config file (keys never go through chat).
+
+**Every other machine / agent — connect, do NOT install.** One ruyi server is the single home of your memory; other machines talk to it over HTTPS:
+
+> Connect to my ruyi at https://ruyi.example.com, token: xxx. Remote HTTP API — do not install a local instance. Use examples/mcp-remote.mjs for the MCP wiring.
 
 Prefer doing it manually?
 

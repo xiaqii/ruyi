@@ -28,7 +28,7 @@ const TOOLS = [
 	{ name: "get", description: "Get a memory entry by id.", inputSchema: { type: "object", properties: { id: { type: "number" } }, required: ["id"] } },
 	{ name: "ingest", description: "Submit raw conversation text or notes; ruyi distills durable memories from it.", inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } },
 	{ name: "remember", description: "Explicitly save something to long-term memory RIGHT NOW when the user asks you to remember it, or when you identify a durable rule/convention. Goes through LLM merge judgement — duplicates become reinforcement. Not for one-off task details.", inputSchema: { type: "object", properties: { kind: { type: "string", enum: ["preference", "fact", "knowledge", "lesson", "skill_index"] }, summary: { type: "string" }, content: { type: "string" }, domain: { type: "string" } }, required: ["summary", "content"] } },
-	{ name: "admin", description: "Manage long-term memory: forget (archive by id, recoverable via recall excavate), pin/unpin (constitution tier), stats (token report, days param), profile (list chapters, or full content with profileId).", inputSchema: { type: "object", properties: { action: { type: "string", enum: ["forget", "pin", "unpin", "stats", "profile"] }, id: { type: "number" }, days: { type: "number" }, profileId: { type: "number" } }, required: ["action"] } },
+	{ name: "admin", description: "Manage long-term memory: forget (archive by id, recoverable via recall mode=excavate), stats (token report, days param), profile (list chapters, or full content with profileId).", inputSchema: { type: "object", properties: { action: { type: "string", enum: ["forget", "stats", "profile"] }, id: { type: "number" }, days: { type: "number" }, profileId: { type: "number" } }, required: ["action"] } },
 ];
 
 async function api(path, { method = "GET", body, timeoutMs = 15_000 } = {}) {
@@ -70,6 +70,7 @@ async function callTool(name, args = {}) {
 		}
 		case "remember": {
 			const r = await api("/memories", { method: "POST", timeoutMs: 60_000, body: { kind: args.kind ?? "fact", summary: args.summary, content: args.content, domain: args.domain, owner: OWNER } });
+			if (r.action === "blocked") return text("Blocked: this content was previously forgotten (tombstone) — not re-saved. If it genuinely matters now, say so explicitly and rephrase it.");
 			return text(`Saved to long-term memory as #${r.id} (${r.action}): ${args.summary}`);
 		}
 		case "admin": {
@@ -77,11 +78,6 @@ async function callTool(name, args = {}) {
 				case "forget": {
 					const r = await api(`/memories/${Number(args.id)}/forget`, { method: "POST", body: {} });
 					return text(r.ok ? `Memory #${args.id} archived (recoverable via recall mode=excavate).` : "failed");
-				}
-				case "pin":
-				case "unpin": {
-					const r = await api(`/memories/${Number(args.id)}/pin`, { method: "POST", body: { pinned: args.action === "pin" ? 1 : 0 } });
-					return text(r.pinned ? `Memory #${args.id} pinned into the constitution tier.` : `Memory #${args.id} unpinned.`);
 				}
 				case "stats": {
 					const r = await api(`/stats?days=${args.days ?? 7}&owner=${OWNER}`);
