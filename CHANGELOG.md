@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.6.6] - 2026-11-07
+
+- main returns to pure memory: the experimental wiki (book-library lookup) moves to a long-term local branch to prove itself; public repo stays the focused memory system
 ## [1.6.5] - 2026-11-06
 
 - recall tool-call discipline: the directory line made the agent re-fetch injected memories on every follow-up (374 calls/day vs 30) — tool description now states memories are auto-injected every turn and to call only for uncovered angles; 'more can be searched via ruyi_recall' footer dropped from non-empty injections (discovery lives in the tool description)
