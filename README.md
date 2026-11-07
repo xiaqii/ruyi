@@ -11,7 +11,7 @@ Hand your agent one line:
 
 > Install and connect https://github.com/xiaqii/ruyi for me, dir: ~/ruyi, token: random.
 
-It reads [AGENT.README.md](AGENT.README.md), installs everything, generates a token, and wires itself in — you'll only be asked for an LLM API key.
+It reads [AGENT.README.md](AGENT.README.md), installs everything, generates a token, and wires itself in — the only thing you do yourself is fill your LLM key into the config file (keys never go through chat).
 
 Prefer doing it manually?
 
