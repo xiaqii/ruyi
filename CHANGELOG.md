@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.7.0] - 2026-11-08
+
+- probe tier + store card — agent-initiated probing on qwen3.8-max (thinking off), per-turn injection stays flash; store map rides every injection so agents know what the store covers
 ## [1.6.9] - 2026-11-07
 
 - remote clients: mcp-remote.mjs lost its pin/unpin zombie (that tier was removed long ago; server has no such route) and learned the tombstone-blocked remember response; README install section now splits the two scenarios explicitly — first machine installs, every other machine CONNECTS to the one server over HTTPS (no local instance)

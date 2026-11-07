@@ -59,6 +59,8 @@ export interface LlmTierConfig {
 	requestTimeoutMs?: number;
 	/** "off" = disable thinking (best effort), number = budget tokens, "default" = model default. */
 	thinking?: "off" | "default" | number;
+	/** Sampling temperature override for this tier (per-call opts.temperature still wins). */
+	temperature?: number;
 }
 
 export interface SessionSourceConfig {
@@ -86,8 +88,12 @@ export interface Config {
 		maxTokens: number;
 		requestTimeoutMs: number;
 		thinking?: "off" | "default" | number;
-		/** Per-tier overrides: "recall" = selection-side steps (pick/topic-summary/reply-gist/inbox-filter — cheap/fast), "dream" = everything else. */
-		steps?: { recall?: LlmTierConfig; dream?: LlmTierConfig };
+		/** Base-tier sampling temperature (per-call opts.temperature wins; recall-tier steps default 0.2). */
+		temperature?: number;
+		/** Per-tier overrides: "recall" = selection-side steps (pick/topic-summary/reply-gist/inbox-filter — cheap/fast),
+		 *  "probe" = agent-initiated probe/deep-recall selection (strong but cheap per call — recall matters, over-hinting is harmless),
+		 *  "dream" = everything else. */
+		steps?: { recall?: LlmTierConfig; probe?: LlmTierConfig; dream?: LlmTierConfig };
 	};
 	inbox: {
 		/** Drop directory: users toss raw material (zip/tar.gz/jsonl/txt/md) here; the nightly

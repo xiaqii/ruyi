@@ -568,6 +568,17 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 	report.inputTokens = usage.i ?? 0;
 	report.outputTokens = usage.o ?? 0;
 	if (!opts.dryRun) writeDreamReport(db, report);
+
+	// Store card last: the store map reflects the post-dream state. Non-fatal —
+	// a card failure must never fail the dream.
+	if (!opts.dryRun) {
+		try {
+			const { refreshStoreCard } = await import("./storecard.ts");
+			if (await refreshStoreCard("default", { verbose: true })) console.log("[dream] store card refreshed");
+		} catch (err) {
+			console.error(`[dream] store card refresh failed (non-fatal): ${err instanceof Error ? err.message : err}`);
+		}
+	}
 	return report;
 }
 

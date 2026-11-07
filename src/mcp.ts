@@ -11,7 +11,7 @@ import {
 	memoryCounts,
 	tokenUsage,
 } from "./db.ts";
-import { recall } from "./recall.ts";
+import { probe, recall } from "./recall.ts";
 import { distillText, explicitRemember } from "./distill.ts";
 
 /**
@@ -29,6 +29,18 @@ interface JsonRpcRequest {
 const PROTOCOL_VERSION = "2024-11-05";
 
 const TOOLS = [
+	{
+		name: "probe",
+		description:
+			"Cheap relevance probe of the user's long-term memory. Call this LIBERALLY — before changing configs/architecture/infra, when the task touches a domain the store map says exists, or whenever the user's past might matter. Probing injects nothing and returns only one-line pointers (#id + title). Follow up with the recall tool to fetch full entries for the pointers that look relevant.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				question: { type: "string", description: "Self-contained question, e.g. 'how is the user's server network entry point set up'" },
+			},
+			required: ["question"],
+		},
+	},
 	{
 		name: "recall",
 		description:
@@ -154,6 +166,18 @@ async function handleToolCall(
 	const owner = typeof args.owner === "string" ? args.owner : "default";
 
 	switch (name) {
+		case "probe": {
+			const question = String(args.question ?? "").trim();
+			if (!question) return replyError(id, -32602, "question is required");
+			const r = await probe(question, owner, typeof args.cwd === "string" ? args.cwd : null);
+			if (r.hints.length === 0 && r.profiles.length === 0)
+				return reply(id, toolResult("No relevant memories found — safe to proceed without memory context."));
+			const lines = [
+				...r.profiles.map((p) => `[profile ${p.id}] ${p.title}`),
+				...r.hints.map((h) => `#${h.id} (${h.kind}) ${h.line}`),
+			];
+			return reply(id, toolResult(`Relevant pointers (fetch full entries with recall if needed):\n${lines.join("\n")}`));
+		}
 		case "recall": {
 			const query = String(args.query ?? "");
 			const k = typeof args.k === "number" ? args.k : undefined;

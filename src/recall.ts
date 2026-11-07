@@ -379,6 +379,7 @@ async function pick(
 	owner: string,
 	alreadyBlock?: string,
 	profileMax = 3,
+	step = "rerank",
 ): Promise<{ ids: number[]; profileIds: number[]; gist: string | null }> {
 	if (pool.length === 0) return { ids: [], profileIds: [], gist: null };
 	const listing = pool
@@ -397,7 +398,7 @@ async function pick(
 	const picked = await completeJson<{ ids?: number[]; profile_ids?: number[]; topic_gist?: string | null }>({
 		system: loadPrompt("pick"),
 		user: `CONTEXT:\n${query}\n\nMEMORIES:\n${listing}${profileBlock}${already}\n\nPick at most ${limit} memory ids and up to ${profileMax} profile ids.`,
-		step: "rerank",
+		step,
 	});
 	const valid = new Set(pool.map((m) => m.id));
 	const validProfiles = new Set(profiles.map((p) => p.id));
@@ -409,6 +410,38 @@ async function pick(
 		profileIds: coerce(picked.profile_ids).filter((id) => validProfiles.has(id)).slice(0, profileMax),
 		gist: typeof picked.topic_gist === "string" ? picked.topic_gist : null,
 	};
+}
+
+// ---------------------------------------------------------------------------
+// Agent-initiated probe: one probe-tier selector call over the whole-store
+// listing, returns one-line POINTERS only — no content, no injection, no
+// ledger. Designed to be called liberally: cheap, and the agent filters the
+// hints itself, so over-hinting is harmless while a missed hit is the real loss.
+// ---------------------------------------------------------------------------
+export async function probe(
+	question: string,
+	owner: string,
+	cwd: string | null = null,
+	scope?: RecallScope,
+): Promise<{ hints: Array<{ id: number; kind: string; line: string }>; profiles: Array<{ id: number; title: string }> }> {
+	const startedAt = Date.now();
+	const config = loadConfig();
+	const db = getDb(config.dbPath);
+	const effectiveScope = scope ?? config.recall.defaultScope;
+	const pool = gatherChannels(db, owner, effectiveScope, cwd).rows.slice(0, Math.min(config.inject.recallCandidateMax, 400));
+	if (pool.length === 0) return { hints: [], profiles: [] };
+	const picked = await pick(db, question, pool, 8, owner, undefined, 5, "probe-pick");
+	const byId = new Map(pool.map((m) => [m.id, m]));
+	const hints = picked.ids
+		.map((id) => byId.get(id))
+		.filter((m): m is MemoryRow => !!m)
+		.map((m) => ({ id: m.id, kind: m.kind, line: m.mini || clip(m.summary, 60) }));
+	const profiles = picked.profileIds
+		.map((id) => getProfile(db, id))
+		.filter((p): p is NonNullable<typeof p> => !!p)
+		.map((p) => ({ id: p.id, title: p.title }));
+	logRecall(db, { owner, query: question, mode: "probe", hits: hints.length, latencyMs: Date.now() - startedAt, detail: { pool: pool.length } });
+	return { hints, profiles };
 }
 
 // ---------------------------------------------------------------------------
@@ -522,7 +555,7 @@ export async function recall(
 	let gist: string | null;
 	let degraded = false;
 	try {
-		({ ids, profileIds, gist } = await pick(db, contextQuery, candidates, limit, owner, alreadyBlock, profileMax));
+		({ ids, profileIds, gist } = await pick(db, contextQuery, candidates, limit, owner, alreadyBlock, profileMax, opts?.auto ? "rerank" : "probe-pick"));
 	} catch (err) {
 		// Graceful degradation: LLM down/quota out → pool order (evidence/recency),
 		// no profiles. 变笨但不断线.

@@ -32,7 +32,8 @@
   "_llm_notes": {
     "protocol": "'anthropic' (Anthropic, Kimi coding endpoint, ...) or 'openai' (DeepSeek, OpenAI, Qwen, Moonshot, vLLM, Ollama, ...). For openai put the base up to /v1 or the host root, e.g. https://api.deepseek.com",
     "thinking": "'off' disables thinking (best effort, anthropic protocol verified), a number sets a budget, 'default' leaves it to the model. Recall works fine with thinking off and is much cheaper.",
-    "steps": "optional per-tier overrides, e.g. run recall (understand+rerank) on a cheap fast model: { \"steps\": { \"recall\": { \"protocol\": \"openai\", \"baseUrl\": \"https://api.deepseek.com\", \"apiKey\": \"...\", \"model\": \"deepseek-chat\", \"thinking\": \"off\" } } }"
+    "steps": "optional per-tier overrides, e.g. run recall (understand+rerank) on a cheap fast model: { \"steps\": { \"recall\": { \"protocol\": \"openai\", \"baseUrl\": \"https://api.deepseek.com\", \"apiKey\": \"...\", \"model\": \"deepseek-chat\", \"thinking\": \"off\" } } }",
+    "steps_probe": "optional third tier 'probe': agent-initiated probe / deep-recall selection. Recall matters more than precision there (output is one-line hints the agent filters), so a strong-but-cheap model wins — e.g. { \"steps\": { \"probe\": { \"protocol\": \"openai\", \"baseUrl\": \"https://dashscope.aliyuncs.com/compatible-mode\", \"apiKey\": \"...\", \"model\": \"qwen3.8-max\", \"thinking\": \"off\", \"temperature\": 0 } } }. Falls back to the recall tier when unset."
   },
   "dream": {
     "pipeline": "full",

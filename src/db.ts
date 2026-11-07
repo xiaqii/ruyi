@@ -20,7 +20,7 @@ const dbs = new Map<string, DatabaseSync>();
  * v10 = replies.answer/gist (layered topic context). v11 = memories.mini + profiles.abstract
  *       (selector listing). v12 = inbox_files (raw-material inbox: per-file×lens offsets).
  */
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 
 function migrate(d: DatabaseSync, from: number): void {
 	if (from < 1) {
@@ -90,6 +90,9 @@ function migrate(d: DatabaseSync, from: number): void {
 		const cols = d.prepare(`SELECT name FROM pragma_table_info('replies')`).all() as unknown as { name: string }[];
 		if (!cols.some((c) => c.name === "answer")) d.exec(`ALTER TABLE replies ADD COLUMN answer TEXT NOT NULL DEFAULT ''`);
 		if (!cols.some((c) => c.name === "gist")) d.exec(`ALTER TABLE replies ADD COLUMN gist TEXT NOT NULL DEFAULT ''`);
+	}
+	if (from < 13) {
+		createKv(d);
 	}
 	if (from < 12) {
 		createInboxFiles(d);
@@ -174,6 +177,22 @@ CREATE TABLE IF NOT EXISTS injection_log (
 }
 
 /** Topic registry + per-turn reply ledger (auto-inject bookkeeping; topics never pruned). */
+function createKv(db: DatabaseSync): void {
+	db.exec(`CREATE TABLE IF NOT EXISTS kv (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+)`);
+}
+
+export function getKv(d: DatabaseSync, key: string): string | null {
+	const row = d.prepare("SELECT value FROM kv WHERE key=?").get(key) as { value: string } | undefined;
+	return row?.value ?? null;
+}
+
+export function setKv(d: DatabaseSync, key: string, value: string): void {
+	d.prepare("INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key, value);
+}
+
 function createInboxFiles(d: DatabaseSync): void {
 	d.exec(`CREATE TABLE IF NOT EXISTS inbox_files (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -559,6 +578,7 @@ CREATE TABLE IF NOT EXISTS profiles (
 	createSessionRegistry(db);
 	createInjectionLog(db);
 	createInboxFiles(db); // idempotent, same rationale
+	createKv(db); // idempotent
 	createTopics(db); // idempotent; migrate() is a no-op for fresh DBs (user_version already current)
 	createTombstones(db);
 
