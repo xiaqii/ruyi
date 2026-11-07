@@ -22,3 +22,8 @@ data/
 tmp/
 dist/
 wiki/
+
+# User raw-material inbox (default ~/ruyi/inbox when the repo IS the state root)
+inbox/
+inbox-slim/
+inbox-kept/

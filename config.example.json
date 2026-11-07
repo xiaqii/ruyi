@@ -60,7 +60,7 @@
     "inferredArchiveConfidenceBelow": 0.7
   },
   "inbox": {
-    "dir": "~/ruyi-inbox",
+    "dir": "~/ruyi/inbox",
     "windowChars": 8000,
     "nightlyFilterChars": 2000000,
     "dailyBudgetCny": 80,

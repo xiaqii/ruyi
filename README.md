@@ -23,7 +23,7 @@ git clone https://github.com/xiaqii/ruyi && cd ruyi && bash scripts/install.sh  
 
 Then start a fresh chat and casually bring up an old problem from last month. The moment it picks up right where you left off — you'll get it.
 
-**Have old conversation logs?** Drop them into `~/ruyi-inbox/` — zip, tar.gz, jsonl, txt, md, even truncated archives. Overnight they get slimmed (a 174MB log becomes ~1.5MB of human signal), filtered, and distilled.
+**Have old conversation logs?** Drop them into `~/ruyi/inbox/` — zip, tar.gz, jsonl, txt, md, even truncated archives. Overnight they get slimmed (a 174MB log becomes ~1.5MB of human signal), filtered, and distilled.
 
 ## The numbers
 
