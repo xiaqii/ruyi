@@ -1,17 +1,29 @@
 # Ruyi — Cross-Conversation Memory for AI Agents
 
-**Your agent's soul, distilled.**
+You use PI / Claude Code / OpenCode — you got a smart agent.
+You use Ruyi with them — you got a Jarvis~
 
-Every new chat starts from zero. Your setup, your tastes, the traps you already paid for — gone. Ruyi fixes that. It reads your session logs overnight and learns how you think and what you prefer. The next morning, your agent shows up knowing you.
+It reads your session logs overnight, learns how you think and what you prefer, and brings it to every new conversation. No vector database. No embeddings. One Node process, one SQLite file.
 
-No vector database. No embeddings. No babysitting. One Node process, one SQLite file.
+## Install
 
-## What you get
+Hand your agent one line:
 
-- **It knows you** — your style, your rules, your hardware, your allergies. Distilled into a short book about you, chapter by chapter
-- **New chat, old topic, zero catch-up** — pick up right where you left off, weeks later
-- **Cross-domain, not just code** — how you buy things, how you parent, how you manage your health. Any domain that shows up in your life grows its own chapter
-- **No nagging** — an unrelated chat gets exactly 0 memories. A relevant one arrives once per conversation, never on repeat
+> Install and connect https://github.com/xiaqii/ruyi for me, dir: ~/ruyi, token: random.
+
+It reads [AGENT.README.md](AGENT.README.md), installs everything, generates a token, and wires itself in — you'll only be asked for an LLM API key.
+
+Prefer doing it manually?
+
+```bash
+git clone https://github.com/xiaqii/ruyi && cd ruyi && bash scripts/install.sh   # Node ≥ 23.6
+# or: npm i -g https://github.com/xiaqii/ruyi/releases/latest/download/ruyi.tgz
+# or: docker compose up -d --build
+```
+
+Then start a fresh chat and casually bring up an old problem from last month. The moment it picks up right where you left off — you'll get it.
+
+**Have old conversation logs?** Drop them into `~/ruyi-inbox/` — zip, tar.gz, jsonl, txt, md, even truncated archives. Overnight they get slimmed (a 174MB log becomes ~1.5MB of human signal), filtered, and distilled.
 
 ## The numbers
 
@@ -29,56 +41,6 @@ No vector database. No embeddings. No babysitting. One Node process, one SQLite 
 1. **Daytime — select.** A cheap fast model reads your whole store as a one-line-per-item listing plus your current topic, and points at what matters. At human scale the whole store fits in one glance — no keyword gatekeeping, nothing gets shut out.
 2. **Night — distill.** A stronger model re-reads the day's session logs: extracts lessons, merges duplicates, archives the stale. Duplicates become reinforcement, not clutter.
 3. **Weekly — write the book.** Everything worth keeping gets distilled into profile chapters: your identity card, your working style, your health, your craft domains. Memories are raw material; **profiles are the product**.
-
-## Install
-
-Best paired with [pi](https://github.com/earendil-works/pi) / [pi web](https://github.com/agegr/pi-web) — the prebuilt extension unlocks the full experience (per-turn auto-injection, tools, graceful degradation). Other agents work too.
-
-Easiest: hand the repo URL to your agent.
-
-> Install https://github.com/xiaqii/ruyi for me.
-
-It reads [AGENT.README.md](AGENT.README.md) and sets everything up itself. It will ask you for exactly one thing: an LLM API key.
-
-Or manually:
-
-```bash
-git clone https://github.com/xiaqii/ruyi
-cd ruyi
-bash scripts/install.sh
-```
-
-A local service runs at `http://127.0.0.1:8899`. (Node ≥ 23.6; custom directory: `bash scripts/install.sh /opt/ruyi`)
-
-**With npm** (two lines, works on every npm version — npm ≥12 blocks direct git/URL installs for supply-chain safety, so download first, then install the local file; no npmjs account needed on either side):
-
-```bash
-curl -LO https://github.com/xiaqii/ruyi/releases/latest/download/ruyi.tgz
-npm i -g ./ruyi.tgz        # puts `ruyi` on your PATH: ruyi serve / ruyi doctor / ruyi distill
-```
-
-**With Docker** (no Node needed on the host):
-
-```bash
-git clone https://github.com/xiaqii/ruyi && cd ruyi
-docker compose up -d --build
-```
-
-The database lives in a mounted volume at `~/ruyi-docker/` — delete the container, lose nothing.
-
-**Have old conversation logs?** Drop the file into `~/ruyi-inbox/` — zip, tar.gz, jsonl, txt, md, even a truncated archive. Overnight it gets slimmed (a 174MB log becomes ~1.5MB of actual human signal), filtered, and distilled. Bring your own history.
-
-## Connect an agent
-
-Don't wire anything yourself — let your agent do it. One sentence:
-
-> Connect ruyi for me at `http://<host>:8899`, token is `<your-token>`.
-
-The service itself is the manual — your agent fetches it, reads [AGENT.README.md](AGENT.README.md), picks the right connector (pi extension / MCP / single-file bridge), and wires itself up. Works with pi, Claude Code, opencode, and anything that speaks HTTP or MCP.
-
-Then start a fresh chat and casually bring up an old problem from last month.
-
-The moment it picks up right where you left off — you'll get it.
 
 ## Uninstall
 
