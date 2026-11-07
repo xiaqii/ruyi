@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.6.9] - 2026-11-07
+
+- remote clients: mcp-remote.mjs lost its pin/unpin zombie (that tier was removed long ago; server has no such route) and learned the tombstone-blocked remember response; README install section now splits the two scenarios explicitly — first machine installs, every other machine CONNECTS to the one server over HTTPS (no local instance)
 ## [1.6.8] - 2026-11-07
 
 - inbox default dir: ~/ruyi-inbox → ~/ruyi/inbox (subdirectory discipline — everything ruyi lives under the one state root: data/, wiki/, inbox/); inbox dirs gitignored since the repo often IS the state root
