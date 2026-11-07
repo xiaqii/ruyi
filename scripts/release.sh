@@ -83,6 +83,14 @@ else
 fi
 rm -f ruyi.tgz
 
+# 8. prune old releases (tags stay — they are the version archaeology; the Releases
+# page shows only the latest package, per user's taste)
+for tag in $(gh release list --limit 100 | awk '{print $1}'); do
+	if [ "$tag" != "v$NEW" ]; then
+		gh release delete "$tag" --yes >/dev/null 2>&1 && say "pruned old release $tag"
+	fi
+done
+
 say "released v$NEW and pushed with tag"
 say "npm install: npm i -g https://github.com/xiaqii/ruyi/releases/latest/download/ruyi.tgz"
 say "NOTE: production deploy (/app/ruyi pull + restart) is a separate, user-confirmed step"
