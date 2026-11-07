@@ -1,6 +1,6 @@
 {
   "name": "ruyi",
-  "version": "1.6.9",
+  "version": "1.7.0",
   "description": "Cross-conversation memory for AI agents — learns how you think and what you prefer. Zero deps, one SQLite file.",
   "type": "module",
   "license": "MIT",
