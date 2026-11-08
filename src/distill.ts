@@ -442,7 +442,12 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 
 		for await (const { agent, file, owner } of stream) {
 			report.sessionsScanned++;
-			const size = statSync(file).size;
+			let size: number;
+			try {
+				size = statSync(file).size;
+			} catch {
+				continue; // session files are volatile — pi can delete/rotate between listing and stat
+			}
 			const state = getDistillState(db, file);
 			if (!opts.fullReprocess && state && size === state.processed_bytes) continue;
 			let offset = opts.fullReprocess || !state || size < state.processed_bytes ? 0 : state.processed_bytes;
@@ -510,6 +515,7 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 				} catch (err) {
 					report.errors.push(`${file}@seg${seg}: ${err instanceof Error ? err.message : String(err)}`);
 					// Skip ahead one segment so a persistent failure cannot loop forever.
+					if (!existsSync(file)) break; // vanished mid-run — leave state as-is, next run re-stats
 					const delta = readSessionDelta(agent, file, offset, config.dream.maxSessionChars);
 					if (delta.newOffset <= offset) break;
 					if (!opts.dryRun) setDistillState(db, file, delta.newOffset, gist);
