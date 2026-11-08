@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.7.1] - 2026-11-08
+
+- storecard: never write an empty assembly over a good card; maxTokens 32K for assembly (Kimi thinking shares the token budget)
 ## [1.7.0] - 2026-11-08
 
 - probe tier + store card — agent-initiated probing on qwen3.8-max (thinking off), per-turn injection stays flash; store map rides every injection so agents know what the store covers
