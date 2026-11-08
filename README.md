@@ -29,6 +29,15 @@ Then start a fresh chat and casually bring up an old problem from last month. Th
 
 **Have old conversation logs?** Drop them into `~/ruyi/inbox/` — zip, tar.gz, jsonl, txt, md, even truncated archives. Overnight they get slimmed (a 174MB log becomes ~1.5MB of human signal), filtered, and distilled.
 
+## Model setup — this decides whether ruyi feels instant or sluggish
+
+Ruyi runs a tiny LLM selection call on **every user message**. Two models, two jobs:
+
+- **Selection / probe (per-turn): a fast model with thinking OFF** (e.g. Qwen flash-class, `enable_thinking=false`). With thinking left on, every turn burns seconds and money for zero quality gain — measured, not theoretical. This one choice is the difference between "invisible" and "annoying".
+- **Nightly distillation & profiles: your strongest model, thinking ON.** It runs once a night; quality is everything, speed is irrelevant.
+
+Tell your agent both keys when installing; `ruyi doctor` verifies live and warns if thinking is on for the per-turn path.
+
 ## The numbers
 
 | | |
