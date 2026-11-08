@@ -300,16 +300,18 @@ export default function (pi: ExtensionAPI) {
 			"that look relevant.",
 		parameters: ProbeParams,
 		async execute(_toolCallId, params) {
-			const r = await api<{ hints?: Array<{ id: number; kind: string; line: string }>; profiles?: Array<{ id: number; title: string }> }>(
+			const r = await api<{ hints?: Array<{ id: number; kind: string; line: string }>; profiles?: Array<{ id: number; title: string }>; serverTime?: string; error?: string }>(
 				"probe", `/probe`, { method: "POST", body: { question: params.question, owner: OWNER } },
 			);
+			if (!r) return { content: [{ type: "text", text: "(probe unavailable — service error or timeout; proceed without memory context)" }], details: {} };
 			const lines = [
 				...(r.profiles ?? []).map((x) => `[profile ${x.id}] ${x.title}`),
 				...(r.hints ?? []).map((h) => `#${h.id} (${h.kind}) ${h.line}`),
 			];
+			if (r.error) lines.unshift(`(probe degraded: ${r.error})`);
 			const text = lines.length
 				? `Relevant pointers (fetch full entries with ruyi_recall if needed):\n${lines.join("\n")}`
-				: "No relevant memories found — safe to proceed without memory context.";
+				: `No relevant memories found — safe to proceed without memory context.${r.serverTime ? `\n(顺带校准时间感: 这次提问发生于 ${r.serverTime} —— 这是提问时间,不是任何记忆的时间)` : ""}`;
 			return { content: [{ type: "text", text }], details: { hints: r.hints?.length ?? 0 } };
 		},
 	});

@@ -112,9 +112,15 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 				const body = await readBody(req);
 				const question = typeof body.question === "string" ? body.question.trim() : "";
 				if (!question) return send(res, 400, { error: "question is required" });
-				const { probe } = await import("./recall.ts");
-				const result = await probe(question, ownerOf(url, body), cwdOf(url, body));
-				return send(res, 200, result);
+				try {
+					const { probe } = await import("./recall.ts");
+					const result = await probe(question, ownerOf(url, body), cwdOf(url, body));
+					return send(res, 200, { ...result, serverTime: new Date().toLocaleString("zh-CN", { hour12: false, timeZone: "Asia/Shanghai" }) });
+				} catch (e) {
+					// Probe is advisory — a probe-tier outage must never break the agent's
+					// tool call; empty result + note lets it proceed without memory context.
+					return send(res, 200, { hints: [], profiles: [], error: `probe unavailable: ${String(e).slice(0, 120)}` });
+				}
 			}
 
 			if (req.method === "POST" && path === "/recall") {
@@ -137,7 +143,7 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 					const { getStoreCard } = await import("./storecard.ts");
 					storeCard = getStoreCard(ownerOf(url, body));
 				} catch { /* card is optional, never breaks recall */ }
-				return send(res, 200, { ...result, storeCard });
+				return send(res, 200, { ...result, storeCard, serverTime: new Date().toLocaleString("zh-CN", { hour12: false, timeZone: "Asia/Shanghai" }) });
 			}
 
 			// Assistant-answer report (client fire-and-forget, after each agent run):
