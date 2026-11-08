@@ -7,7 +7,7 @@
  *  notes) is skipped unless the user opts in with an explicit .lens.md. */
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, appendFileSync, openSync, readSync, closeSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, appendFileSync, openSync, readSync, writeSync, closeSync } from "node:fs";
 import { join, basename } from "node:path";
 import { inflateRawSync, gunzipSync } from "node:zlib";
 import type { DatabaseSync } from "node:sqlite";
@@ -126,6 +126,18 @@ function extractTexts(content: unknown): string[] {
 }
 
 /** Session jsonl (claude-code / pi) → 【用户】/【AI】 dialogue stream; thinking, tools, code all dropped. */
+/** Line-by-line over a Buffer — never materializes the whole file as one string
+ *  (Node caps strings at ~512MB; real CC session logs reach 800MB each). */
+function* iterLines(buf: Buffer): Generator<string> {
+	let start = 0;
+	while (start < buf.length) {
+		let nl = buf.indexOf(0x0a, start);
+		if (nl === -1) nl = buf.length;
+		yield buf.subarray(start, nl).toString("utf8");
+		start = nl + 1;
+	}
+}
+
 function slimJsonl(text: string): string {
 	const out: string[] = [];
 	for (const line of text.split("\n")) {
@@ -143,7 +155,29 @@ function slimJsonl(text: string): string {
 	return out.join("\n\n");
 }
 
+/** Buffer variant of slimJsonl for huge entries. */
+function slimJsonlBuffer(buf: Buffer): string {
+	const out: string[] = [];
+	for (const line of iterLines(buf)) {
+		if (!line.trim()) continue;
+		let j: JsonlEntry;
+		try { j = JSON.parse(line); } catch { continue; }
+		const m = j.message ?? j;
+		const role = m.role ?? (j.type === "user" || j.type === "assistant" ? j.type : undefined);
+		if (role !== "user" && role !== "assistant") continue;
+		const body = cleanText(extractTexts(m.content).join("\n"));
+		if (body.length < 2) continue;
+		if (body.startsWith("<command-") || body.startsWith("<local-command")) continue;
+		out.push(`【${role === "user" ? "用户" : "AI"}】${body}`);
+	}
+	return out.join("\n\n");
+}
+
 /** Is this text a session jsonl? Sample the first 50 lines for a message line — headers are often metadata lines. */
+function looksLikeSessionJsonlBuf(buf: Buffer): boolean {
+	return looksLikeSessionJsonl(buf.subarray(0, 65536).toString("utf8"));
+}
+
 function looksLikeSessionJsonl(text: string): boolean {
 	let checked = 0;
 	for (const line of text.split("\n")) {
@@ -161,12 +195,11 @@ function slimOne(name: string, data: Buffer): { format: string; text: string } |
 	const ext = name.toLowerCase();
 	if (!/\.(jsonl|txt|md|log)$/.test(ext) && !ext.includes(".")) { /* extensionless files get a try too */ }
 	else if (!/\.(jsonl|txt|md|log)$/.test(ext)) return null;
-	const text = data.toString("utf8");
-	if (looksLikeSessionJsonl(text)) {
-		const slim = slimJsonl(text);
+	if (looksLikeSessionJsonlBuf(data)) {
+		const slim = slimJsonlBuffer(data);
 		return slim.length >= 50 ? { format: "session-jsonl", text: slim } : null;
 	}
-	const cleaned = cleanText(text);
+	const cleaned = cleanText(data.toString("utf8"));
 	return cleaned.length >= 50 ? { format: "text", text: cleaned } : null;
 }
 
@@ -241,17 +274,26 @@ export async function runInbox(opts: { verbose?: boolean } = {}): Promise<InboxR
 				else if (raw[0] === 0x1f && raw[1] === 0x8b) entries = unpackTarGz(raw);
 				else entries = [{ name: row.path, data: raw }];
 				const slimPath = join(slimDir, row.path.replace(/[^\w.-]+/g, "_") + ".slim.txt");
-				let total = "";
-				for (const e of entries) {
-					const s = slimOne(e.name, e.data);
-					if (s) total += `\n\n===== ${e.name} =====\n\n${s.text}`;
+				// Stream to disk chunk by chunk: accumulating one giant string dies at
+				// Node's ~512MB string limit on multi-GB archives (real: 1.3GB zip).
+				const fd = openSync(slimPath, "w");
+				let totalLen = 0;
+				try {
+					for (const e of entries) {
+						const s = slimOne(e.name, e.data);
+						if (!s) continue;
+						const chunk = `\n\n===== ${e.name} =====\n\n${s.text}`;
+						writeSync(fd, chunk);
+						totalLen += chunk.length;
+					}
+				} finally {
+					closeSync(fd);
 				}
-				writeFileSync(slimPath, total.trim());
 				d.prepare("UPDATE inbox_files SET status='slimmed', slim_chars=?, format=?, updated_at=? WHERE id=?")
-					.run(total.length, "auto", now(), row.id);
+					.run(totalLen, "auto", now(), row.id);
 				report.slimmed++;
 				row.status = "slimmed";
-				if (opts.verbose) console.log(`[inbox] slimmed ${row.path}: ${(statSync(path).size / 1e6).toFixed(1)}MB → ${(total.length / 1e3).toFixed(0)}K chars`);
+				if (opts.verbose) console.log(`[inbox] slimmed ${row.path}: ${(statSync(path).size / 1e6).toFixed(1)}MB → ${(totalLen / 1e3).toFixed(0)}K chars`);
 			}
 
 			// ② filter (flash keep/drop; lenses decide what passes)
