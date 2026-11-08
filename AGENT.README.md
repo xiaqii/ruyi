@@ -14,6 +14,8 @@
   install the service**. The simplest first step: fetch the service URL (`curl https://<url>` or WebFetch) —
   **the service itself is the manual**; the returned text tells you what to do. Or read §5 "Remote access".
 
+- **Scenario C: update an existing install** — the user says ruyi released a new version → §5c.
+
 ruyi is a long-term memory service: at night it re-reads your session logs and distills what's worth
 remembering into memories; by day you query it via HTTP API / pi extension / MCP. Install it and your
 agent gains cross-session memory.
@@ -343,6 +345,27 @@ install.sh opts back in anytime. Results land in `logs/self-update.status`
 rebuilds need no manual action — the dream pipeline re-synthesizes when the newest profile is over 7 days
 old. To see a fresh profile tree right after an upgrade, run `node src/cli.ts synthesize` once manually
 (costs one LLM call).
+
+## 5c. Updating an existing install (read this when the user says "ruyi has a new version")
+
+First identify the install type, then act:
+
+1. **Git-clone install** (most common — `~/ruyi` or similar with a `.git`): `cd <repo> && git pull`.
+   - Client registered via **MCP stdio** (opencode / Claude Code / pi): you are DONE — the MCP server
+     respawns from the updated code on every new conversation; new tools (e.g. a newly added one) appear
+     in the next session automatically. No re-registration, no restart of your own process needed.
+   - A **ruyi service** runs on that machine: `systemctl restart ruyi` (or leave it — the daily
+     self-update at 04:40 handles tagged releases with auto-rollback, see §5b).
+2. **npm global install**: `npm i -g https://github.com/xiaqii/ruyi/releases/latest/download/ruyi.tgz`
+   (same restart rules as above).
+3. **Remote bridge** (this machine has no clone, only `mcp-remote.mjs` pointing at a remote service):
+   re-download just that file —
+   `curl -LO https://raw.githubusercontent.com/xiaqii/ruyi/main/examples/mcp-remote.mjs` —
+   then start a new conversation. The remote server already speaks the new API; nothing else to touch.
+4. **Version check**: local = `node src/cli.ts --version`; latest =
+   `git ls-remote --tags https://github.com/xiaqii/ruyi | tail -1`.
+
+Schema migrations run automatically at service start; memories/profiles/data are never touched by updates.
 
 ## 5c. Docker form (second install path)
 
