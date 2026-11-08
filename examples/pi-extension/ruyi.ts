@@ -296,16 +296,13 @@ export default function (pi: ExtensionAPI) {
 		name: "ruyi_probe",
 		label: "ruyi probe",
 		description:
-			"Cheap relevance probe of the user's long-term memory. CALL THIS LIBERALLY — before changing configs/architecture/infra, " +
-			"when the task touches a domain the store map mentions, or whenever the user's past might matter. Probing injects nothing " +
-			"and returns only one-line pointers (#id + short title). Follow up with ruyi_recall to fetch full entries for pointers " +
-			"that look relevant.",
+			"Cheap relevance probe of the user's long-term memory. Call liberally whenever the user's past might matter — returns only one-line pointers (#id + title) and injects nothing. If pointers look relevant, fetch them with ruyi_recall.",
 		parameters: ProbeParams,
 		async execute(_toolCallId, params) {
 			const r = await api<{ hints?: Array<{ id: number; kind: string; line: string }>; profiles?: Array<{ id: number; title: string }>; serverTime?: string; error?: string }>(
 				"probe", `/probe`, { method: "POST", body: { question: params.question, owner: OWNER } },
 			);
-			if (!r) return { content: [{ type: "text", text: "(probe unavailable — service error or timeout; proceed without memory context)" }], details: {} };
+			if (!r) return { content: [{ type: "text", text: "(probe unavailable — service error or timeout; proceed without memory context)" }], details: { unavailable: true } };
 			const lines = [
 				...(r.profiles ?? []).map((x) => `[profile ${x.id}] ${x.title}`),
 				...(r.hints ?? []).map((h) => `#${h.id} (${h.kind}) ${h.line}`),
@@ -314,7 +311,25 @@ export default function (pi: ExtensionAPI) {
 			const text = lines.length
 				? `Relevant pointers (fetch full entries with ruyi_recall if needed):\n${lines.join("\n")}`
 				: `No relevant memories found — safe to proceed without memory context.${r.serverTime ? `\n(顺带校准时间感: 这次提问发生于 ${r.serverTime} —— 这是提问时间,不是任何记忆的时间)` : ""}`;
-			return { content: [{ type: "text", text }], details: { hints: r.hints?.length ?? 0 } };
+			return { content: [{ type: "text", text }], details: { hints: lines.length, degraded: !!r.error } };
+		},
+
+		renderCall(args, theme) {
+			return new Text(
+				theme.fg("toolTitle", theme.bold("ruyi_probe ")) + theme.fg("accent", `"${args.question}"`),
+				0,
+				0,
+			);
+		},
+
+		renderResult(result, { isPartial }, theme) {
+			if (isPartial) return new Text(theme.fg("warning", "探针扫描中..."), 0, 0);
+			const d = result.details as { hints?: number; unavailable?: boolean; degraded?: boolean } | undefined;
+			if (d?.unavailable) return new Text(theme.fg("dim", "记忆服务不可用（不影响主流程）"), 0, 0);
+			if (d?.degraded) return new Text(theme.fg("warning", "探针降级（probe 层模型故障）"), 0, 0);
+			return d?.hints
+				? new Text(theme.fg("success", `探到 ${d.hints} 条指向`), 0, 0)
+				: new Text(theme.fg("dim", "探针：无相关记忆"), 0, 0);
 		},
 	});
 
@@ -322,15 +337,7 @@ export default function (pi: ExtensionAPI) {
 		name: "ruyi_recall",
 		label: "Memory Recall",
 		description:
-			"Query the user's long-term memory for FULL entries. Relevant memories are auto-injected every turn (see above) — " +
-			"never re-fetch what was injected. A store map (domains the store covers) also rides each injection: when the task " +
-			"touches one of those domains, or you are about to change configs/architecture/infra, probe first with ruyi_probe " +
-			"(cheap, injects nothing), then use this tool to fetch the entries that matter. Also use it when the user references " +
-			"earlier context (\"继续\", \"上次\", \"老规矩\") or asks what you remember. " +
-			"SKIP for fully self-contained questions (syntax, generic how-to). " +
-			"mode=fast is a free keyword probe (cheap tentative check), mode=deep (default) is semantic search, " +
-			"mode=excavate also digs absorbed/archived memories; scope=\"all\" searches every directory's memories. " +
-			"One deep call usually settles it — escalate to excavate or scope=\"all\" only when deep misses.",
+			"Fetch FULL memory entries. Relevant memories are auto-injected every turn and a store map rides each injection — never re-fetch what was injected. Typical flow: ruyi_probe first (cheap), then recall only the pointers that matter. Also use when the user references earlier context (\"continue\", \"last time\"). Skip for self-contained questions. mode: fast = keyword scan, deep = semantic (default), excavate = include archived; scope=\"all\" searches every directory. One deep call usually settles it.",
 		parameters: RecallParams,
 
 		async execute(_id, params, _signal, _onUpdate, _ctx) {

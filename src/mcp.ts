@@ -32,7 +32,7 @@ const TOOLS = [
 	{
 		name: "probe",
 		description:
-			"Cheap relevance probe of the user's long-term memory. Call this LIBERALLY — before changing configs/architecture/infra, when the task touches a domain the store map says exists, or whenever the user's past might matter. Probing injects nothing and returns only one-line pointers (#id + title). Follow up with the recall tool to fetch full entries for the pointers that look relevant.",
+			"Cheap relevance probe of the user's long-term memory. Call liberally whenever the user's past might matter — returns only one-line pointers (#id + title) and injects nothing. If pointers look relevant, fetch them with recall.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -44,7 +44,7 @@ const TOOLS = [
 	{
 		name: "recall",
 		description:
-			"Query the user's long-term memory. CALL THIS whenever the request touches the user's past work, decisions, tastes, projects or habits; when the user references earlier context; before advising in a domain the user has history in; or when asked what you remember. SKIP only for fully self-contained questions. Returns full memory entries. mode: fast=free keyword probe, deep(default)=semantic, excavate=include archived.",
+			"Fetch full memory entries. Relevant memories are auto-injected every turn — never re-fetch what was injected. Typical flow: probe first (cheap), then recall only the pointers that matter. Also use when the user references earlier context. Skip for self-contained questions. mode: fast = keyword scan, deep = semantic (default), excavate = include archived.",
 		inputSchema: {
 			type: "object",
 			properties: {
