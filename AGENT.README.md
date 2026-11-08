@@ -348,7 +348,10 @@ old. To see a fresh profile tree right after an upgrade, run `node src/cli.ts sy
 
 ## 5c. Updating an existing install (read this when the user says "ruyi has a new version")
 
-First identify the install type, then act:
+**First question: are you CONNECT-only or do you run the server?** Most clients are connect-only
+(mcp-remote.mjs bridge → someone else's ruyi service) — for them "upgrading ruyi" means updating ONE
+local bridge file, never installing anything. Only the machine that actually runs the ruyi service
+follows the install-upgrade paths. Then act by type:
 
 1. **Git-clone install** (most common — `~/ruyi` or similar with a `.git`): `cd <repo> && git pull`.
    - Client registered via **MCP stdio** (opencode / Claude Code / pi): you are DONE — the MCP server
@@ -358,8 +361,8 @@ First identify the install type, then act:
      self-update at 04:40 handles tagged releases with auto-rollback, see §5b).
 2. **npm global install**: `npm i -g https://github.com/xiaqii/ruyi/releases/latest/download/ruyi.tgz`
    (same restart rules as above).
-3. **Remote bridge** (this machine has no clone, only `mcp-remote.mjs` pointing at a remote service):
-   re-download just that file —
+3. **Remote bridge** (connect-only client: no clone, no service, only `mcp-remote.mjs` pointing at a
+   remote ruyi): re-download just that file —
    `curl -LO https://raw.githubusercontent.com/xiaqii/ruyi/main/examples/mcp-remote.mjs` —
    then start a new conversation. The remote server already speaks the new API; nothing else to touch.
 4. **Version check**: local = `node src/cli.ts --version`; latest =
