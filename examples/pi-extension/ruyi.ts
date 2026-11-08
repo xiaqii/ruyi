@@ -104,6 +104,7 @@ interface RecallResponse {
 	memories: RecallMemory[];
 	profiles?: RecallProfile[];
 	deduped?: number;
+	storeCard?: string;
 }
 
 
@@ -115,8 +116,8 @@ function profileIntro(p: RecallProfile): string {
 
 function formatRecall(result: RecallResponse): string {
 	const parts: string[] = [];
-	if (typeof res.storeCard === "string" && res.storeCard.trim()) {
-		parts.push("STORE MAP (what this memory store covers — probe via ruyi_probe when the task touches these domains):\n" + res.storeCard.trim());
+	if (typeof result.storeCard === "string" && result.storeCard.trim()) {
+		parts.push("STORE MAP (what this memory store covers — probe via ruyi_probe when the task touches these domains):\n" + result.storeCard.trim());
 	}
 	for (const p of result.profiles ?? [])
 		parts.push(`${profileIntro(p)} (v${p.version}):\n${p.content.slice(0, 3000)}`);
