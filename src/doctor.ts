@@ -9,7 +9,7 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { loadConfig } from "./config.ts";
 import { getDb, ftsSearch, memoryCounts } from "./db.ts";
-import { resolveLlm } from "./llm.ts";
+import { PROBE_STEPS, RECALL_STEPS, resolveLlm } from "./llm.ts";
 
 type Status = "PASS" | "WARN" | "FAIL";
 
@@ -33,10 +33,13 @@ async function checkLlm(step: string): Promise<{ ok: boolean; ms: number }> {
 		});
 		const ms = Date.now() - started;
 		const parsed = r.text.includes("ok");
+		const fastPath = RECALL_STEPS.has(step) || PROBE_STEPS.has(step);
+		const thinkingOn = fastPath && llm.thinking !== "off";
 		const ok = line(
-			ms < 30_000 ? "PASS" : "WARN",
+			ms < 30_000 && !thinkingOn ? "PASS" : "WARN",
 			`LLM ${step} tier (${llm.protocol}/${llm.model}${llm.thinking === "off" ? ", thinking off" : ""})`,
-			`${ms}ms, ${r.inputTokens}+${r.outputTokens} tokens${parsed ? "" : ", unexpected reply"}`,
+			`${ms}ms, ${r.inputTokens}+${r.outputTokens} tokens${parsed ? "" : ", unexpected reply"}` +
+				(thinkingOn ? " — THINKING IS ON for a per-turn path: every user message pays thinking latency/cost; set thinking: \"off\" for the recall/probe tier" : ""),
 		);
 		return { ok, ms };
 	} catch (err) {

@@ -91,11 +91,11 @@ function appendUsageLog(entry: Record<string, unknown>): void {
 }
 
 /** Steps served by the (cheap, fast, thinking-off) "recall" tier; everything else is "dream". */
-const RECALL_STEPS = new Set(["pick", "rerank", "topic-summary", "reply-gist", "inbox-filter"]);
+export const RECALL_STEPS = new Set(["pick", "rerank", "topic-summary", "reply-gist", "inbox-filter"]);
 // Probe tier (steps.probe): agent-initiated probe / deep-recall selection. Recall matters
 // more than precision here — the output is one-line hints the agent filters itself, so an
 // over-eager strong-but-cheap model (e.g. qwen3.8-max thinking-off) beats a timid one.
-const PROBE_STEPS = new Set(["probe-pick"]);
+export const PROBE_STEPS = new Set(["probe-pick"]);
 
 interface ResolvedLlm {
 	protocol: "anthropic" | "openai";
