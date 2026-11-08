@@ -88,8 +88,17 @@ export async function refreshStoreCard(owner = "default", opts: { verbose?: bool
 			system: loadPrompt("store-card"),
 			user: `DOMAIN CARDS:\n${domainCards.map((d) => `【${d.domain}】(${d.count} 条)\n${d.card}`).join("\n\n")}\n\nPORTRAIT CHAPTERS:\n${profileLines}\n\nAssemble the store card (target <= ${STORE_CARD_TARGET} chars).`,
 			step: "store-card",
+			// Thinking burns the same budget as the reply on the Kimi endpoint — with
+			// the tier default (8K) a long think leaves ZERO room for the card text.
+			maxTokens: 32_000,
 		})
 	).text.trim();
+	// Never let an empty/garbage assembly overwrite a good card (Kimi occasionally
+	// returns an empty completion; a missing card is better than a blank one).
+	if (assembled.length < 100) {
+		console.warn(`[storecard] assembly returned ${assembled.length} chars — keeping the previous card`);
+		return false;
+	}
 	setKv(db, `storecard:${owner}`, assembled);
 	setKv(db, stateKey, domState);
 	if (opts.verbose) console.log(`[storecard] assembled ${assembled.length} chars from ${domainCards.length} domains`);
