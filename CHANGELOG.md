@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.7.2] - 2026-11-08
+
+- inbox streams slimming (GB-scale archives no longer hit Node's 512MB string cap); probe survives probe-tier outages gracefully; recall/probe responses carry serverTime (surfaced only on empty probes, labeled as question time); fix extension formatRecall crash (undefined res) that broke every injection; AGENT.README §5c update guide leads with connect-vs-install
 ## [1.7.1] - 2026-11-08
 
 - storecard: never write an empty assembly over a good card; maxTokens 32K for assembly (Kimi thinking shares the token budget)
