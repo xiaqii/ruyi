@@ -101,6 +101,7 @@ export async function refreshStoreCard(owner = "default", opts: { verbose?: bool
 	}
 	setKv(db, `storecard:${owner}`, assembled);
 	setKv(db, stateKey, domState);
+	setKv(db, `storecard:built:${owner}`, new Date().toISOString());
 	if (opts.verbose) console.log(`[storecard] assembled ${assembled.length} chars from ${domainCards.length} domains`);
 	return true;
 }
@@ -109,5 +110,14 @@ export async function refreshStoreCard(owner = "default", opts: { verbose?: bool
 export function getStoreCard(owner = "default"): string | null {
 	const config = loadConfig();
 	const db = getDb(config.dbPath);
-	return getKv(db, `storecard:${owner}`);
+	const card = getKv(db, `storecard:${owner}`);
+	if (!card) return null;
+	// Fresh strip: memories born after the card's last nightly build are not in
+	// the map yet — append them so the agent's map is never a day stale.
+	const built = getKv(db, `storecard:built:${owner}`) ?? new Date(Date.now() - 86_400_000).toISOString();
+	const fresh = db
+		.prepare(`SELECT id, summary FROM memories WHERE status = 'active' AND owner = ? AND created_at > ? ORDER BY id DESC LIMIT 8`)
+		.all(owner, built) as Array<{ id: number; summary: string }>;
+	if (fresh.length === 0) return card;
+	return card + "\n\nNEW SINCE THIS MAP WAS BUILT (not yet woven in):\n" + fresh.map((m) => `#${m.id} ${m.summary.slice(0, 50)}`).join("\n");
 }

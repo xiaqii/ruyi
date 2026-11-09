@@ -203,7 +203,9 @@ function gatherChannels(
 		if (!scopeOk(m, scope, cwd)) continue;
 		out.push(m);
 	}
-	out.sort((a, b) => b.pinned - a.pinned || b.evidence - a.evidence || b.last_seen_at.localeCompare(a.last_seen_at));
+	// Stable id order: last_seen_at changes on every injection, which would reshuffle
+	// the listing and defeat the provider's prefix cache. Stability wins (bench-verified).
+	out.sort((a, b) => a.id - b.id);
 	return { rows: out, scores: new Map(), ftsHitCount: 0 };
 }
 
@@ -397,7 +399,9 @@ async function pick(
 	const already = alreadyBlock ? `\n\nALREADY INJECTED:\n${alreadyBlock}` : "";
 	const picked = await completeJson<{ ids?: number[]; profile_ids?: number[]; topic_gist?: string | null }>({
 		system: loadPrompt("pick"),
-		user: `CONTEXT:\n${query}\n\nMEMORIES:\n${listing}${profileBlock}${already}\n\nPick at most ${limit} memory ids and up to ${profileMax} profile ids.`,
+		// Static listing first, per-turn variables (query, already-injected) last:
+		// the provider's prefix cache then hits on the 13K-token listing every turn.
+		user: `MEMORIES:\n${listing}${profileBlock}\n\nCONTEXT:\n${query}${already}\n\nPick at most ${limit} memory ids and up to ${profileMax} profile ids.`,
 		step,
 	});
 	const valid = new Set(pool.map((m) => m.id));
