@@ -272,8 +272,12 @@ export async function complete(opts: CompleteOptions): Promise<LlmResult> {
 				const text = await res.text().catch(() => "");
 				lastError = `HTTP ${res.status} ${text.slice(0, 300)}`;
 				// Auth/quota rejection: fall through to the next key in the pool.
-				if ((res.status === 401 || res.status === 403 || res.status === 429) && k + 1 < llm.apiKeys.length) {
-					console.error(`[ruyi] LLM key #${k + 1} rejected (HTTP ${res.status}), falling back to key #${k + 2}`);
+				// Note: some Anthropic-style endpoints report a drained subscription as
+				// HTTP 400 ("credit balance too low" / quota wording) rather than 429 —
+				// match the body too or a burnt key would hard-fail the whole run.
+				const quotaWords = /credit|balance|quota|insufficient|额度|余额|套餐/i.test(text);
+				if ((res.status === 401 || res.status === 403 || res.status === 429 || res.status === 402 || (res.status === 400 && quotaWords)) && k + 1 < llm.apiKeys.length) {
+					console.error(`[ruyi] LLM key #${k + 1} rejected (HTTP ${res.status}${quotaWords && res.status === 400 ? ", quota wording in body" : ""}), falling back to key #${k + 2}`);
 					continue keyLoop;
 				}
 				if (res.status === 400) {
