@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.7.3] - 2026-11-09
+
+- dream: tolerate vanishing session files (ENOENT mid-scan) and actually read inbox-kept .txt (the .jsonl filter starved the inbox→dream path); selector listing in stable id order with static-first prompt layout (prefix-cache friendly; flash +3/14 on bench); store card gains a NEW-SINCE strip for memories born after the last nightly build
 ## [1.7.2] - 2026-11-08
 
 - inbox streams slimming (GB-scale archives no longer hit Node's 512MB string cap); probe survives probe-tier outages gracefully; recall/probe responses carry serverTime (surfaced only on empty probes, labeled as question time); fix extension formatRecall crash (undefined res) that broke every injection; AGENT.README §5c update guide leads with connect-vs-install
