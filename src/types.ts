@@ -61,6 +61,11 @@ export interface LlmTierConfig {
 	thinking?: "off" | "default" | number;
 	/** Sampling temperature override for this tier (per-call opts.temperature still wins). */
 	temperature?: number;
+	/** openai protocol only: use SSE streaming. Some gateways (e.g. Aliyun token-plan)
+	 *  kill long-running NON-streaming requests (silent socket drop → "fetch failed")
+	 *  while streaming keeps the connection alive with chunks. Enable for big-budget
+	 *  dream-stage calls on such gateways. */
+	stream?: boolean;
 }
 
 export interface SessionSourceConfig {
@@ -88,6 +93,9 @@ export interface Config {
 		maxTokens: number;
 		requestTimeoutMs: number;
 		thinking?: "off" | "default" | number;
+		/** openai protocol only: SSE streaming for this tier (survives gateways that
+		 *  drop long non-streaming calls, e.g. Aliyun token-plan). */
+		stream?: boolean;
 		/** Base-tier sampling temperature (per-call opts.temperature wins; recall-tier steps default 0.2). */
 		temperature?: number;
 		/** Per-tier overrides: "recall" = selection-side steps (pick/topic-summary/reply-gist/inbox-filter — cheap/fast),
