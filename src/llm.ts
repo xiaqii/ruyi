@@ -107,6 +107,7 @@ interface ResolvedLlm {
 	maxTokens: number;
 	requestTimeoutMs: number;
 	thinking: "off" | "default" | number;
+	stream?: boolean;
 	temperature?: number;
 }
 
@@ -124,6 +125,7 @@ export function resolveLlm(step: string): ResolvedLlm {
 		apiKey: keys[0] ?? base.apiKey,
 		apiKeys: keys,
 		model: override?.model ?? base.model,
+		stream: override?.stream ?? base.stream,
 		temperature: override?.temperature ?? base.temperature,
 		maxTokens: override?.maxTokens ?? base.maxTokens,
 		requestTimeoutMs: override?.requestTimeoutMs ?? base.requestTimeoutMs,
@@ -162,6 +164,12 @@ function buildBody(llm: ResolvedLlm, opts: CompleteOptions, fixes: Set<string>):
 		// DashScope-style switch for thinking-capable OpenAI-compatible models
 		// (qwen3.x): dropped on 400 via the "thinking" downgrade fix.
 		if (llm.thinking === "off" && !fixes.has("thinking")) body.enable_thinking = false;
+		// SSE streaming keeps long calls alive on gateways that silently drop
+		// long-running non-streaming requests (token-plan: >~2min = fetch failed).
+		if (llm.stream) {
+			body.stream = true;
+			body.stream_options = { include_usage: true };
+		}
 		return body;
 	}
 	// anthropic protocol
@@ -196,6 +204,36 @@ function endpointOf(llm: ResolvedLlm, key: string): { url: string; headers: Reco
 			"anthropic-version": "2023-06-01",
 		},
 	};
+}
+
+/** Consume an OpenAI-style SSE stream into the same shape parseResponse expects.
+ *  Accumulates delta.content (reasoning deltas ignored); usage comes from the final
+ *  chunk (stream_options.include_usage). */
+async function consumeStream(res: Response): Promise<Record<string, unknown>> {
+	let text = "";
+	let usage: Record<string, unknown> = {};
+	const reader = res.body!.getReader();
+	const dec = new TextDecoder();
+	let buf = "";
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		buf += dec.decode(value, { stream: true });
+		const lines = buf.split("\n");
+		buf = lines.pop() ?? "";
+		for (const ln of lines) {
+			if (!ln.startsWith("data:") || ln.includes("[DONE]")) continue;
+			try {
+				const j = JSON.parse(ln.slice(5)) as Record<string, unknown>;
+				const delta = ((j.choices as Record<string, unknown>[]) ?? [])[0]?.delta as Record<string, unknown> | undefined;
+				if (typeof delta?.content === "string") text += delta.content;
+				if (j.usage) usage = j.usage as Record<string, unknown>;
+			} catch {
+				// partial chunk — ignore
+			}
+		}
+	}
+	return { choices: [{ message: { content: text } }], usage };
 }
 
 function parseResponse(
@@ -290,7 +328,7 @@ export async function complete(opts: CompleteOptions): Promise<LlmResult> {
 				throw new Error(`LLM request failed: ${lastError}`);
 			}
 
-		const data = (await res.json()) as Record<string, unknown>;
+		const data = llm.stream && llm.protocol === "openai" ? await consumeStream(res) : ((await res.json()) as Record<string, unknown>);
 		const { text, inputTokens, outputTokens } = parseResponse(llm, data);
 		const latencyMs = Date.now() - startedAt;
 
