@@ -97,7 +97,7 @@ export async function runSynthesize(owner: string): Promise<SynthesizeReport> {
 		user: `MEMORIES:\n${listing}${existingBlock}${demandBlock}\n\nReturn at most ${MAX_DOMAINS} domains.`,
 		runId: `synthesize-${Date.now()}`,
 		step: "synthesize-cluster",
-		maxTokens: 16384,
+		maxTokens: 65_536,
 	});
 
 	const byId = new Map(memories.map((m) => [m.id, m]));
@@ -165,7 +165,7 @@ export async function runSynthesize(owner: string): Promise<SynthesizeReport> {
 				user: `THEME: ${dom.title} / ${sub.title}\n\nMATURITY: ${maturity} (${memberRows.length} member memories)\n\nMEMBER MEMORIES:\n${material}\n\nReturn ONLY JSON: {"abstract": "one line <=60 chars", "chapter": "..."} (markdown inside the strings).`,
 				runId: `synthesize-${Date.now()}`,
 				step: `synthesize-theme:${subTheme}`,
-				maxTokens: 8192,
+				maxTokens: 32_768,
 			});
 			const content = chapter.chapter?.trim();
 			if (!content) continue;
