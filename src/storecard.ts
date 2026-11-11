@@ -90,7 +90,7 @@ export async function refreshStoreCard(owner = "default", opts: { verbose?: bool
 			step: "store-card",
 			// Thinking burns the same budget as the reply on the Kimi endpoint — with
 			// the tier default (8K) a long think leaves ZERO room for the card text.
-			maxTokens: 32_000,
+			maxTokens: 65_536,
 		})
 	).text.trim();
 	// Never let an empty/garbage assembly overwrite a good card (Kimi occasionally
