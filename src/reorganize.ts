@@ -57,7 +57,7 @@ export async function runReorganize(runId: string, owner: string): Promise<Reorg
 		step: "reorganize",
 		runId,
 		maxTokens: 131_072, // reasoning models (qwen4) think long — thinking shares the output budget // whole-store listing + thinking needs headroom
-		timeoutMs: 600_000,
+		timeoutMs: 3_600_000, // long-thinking models need real time on whole-store listings
 	});
 
 	const valid = new Set(memories.map((m) => m.id));
