@@ -56,7 +56,7 @@ export async function runReorganize(runId: string, owner: string): Promise<Reorg
 				: "") + `ACTIVE MEMORIES:\n${listing}`,
 		step: "reorganize",
 		runId,
-		maxTokens: 65_536, // reasoning models (qwen4) think long — thinking shares the output budget // whole-store listing + thinking needs headroom
+		maxTokens: 131_072, // reasoning models (qwen4) think long — thinking shares the output budget // whole-store listing + thinking needs headroom
 		timeoutMs: 600_000,
 	});
 
