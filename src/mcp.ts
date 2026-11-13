@@ -32,7 +32,7 @@ const TOOLS = [
 	{
 		name: "probe",
 		description:
-			"Cheap relevance probe of the user's long-term memory. Call liberally whenever the user's past might matter — returns only one-line pointers (#id + title) and injects nothing. If pointers look relevant, fetch them with recall.",
+			"Cheap relevance probe of the user's long-term memory. Call it AS OFTEN AS POSSIBLE and ALWAYS FIRST: whenever the user's past, preferences, projects, devices or environment might matter, probe before answering from guesswork, and always probe before any full recall. Returns only one-line pointers (#id + title) and injects nothing. No relevant pointers → answer directly, no recall. Relevant pointers → fetch them with recall.",
 		inputSchema: {
 			type: "object",
 			properties: {

@@ -23,7 +23,7 @@ const TOKEN = process.env.RUYI_TOKEN ?? "";
 const OWNER = process.env.RUYI_OWNER ?? "default";
 
 const TOOLS = [
-	{ name: "probe", description: "Cheap relevance probe of the memory store. Call liberally whenever the user's past might matter — returns one-line pointers only and injects nothing; follow up with recall for full entries.", inputSchema: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } },
+	{ name: "probe", description: "Cheap relevance probe of the user's long-term memory. Call it AS OFTEN AS POSSIBLE and ALWAYS FIRST: whenever the user's past, preferences, projects, devices or environment might matter, probe before answering from guesswork, and always probe before any full recall. Returns only one-line pointers (#id + title) and injects nothing. No relevant pointers → answer directly, no recall. Relevant pointers → fetch them with recall.", inputSchema: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } },
 	{ name: "recall", description: "Fetch full memory entries. Typical flow: probe first (cheap), then recall the pointers that matter. mode: fast = keyword scan, deep = semantic (default), excavate = include archived.", inputSchema: { type: "object", properties: { query: { type: "string" }, k: { type: "number" }, mode: { type: "string", enum: ["fast", "deep", "excavate"] } }, required: ["query"] } },
 	{ name: "list", description: "List recent long-term memory entries (one-line summaries with ids).", inputSchema: { type: "object", properties: { limit: { type: "number" } } } },
 	{ name: "get", description: "Get a memory entry by id.", inputSchema: { type: "object", properties: { id: { type: "number" } }, required: ["id"] } },

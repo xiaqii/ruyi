@@ -296,7 +296,7 @@ export default function (pi: ExtensionAPI) {
 		name: "ruyi_probe",
 		label: "ruyi probe",
 		description:
-			"Cheap relevance probe of the user's long-term memory. Call liberally whenever the user's past might matter — returns only one-line pointers (#id + title) and injects nothing. If pointers look relevant, fetch them with ruyi_recall.",
+			"Cheap relevance probe of the user's long-term memory. Call it AS OFTEN AS POSSIBLE and ALWAYS FIRST: whenever the user's past, preferences, projects, devices or environment might matter, probe before answering from guesswork, and always probe before any full recall. Returns only one-line pointers (#id + title) and injects nothing. No relevant pointers → answer directly, no recall. Relevant pointers → fetch them with recall.",
 		parameters: ProbeParams,
 		async execute(_toolCallId, params) {
 			const r = await api<{ hints?: Array<{ id: number; kind: string; line: string }>; profiles?: Array<{ id: number; title: string }>; serverTime?: string; error?: string }>(
