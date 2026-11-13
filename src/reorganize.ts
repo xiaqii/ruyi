@@ -56,8 +56,8 @@ export async function runReorganize(runId: string, owner: string): Promise<Reorg
 				: "") + `ACTIVE MEMORIES:\n${listing}`,
 		step: "reorganize",
 		runId,
-		maxTokens: 131_072, // reasoning models (qwen4) think long — thinking shares the output budget // whole-store listing + thinking needs headroom
-		timeoutMs: 14_400_000, // 4h — user call: stop being timid, let long-thinking models finish
+		maxTokens: 256_000, // reasoning models (qwen4) think long — thinking shares the output budget // whole-store listing + thinking needs headroom
+		timeoutMs: 28_800_000, // 8h — effectively no timeout; user call: let it think as long as it wants
 	});
 
 	const valid = new Set(memories.map((m) => m.id));
