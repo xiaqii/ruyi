@@ -504,7 +504,9 @@ export default function (pi: ExtensionAPI) {
 			"Manage long-term memory. Use when the user asks to forget/delete something (action=forget with the memory id), " +
 			"for a token cost report (stats), " +
 			"or to inspect synthesized profile chapters (profile; pass profileId for full content). " +
-			"Forgetting archives — the memory stays recoverable via ruyi_recall mode=excavate.",
+			"Forgetting archives — the memory stays recoverable via ruyi_recall mode=excavate. " +
+			"NOTE: profile is for management/inspection, NOT retrieval — to find relevant memories, " +
+			"probe first with ruyi_probe (the profile list alone is a lossy map; recent memories are not yet in it).",
 		parameters: AdminParams,
 
 		async execute(_id, params, _signal, _onUpdate, _ctx) {
