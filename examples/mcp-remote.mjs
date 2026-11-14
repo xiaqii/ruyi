@@ -10,7 +10,7 @@
  *   RUYI_OWNER  memory namespace               (default "default")
  *
  * Claude Code (any OS):
- *   claude mcp add ruyi -e RUYI_URL=https://ruyi.example.com -e RUYI_TOKEN=xxx \
+ *   claude mcp add ruyi -s user -e RUYI_URL=https://ruyi.example.com -e RUYI_TOKEN=xxx \
  *     -- node C:\path\to\mcp-remote.mjs
  * opencode: same command in the mcp.local entry's "command" array; env via "environment".
  *

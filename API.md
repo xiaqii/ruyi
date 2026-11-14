@@ -290,7 +290,7 @@ the server name automatically: shown as `ruyi_recall` in opencode, `mcp__ruyi__r
 | `remember` | POST /memories | `summary`*, `content`*, `kind`, `domain`, `owner` |
 | `admin` | pin/forget/stats/profiles | `action`*(forget/stats/profile), `id`, `days`, `profileId`, `owner` |
 
-Client config examples (Claude Code: `claude mcp add ruyi -- node <repo>/src/cli.ts mcp`;
+Client config examples (Claude Code: `claude mcp add ruyi -s user -- node <repo>/src/cli.ts mcp`;
 opencode and other MCP clients analogous — see their docs).
 
 ## Recommended minimal agent integration

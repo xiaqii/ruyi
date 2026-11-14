@@ -184,7 +184,7 @@ tools become available.
 ### You are Claude Code
 
 ```bash
-claude mcp add ruyi -- node <absolute repo path>/src/cli.ts mcp
+claude mcp add ruyi -s user -- node <absolute repo path>/src/cli.ts mcp
 ```
 
 (For project-level config see `examples/claude-code/.mcp.json`.)
@@ -248,7 +248,7 @@ curl -o C:\tools\mcp-remote.mjs https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/exa
 
 # 2. MCP registration. Check first: `claude mcp list` — if "ruyi" is already there, skip
 #    (or re-run to refresh env). Otherwise:
-claude mcp add ruyi -e RUYI_URL=<url> -e RUYI_TOKEN=<token> -- node C:\tools\mcp-remote.mjs
+claude mcp add ruyi -s user -e RUYI_URL=<url> -e RUYI_TOKEN=<token> -- node C:\tools\mcp-remote.mjs
 
 # 3. Verify the bridge (mandatory): open a fresh conversation, call the recall tool
 #    with "coding style". Content coming back = connected.

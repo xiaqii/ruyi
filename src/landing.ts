@@ -36,7 +36,7 @@ MCP clients (Claude Code, opencode, ...)
   Download the bridge (single file, no clone needed):
     https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/examples/mcp-remote.mjs
   Claude Code (Windows too):
-    claude mcp add ruyi -e RUYI_URL=<url> -e RUYI_TOKEN=<token> -- node <script-path>
+    claude mcp add ruyi -s user -e RUYI_URL=<url> -e RUYI_TOKEN=<token> -- node <script-path>
   opencode (~/.config/opencode/opencode.jsonc):
     "mcp": { "ruyi": { "type": "local", "command": ["node", "<script-path>"],
                        "environment": { "RUYI_URL": "<url>", "RUYI_TOKEN": "<token>" } } }
