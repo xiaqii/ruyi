@@ -216,8 +216,8 @@ if (tmpId === -1) throw new Error("fixture insert blocked by tombstone — conte
 	ok(cf2.status === 404, "unknown client file rejected");
 
 	// request stats: requests are logged with client attribution and aggregate by day
-	await call("POST", "/probe", { question: "stats-contract-probe" });
-	const act = await call("GET", "/activity?days=1", undefined, { "x-ruyi-client": "contract-stats" });
+	await call("POST", "/probe", { question: "stats-contract-probe" }, { "x-ruyi-client": "contract-stats" });
+	const act = await call("GET", "/activity?days=1");
 	const today = new Date().toISOString().slice(0, 10);
 	ok(act.status === 200 && act.json.byDay?.[today]?.probe?.n >= 1, "activity aggregates today's probe calls");
 	const cl = act.json.byClient?.["contract-stats"] ?? act.json.byClient?.unknown;
