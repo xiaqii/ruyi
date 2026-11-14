@@ -55,6 +55,17 @@ Tell your agent both keys when installing; `ruyi doctor` verifies live and warns
 2. **Night — distill.** A stronger model re-reads the day's session logs: extracts lessons, merges duplicates, archives the stale. Duplicates become reinforcement, not clutter.
 3. **Weekly — write the book.** Everything worth keeping gets distilled into profile chapters: your identity card, your working style, your health, your craft domains. Memories are raw material; **profiles are the product**.
 
+### Feeding the dream from other machines (session sync)
+
+`examples/sync-sessions.mjs` (single self-contained file) pushes any machine's agent logs into the same
+ruyi. It **slims locally first** — thinking blocks, images and file snapshots stripped, tool payloads
+capped, typically ~0.3% of the raw bytes — then sends only new lines, resumable at line granularity with
+per-chunk checkpoints. Formats auto-detected (claude-code / pi / codex); unknown formats stop loudly with
+nothing uploaded. Claude Code can self-wire a SessionEnd hook (`--install-hook`) so every finished
+conversation syncs itself in seconds; the script self-updates weekly from your server, and
+`--uninstall-hook` removes all traces. Machines and their push activity are visible in the server ledger
+(`GET /sync/state`).
+
 ## Uninstall
 
 ```
