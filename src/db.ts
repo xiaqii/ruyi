@@ -20,7 +20,7 @@ const dbs = new Map<string, DatabaseSync>();
  * v10 = replies.answer/gist (layered topic context). v11 = memories.mini + profiles.abstract
  *       (selector listing). v12 = inbox_files (raw-material inbox: per-file×lens offsets).
  */
-const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 14;
 
 function migrate(d: DatabaseSync, from: number): void {
 	if (from < 1) {
