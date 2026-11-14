@@ -98,7 +98,7 @@ function slimLineString(ln, agent) {
 	}
 	return shrinkToFit(JSON.stringify(slimLine(obj, agent)));
 }
-const SYNC_VERSION = "2.2.0";
+const SYNC_VERSION = "2.3.0";
 
 /** Best-effort weekly self-update from the server (which serves the latest
  *  client files from its own checkout). Never breaks a sync run over an update. */
@@ -356,22 +356,45 @@ if (isMain) {
 // (delete the file; `claude mcp remove ruyi`). Synced data on the server is
 // NOT touched — that is accumulated memory, not client state.
 if (args.includes("--uninstall-hook")) {
-	const ccSettings = join(`${process.env.HOME ?? process.env.USERPROFILE}`, ".claude", "settings.json");
-	let removed = 0;
+	const homeDir = `${process.env.HOME ?? process.env.USERPROFILE}`;
+	const ccSettings = join(homeDir, ".claude", "settings.json");
 	if (existsSync(ccSettings)) {
 		const cfg = JSON.parse(readFileSync(ccSettings, "utf8"));
-		const before = JSON.stringify(cfg.hooks ?? {});
-		if (cfg.hooks?.SessionEnd) {
-			cfg.hooks.SessionEnd = cfg.hooks.SessionEnd.filter((e) => !JSON.stringify(e).includes("sync-sessions.mjs"));
-			if (!cfg.hooks.SessionEnd.length) delete cfg.hooks.SessionEnd;
+		const before = JSON.stringify(cfg);
+		for (const event of ["SessionEnd", "SessionStart", "UserPromptSubmit"]) {
+			if (cfg.hooks?.[event]) {
+				cfg.hooks[event] = cfg.hooks[event].filter((e) => {
+					const j = JSON.stringify(e);
+					return !j.includes("sync-sessions.mjs") && !j.includes("ruyi-hooks");
+				});
+				if (!cfg.hooks[event].length) delete cfg.hooks[event];
+			}
 		}
-		if (JSON.stringify(cfg.hooks ?? {}) !== before) {
-			writeFileSync(ccSettings, JSON.stringify(cfg, null, 2));
-			removed = 1;
+		if (cfg.env) {
+			delete cfg.env.RUYI_URL;
+			delete cfg.env.RUYI_TOKEN;
+			if (!Object.keys(cfg.env).length) delete cfg.env;
+		}
+		if (JSON.stringify(cfg) !== before) writeFileSync(ccSettings, JSON.stringify(cfg, null, 2));
+		console.log("✓ hooks removed (SessionEnd sync + SessionStart/UserPromptSubmit injection) and env keys cleaned");
+	} else {
+		console.log("✓ no settings.json found (nothing to remove)");
+	}
+	const hooksDir = join(homeDir, ".claude", "ruyi-hooks");
+	if (existsSync(hooksDir)) {
+		rmSync(hooksDir, { recursive: true, force: true });
+		console.log("✓ ~/.claude/ruyi-hooks/ deleted");
+	}
+	const claudeMd = join(homeDir, ".claude", "CLAUDE.md");
+	if (existsSync(claudeMd)) {
+		const md = readFileSync(claudeMd, "utf8");
+		const cleaned = md.replace(/\n*<!-- ruyi-memory-rules -->[\s\S]*?<!-- \/ruyi-memory-rules -->\n?/g, "\n");
+		if (cleaned !== md) {
+			writeFileSync(claudeMd, cleaned);
+			console.log("✓ memory-use rules block removed from CLAUDE.md (your other content untouched)");
 		}
 	}
 	if (existsSync(CONFIG_FILE)) rmSync(CONFIG_FILE);
-	console.log(`✓ SessionEnd hook ${removed ? "removed" : "not present (nothing to do)"}`);
 	console.log("✓ ~/.ruyi-sync.config.json (stored url/token) deleted");
 	console.log("Remaining manual steps: delete sync-sessions.mjs itself, and remove the query bridge:");
 	console.log("  claude mcp remove ruyi && delete mcp-remote.mjs");
@@ -394,7 +417,8 @@ if (args.includes("--install-hook")) {
 		process.exit(1);
 	}
 	writeFileSync(CONFIG_FILE, JSON.stringify({ url, token }, null, 2));
-	const ccSettings = join(`${process.env.HOME ?? process.env.USERPROFILE}`, ".claude", "settings.json");
+	const homeDir = `${process.env.HOME ?? process.env.USERPROFILE}`;
+	const ccSettings = join(homeDir, ".claude", "settings.json");
 	mkdirSync(dirname(ccSettings), { recursive: true });
 	const cfg = existsSync(ccSettings) ? JSON.parse(readFileSync(ccSettings, "utf8")) : {};
 	cfg.hooks ??= {};
@@ -403,11 +427,58 @@ if (args.includes("--install-hook")) {
 	const already = JSON.stringify(cfg.hooks.SessionEnd).includes("sync-sessions.mjs");
 	if (!already) {
 		cfg.hooks.SessionEnd.push({ hooks: [{ type: "command", command: cmd }] });
-		writeFileSync(ccSettings, JSON.stringify(cfg, null, 2));
 	}
 	console.log(`✓ config written to ${CONFIG_FILE}`);
 	console.log(`✓ SessionEnd hook ${already ? "already present" : "added"} in ${ccSettings}`);
-	console.log("From now on every finished Claude Code conversation syncs itself.");
+
+	// Memory injection hooks (SessionStart opening injection + UserPromptSubmit
+	// per-turn recall) — downloaded from the server so they stay current.
+	const hooksDir = join(homeDir, ".claude", "ruyi-hooks");
+	mkdirSync(hooksDir, { recursive: true });
+	const injectHooks = [
+		["cc-session-start.mjs", "session-start.mjs", "SessionStart"],
+		["cc-user-prompt-submit.mjs", "user-prompt-submit.mjs", "UserPromptSubmit"],
+	];
+	const authHeaders = token ? { authorization: `Bearer ${token}` } : {};
+	for (const [remote, local, event] of injectHooks) {
+		const dest = join(hooksDir, local);
+		try {
+			const r = await fetch(`${url.replace(/\/+$/, "")}/clients/${remote}`, { headers: authHeaders, signal: AbortSignal.timeout(30_000) });
+			if (!r.ok) throw new Error(`HTTP ${r.status}`);
+			writeFileSync(dest, await r.text());
+		} catch (e) {
+			console.error(`⚠ could not fetch ${remote} (${e.message}) — injection hooks skipped; sync still works`);
+			continue;
+		}
+		cfg.hooks[event] ??= [];
+		if (!JSON.stringify(cfg.hooks[event]).includes("ruyi-hooks")) {
+			cfg.hooks[event].push({ hooks: [{ type: "command", command: `node ${JSON.stringify(dest)}` }] });
+		}
+		console.log(`✓ ${event} injection hook ready (${dest})`);
+	}
+	// The injection hooks read env; provide it via settings.json's top-level env.
+	cfg.env ??= {};
+	cfg.env.RUYI_URL = url.replace(/\/+$/, "");
+	if (token) cfg.env.RUYI_TOKEN = token;
+	writeFileSync(ccSettings, JSON.stringify(cfg, null, 2));
+
+	// Memory-use rules: teach the model WHEN to reach for memory — tools alone
+	// are not enough (it answered "I don't know" with the tools sitting there).
+	const claudeMd = join(homeDir, ".claude", "CLAUDE.md");
+	const RULES = [
+		"<!-- ruyi-memory-rules -->",
+		"## Long-term memory (ruyi)",
+		"You have a ruyi long-term memory service (mcp__ruyi__* tools; some memories are also auto-injected by hooks).",
+		"- BEFORE answering anything about the user themselves — preferences, possessions, past decisions, projects, habits, \"what did I say about X\" — call mcp__ruyi__probe first; if it returns pointers, fetch them with mcp__ruyi__recall, then answer. Never answer such questions from guesswork while memory tools exist.",
+		"- When the user asks you to remember something, write it with mcp__ruyi__remember.",
+		"- Memories already injected into this conversation need no re-fetching.",
+		"<!-- /ruyi-memory-rules -->",
+	].join("\n");
+	const md = existsSync(claudeMd) ? readFileSync(claudeMd, "utf8") : "";
+	const blockRe = /<!-- ruyi-memory-rules -->[\s\S]*?<!-- \/ruyi-memory-rules -->/;
+	writeFileSync(claudeMd, blockRe.test(md) ? md.replace(blockRe, RULES) : `${md}${md.endsWith("\n") || !md ? "" : "\n"}\n${RULES}\n`);
+	console.log(`✓ memory-use rules written to ${claudeMd}`);
+	console.log("From now on every finished Claude Code conversation syncs itself, and every conversation starts with your memory in context.");
 	console.log(`Optional backstop (daily full scan): schtasks /create /tn ruyi-sync /tr "${cmd}" /sc daily /st 23:30`);
 	process.exit(0);
 }
