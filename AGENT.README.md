@@ -260,8 +260,10 @@ curl -o C:\tools\sync-sessions.mjs https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/
 node C:\tools\sync-sessions.mjs --status
 
 # 6. Automate forever (one time; writes ~/.ruyi-sync.config.json with the env you
-#    currently have set, and registers a SessionEnd hook — every finished
-#    conversation then syncs itself):
+#    currently have set, then installs: a SessionEnd sync hook — every finished
+#    conversation syncs itself; SessionStart + UserPromptSubmit injection hooks
+#    — memory surfaces in context automatically; CLAUDE.md memory-use rules —
+#    the model learns WHEN to probe/recall instead of answering from guesswork):
 $env:RUYI_URL='<url>'; $env:RUYI_TOKEN='<token>'; node C:\tools\sync-sessions.mjs --install-hook
 
 # 7. First full sync of history (slims locally first — typically ~0.3% of raw size):

@@ -98,7 +98,7 @@ function slimLineString(ln, agent) {
 	}
 	return shrinkToFit(JSON.stringify(slimLine(obj, agent)));
 }
-const SYNC_VERSION = "2.3.0";
+const SYNC_VERSION = "2.3.1";
 
 /** Best-effort weekly self-update from the server (which serves the latest
  *  client files from its own checkout). Never breaks a sync run over an update. */
@@ -200,6 +200,15 @@ export function slimLine(obj, agent) {
 	if (DROP_LINE_TYPES.has(obj.type)) return { type: obj.type, stripped: true };
 	if (agent === "codex" && obj.payload && typeof obj.payload === "object") slimContainer(obj.payload);
 	else slimContainer(obj);
+	// CC mirrors the tool result in a top-level `toolUseResult` field — and for
+	// image reads that is the FULL base64 payload (found in production: one such
+	// field alone was 387KB, dominating a whole machine's sync volume).
+	if (obj.toolUseResult && typeof obj.toolUseResult === "object") {
+		const tr = obj.toolUseResult;
+		obj.toolUseResult = (tr.type === "image" || tr.file?.base64 || tr.image?.base64)
+			? { type: "image", stripped: true }
+			: skeleton(tr, 500);
+	}
 	return obj;
 }
 
