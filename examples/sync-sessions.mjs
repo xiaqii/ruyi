@@ -328,6 +328,37 @@ if (args.includes("--install-hook")) {
 	}
 	console.log(`✓ config written to ${CONFIG_FILE}`);
 	console.log(`✓ SessionEnd hook ${already ? "already present" : "added"} in ${ccSettings}`);
+// --uninstall-hook: remove the SessionEnd hook and the stored credentials.
+// The script file itself and the MCP registration are removed separately
+// (delete the file; `claude mcp remove ruyi`). Synced data on the server is
+// NOT touched — that is accumulated memory, not client state.
+if (args.includes("--uninstall-hook")) {
+	const ccSettings = join(`${process.env.HOME ?? process.env.USERPROFILE}`, ".claude", "settings.json");
+	let removed = 0;
+	if (existsSync(ccSettings)) {
+		const cfg = JSON.parse(readFileSync(ccSettings, "utf8"));
+		const before = JSON.stringify(cfg.hooks ?? {});
+		if (cfg.hooks?.SessionEnd) {
+			cfg.hooks.SessionEnd = cfg.hooks.SessionEnd.filter((e) => !JSON.stringify(e).includes("sync-sessions.mjs"));
+			if (!cfg.hooks.SessionEnd.length) delete cfg.hooks.SessionEnd;
+		}
+		if (JSON.stringify(cfg.hooks ?? {}) !== before) {
+			writeFileSync(ccSettings, JSON.stringify(cfg, null, 2));
+			removed = 1;
+		}
+	}
+	if (existsSync(CONFIG_FILE)) {
+		const { rmSync } = await import("node:fs");
+		rmSync(CONFIG_FILE);
+	}
+	console.log(`✓ SessionEnd hook ${removed ? "removed" : "not present (nothing to do)"}`);
+	console.log("✓ ~/.ruyi-sync.config.json (stored url/token) deleted");
+	console.log("Remaining manual steps: delete sync-sessions.mjs itself, and remove the query bridge:");
+	console.log("  claude mcp remove ruyi && delete mcp-remote.mjs");
+	console.log("Server-side memories already learned are untouched (they are the point of memory).");
+	process.exit(0);
+}
+
 	console.log("From now on every finished Claude Code conversation syncs itself.");
 	console.log(`Optional backstop (daily full scan): schtasks /create /tn ruyi-sync /tr "${cmd}" /sc daily /st 23:30`);
 	process.exit(0);
