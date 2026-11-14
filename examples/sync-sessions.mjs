@@ -377,6 +377,14 @@ if (!hookFile && !process.stdin.isTTY && !STATUS) {
 			const p = JSON.parse(raw).transcript_path;
 			if (typeof p === "string" && existsSync(p)) hookFile = p;
 		} catch { /* not hook json */ }
+		if (!hookFile) {
+			// We were triggered by something (a hook, a pipe) but could not resolve
+			// one session file — a full directory scan here would silently run on
+			// EVERY session end. Do nothing; manual runs and --file are the
+			// sanctioned full-scan paths.
+			console.error("[ruyi-sync] hook payload had no usable transcript_path; skipping (run manually for a full scan)");
+			process.exit(0);
+		}
 	}
 }
 
