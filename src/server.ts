@@ -29,13 +29,18 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
 	let size = 0;
 	for await (const chunk of req) {
 		size += (chunk as Buffer).length;
-		if (size > MAX_BODY) throw new Error("body too large");
+		if (size > MAX_BODY)
+			throw Object.assign(new Error(`body too large (server limit: ${MAX_BODY} bytes compressed)`), { httpStatus: 413 });
 		chunks.push(chunk as Buffer);
 	}
 	if (chunks.length === 0) return {};
 	let buf = Buffer.concat(chunks);
 	if (req.headers["content-encoding"] === "gzip") {
-		buf = gunzipSync(buf, { maxOutputLength: MAX_BODY_GUNZIPPED });
+		try {
+			buf = gunzipSync(buf, { maxOutputLength: MAX_BODY_GUNZIPPED });
+		} catch {
+			throw Object.assign(new Error(`body too large after gunzip (server limit: ${MAX_BODY_GUNZIPPED} bytes)`), { httpStatus: 413 });
+		}
 	}
 	return JSON.parse(buf.toString("utf8")) as Record<string, unknown>;
 }
@@ -298,7 +303,8 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 
 			return send(res, 404, { error: "not found" });
 		} catch (err) {
-			return send(res, 500, { error: err instanceof Error ? err.message : String(err) });
+			const status = (err as { httpStatus?: number }).httpStatus ?? 500;
+			return send(res, status, { error: err instanceof Error ? err.message : String(err) });
 		}
 	});
 
