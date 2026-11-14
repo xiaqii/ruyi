@@ -40,16 +40,9 @@ export function dashboardPage(): string {
 </style>
 </head>
 <body>
-<div id="gate" class="wrap">
+<div id="main" class="wrap">
   <h1>ruyi · 活动面板</h1>
-  <p class="sub">输入服务 token 查看（只存在本浏览器 localStorage）</p>
-  <input id="tok" type="password" placeholder="authToken" autofocus>
-  <br><button onclick="saveTok()">进入</button>
-  <p id="gateErr" class="err"></p>
-</div>
-<div id="main" class="wrap" style="display:none">
-  <h1>ruyi · 活动面板</h1>
-  <div class="sub">实时数据 · 每 <b>30s</b> 自动刷新 · <span id="stamp"></span> · <a href="#" onclick="logout();return false" style="color:#58a6ff">退出</a></div>
+  <div class="sub">实时数据 · 每 <b>30s</b> 自动刷新 · <span id="stamp"></span></div>
   <div class="card"><h2>按天 × 类别（次数 / 数据量）</h2><div id="byDay">加载中…</div></div>
   <div class="card"><h2>按客户端汇总</h2><div id="byClient"></div></div>
   <div class="card"><h2>最近 30 条事件（刚才的对话触发了吗？看这里）</h2><div id="recent"></div></div>
@@ -58,22 +51,14 @@ export function dashboardPage(): string {
 const CATS = ["probe", "recall", "inject", "remember", "sync", "other"];
 const CN = { probe: "查询·probe", recall: "召回·recall", inject: "注入·inject", remember: "写入·remember", sync: "同步·sync", other: "其他" };
 function fmt(b) { if (!b) return "—"; if (b < 1024) return b + "B"; if (b < 1048576) return (b/1024).toFixed(1) + "K"; if (b < 1073741824) return (b/1048576).toFixed(1) + "M"; return (b/1073741824).toFixed(2) + "G"; }
-function saveTok() { localStorage.ruyiTok = document.getElementById("tok").value.trim(); boot(); }
-function logout() { delete localStorage.ruyiTok; location.reload(); }
 async function boot() {
-  const tok = localStorage.ruyiTok;
-  if (!tok) return;
   try { await load(); } catch (e) {
-    document.getElementById("gateErr").textContent = "token 不对或服务不可达：" + e.message;
-    return;
+    document.getElementById("byDay").innerHTML = '<span class="err">加载失败：' + e.message + "</span>";
   }
-  document.getElementById("gate").style.display = "none";
-  document.getElementById("main").style.display = "";
   setInterval(load, 30000);
 }
 async function load() {
-  const r = await fetch("/activity?days=14", { headers: { authorization: "Bearer " + localStorage.ruyiTok } });
-  if (r.status === 401 || r.status === 403) throw new Error("401 未授权");
+  const r = await fetch("/activity?days=14");
   if (!r.ok) throw new Error("HTTP " + r.status);
   const d = await r.json();
   render(d);

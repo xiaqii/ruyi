@@ -139,6 +139,29 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 				return;
 			}
 
+			// Stats are aggregate metadata (counts, bytes, client names) — no memory
+			// content — so they are public by the owner's decision, like /health.
+			if (req.method === "GET" && path === "/stats") {
+				const days = Number(url.searchParams.get("days") ?? "7");
+				// Browsers get the live dashboard; API clients keep the JSON.
+				if ((req.headers.accept ?? "").includes("text/html")) {
+					const { dashboardPage } = await import("./dashboard.ts");
+					(res as unknown as { __resBytes?: number }).__resBytes = dashboardPage().length;
+					res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+					res.end(dashboardPage());
+					return;
+				}
+				return send(res, 200, {
+					counts: memoryCounts(db, url.searchParams.get("owner") ?? undefined),
+					tokenUsage: tokenUsage(db, days),
+				});
+			}
+
+			if (req.method === "GET" && path === "/activity") {
+				const days = Math.min(90, Math.max(1, Number(url.searchParams.get("days") ?? "14")));
+				return send(res, 200, requestStats(db, days));
+			}
+
 			if (!isLocal(req)) {
 				if (!authToken) return send(res, 503, { error: "remote access requires authToken in config" });
 				if (req.headers.authorization !== `Bearer ${authToken}`) {
@@ -328,33 +351,13 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 				return send(res, 200, r);
 			}
 
-			if (req.method === "GET" && path === "/stats") {
-				const days = Number(url.searchParams.get("days") ?? "7");
-				// Browsers get the live dashboard; API clients keep the JSON.
-				if ((req.headers.accept ?? "").includes("text/html")) {
-					const { dashboardPage } = await import("./dashboard.ts");
-					(res as unknown as { __resBytes?: number }).__resBytes = dashboardPage().length;
-					res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-					res.end(dashboardPage());
-					return;
-				}
-				return send(res, 200, {
-					counts: memoryCounts(db, url.searchParams.get("owner") ?? undefined),
-					tokenUsage: tokenUsage(db, days),
-				});
-			}
-
-			if (req.method === "GET" && path === "/activity") {
-				const days = Math.min(90, Math.max(1, Number(url.searchParams.get("days") ?? "14")));
-				return send(res, 200, requestStats(db, days));
-			}
 
 			return send(res, 404, { error: "not found" });
 		} catch (err) {
 			const status = (err as { httpStatus?: number }).httpStatus ?? 500;
 			return send(res, status, { error: err instanceof Error ? err.message : String(err) });
 		} finally {
-			if (path !== "/" && path !== "/health") {
+			if (path !== "/" && path !== "/health" && path !== "/stats" && path !== "/activity") {
 				logRequest(db, {
 					category,
 					route: `${req.method} ${path}`,
