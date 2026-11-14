@@ -100,10 +100,14 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 			: path === "/memories" || path === "/ingest" ? "remember"
 			: path.startsWith("/sync") ? "sync"
 			: "other";
+		// attribution chain: explicit client header → User-Agent (node/curl/etc
+		// identify themselves, like Kimi sees its callers) → source IP
 		const clientHdr = req.headers["x-ruyi-client"];
+		const ua = String(req.headers["user-agent"] ?? "");
+		const ip = String(req.headers["x-real-ip"] ?? req.socket.remoteAddress ?? "");
 		const client = typeof clientHdr === "string" && clientHdr ? clientHdr.slice(0, 60)
-			: (req.headers["user-agent"] ?? "").includes("Mozilla") ? "browser"
-			: "unknown";
+			: ua ? (ua.includes("Mozilla") ? "browser" : ua.slice(0, 40))
+			: ip || "unknown";
 		try {
 			// Landing: the service URL doubles as its own manual (no secrets inside).
 			if (req.method === "GET" && path === "/") {

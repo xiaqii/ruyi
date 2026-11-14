@@ -98,7 +98,7 @@ function slimLineString(ln, agent) {
 	}
 	return shrinkToFit(JSON.stringify(slimLine(obj, agent)));
 }
-const SYNC_VERSION = "2.3.1";
+const SYNC_VERSION = "2.3.2";
 
 /** Best-effort weekly self-update from the server (which serves the latest
  *  client files from its own checkout). Never breaks a sync run over an update. */
@@ -125,6 +125,25 @@ async function maybeSelfUpdate() {
 		writeFileSync(process.argv[1], text);
 		console.error(`[ruyi-sync] self-updated to v${m[1]} — takes effect on the next run`);
 	} catch { /* update is best-effort; sync must never fail because of it */ }
+
+	// Installed injection hooks ride the same weekly refresh (they were placed
+	// by --install-hook; only files that EXIST locally are updated, so a
+	// sync-only install never gets surprise files).
+	try {
+		const hooksDir = join(`${process.env.HOME ?? process.env.USERPROFILE}`, ".claude", "ruyi-hooks");
+		const hdrs = TOKEN ? { authorization: `Bearer ${TOKEN}` } : {};
+		for (const [remote, local] of [["cc-session-start.mjs", "session-start.mjs"], ["cc-user-prompt-submit.mjs", "user-prompt-submit.mjs"]]) {
+			const dest = join(hooksDir, local);
+			if (!existsSync(dest)) continue;
+			const r = await fetch(`${BASE}/clients/${remote}`, { headers: hdrs, signal: AbortSignal.timeout(30_000) });
+			if (!r.ok) continue;
+			const text = await r.text();
+			if (text !== readFileSync(dest, "utf8")) {
+				writeFileSync(dest, text);
+				console.error(`[ruyi-sync] hook ${local} refreshed`);
+			}
+		}
+	} catch { /* hook refresh is best-effort too */ }
 }
 
 const SUPPORTED = ["claude-code", "pi", "codex"];

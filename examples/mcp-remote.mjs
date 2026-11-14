@@ -20,6 +20,31 @@
 
 const BASE = (process.env.RUYI_URL ?? "").replace(/\/+$/, "");
 const TOKEN = process.env.RUYI_TOKEN ?? "";
+
+// Best-effort weekly self-update from the server (same /clients endpoint the
+// sync script uses). Runs once at process start; the refreshed file takes
+// effect when the client spawns the next MCP session. Never breaks startup.
+try {
+	const { existsSync, readFileSync, writeFileSync, statSync } = await import("node:fs");
+	const { join } = await import("node:path");
+	const { execFileSync } = await import("node:child_process");
+	const stamp = join(`${process.env.HOME ?? process.env.USERPROFILE}`, ".ruyi-remote.update");
+	const stale = !existsSync(stamp) || Date.now() - statSync(stamp).mtimeMs > 7 * 86_400_000;
+	if (stale && process.argv[1]) {
+		writeFileSync(stamp, String(Date.now()));
+		const hdrs = TOKEN ? { authorization: `Bearer ${TOKEN}` } : {};
+		const res = await fetch(`${BASE}/clients/mcp-remote.mjs`, { headers: hdrs, signal: AbortSignal.timeout(15_000) });
+		if (res.ok) {
+			const text = await res.text();
+			if (text !== readFileSync(process.argv[1], "utf8")) {
+				const tmp = `${process.argv[1]}.new`;
+				writeFileSync(tmp, text);
+				execFileSync(process.execPath, ["--check", tmp]);
+				writeFileSync(process.argv[1], text);
+			}
+		}
+	}
+} catch { /* self-update is best-effort */ }
 const OWNER = process.env.RUYI_OWNER ?? "default";
 
 const TOOLS = [
