@@ -50,7 +50,7 @@ const breakers = new Map<Op, number>();
 async function api<T>(op: Op, path: string, init?: RequestInit, timeoutMs?: number): Promise<T | null> {
 	if (Date.now() < (breakers.get(op) ?? 0)) return null;
 	try {
-		const headers: Record<string, string> = { ...((init?.headers as Record<string, string>) ?? {}) };
+		const headers: Record<string, string> = { "x-ruyi-client": "pi", ...((init?.headers as Record<string, string>) ?? {}) };
 		if (TOKEN) headers.authorization = `Bearer ${TOKEN}`;
 		const res = await fetch(`${BASE}${path}`, { ...init, headers, signal: AbortSignal.timeout(timeoutMs ?? TIMEOUTS[op]) });
 		if (!res.ok) throw new Error(`HTTP ${res.status}`);

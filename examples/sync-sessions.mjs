@@ -285,7 +285,7 @@ function uidOf(agent, first, rel) {
 // ------------------------------------------------------------------ pushing
 
 async function api(path, body) {
-	const headers = { "content-type": "application/json" };
+	const headers = { "content-type": "application/json", "x-ruyi-client": `sync:${MACHINE}` };
 	if (TOKEN) headers.authorization = `Bearer ${TOKEN}`;
 	let payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body), "utf8");
 	if (payload && payload.length > 50_000) {

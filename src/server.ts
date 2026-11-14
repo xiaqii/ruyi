@@ -17,6 +17,7 @@ import {
 import type { Candidate } from "./types.ts";
 import { runDream, distillText, explicitRemember } from "./distill.ts";
 import { syncMachineLedger, syncPush, syncState } from "./sync.ts";
+import { logRequest, requestStats } from "./db.ts";
 import { generateReplyGist, getInject, recall } from "./recall.ts";
 import { runSynthesize } from "./synthesize.ts";
 import { landingPage } from "./landing.ts";
@@ -46,6 +47,7 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
 }
 
 function send(res: ServerResponse, status: number, data: unknown): void {
+	(res as unknown as { __resBytes?: number }).__resBytes = JSON.stringify(data).length;
 	res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
 	res.end(JSON.stringify(data));
 }
@@ -87,8 +89,21 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 	};
 
 	const server = createServer(async (req, res) => {
+		const started = performance.now();
 		const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
 		const path = url.pathname.replace(/\/+$/, "") || "/";
+		// stats dashboard bookkeeping (written in the finally below)
+		const category =
+			path === "/probe" ? "probe"
+			: path === "/recall" ? "recall"
+			: path === "/inject" ? "inject"
+			: path === "/memories" || path === "/ingest" ? "remember"
+			: path.startsWith("/sync") ? "sync"
+			: "other";
+		const clientHdr = req.headers["x-ruyi-client"];
+		const client = typeof clientHdr === "string" && clientHdr ? clientHdr.slice(0, 60)
+			: (req.headers["user-agent"] ?? "").includes("Mozilla") ? "browser"
+			: "unknown";
 		try {
 			// Landing: the service URL doubles as its own manual (no secrets inside).
 			if (req.method === "GET" && path === "/") {
@@ -315,16 +330,40 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 
 			if (req.method === "GET" && path === "/stats") {
 				const days = Number(url.searchParams.get("days") ?? "7");
+				// Browsers get the live dashboard; API clients keep the JSON.
+				if ((req.headers.accept ?? "").includes("text/html")) {
+					const { dashboardPage } = await import("./dashboard.ts");
+					(res as unknown as { __resBytes?: number }).__resBytes = dashboardPage().length;
+					res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+					res.end(dashboardPage());
+					return;
+				}
 				return send(res, 200, {
 					counts: memoryCounts(db, url.searchParams.get("owner") ?? undefined),
 					tokenUsage: tokenUsage(db, days),
 				});
 			}
 
+			if (req.method === "GET" && path === "/activity") {
+				const days = Math.min(90, Math.max(1, Number(url.searchParams.get("days") ?? "14")));
+				return send(res, 200, requestStats(db, days));
+			}
+
 			return send(res, 404, { error: "not found" });
 		} catch (err) {
 			const status = (err as { httpStatus?: number }).httpStatus ?? 500;
 			return send(res, status, { error: err instanceof Error ? err.message : String(err) });
+		} finally {
+			if (path !== "/" && path !== "/health") {
+				logRequest(db, {
+					category,
+					route: `${req.method} ${path}`,
+					client,
+					reqBytes: Number(req.headers["content-length"] ?? 0) || 0,
+					resBytes: (res as unknown as { __resBytes?: number }).__resBytes ?? 0,
+					ms: Math.round(performance.now() - started),
+				});
+			}
 		}
 	});
 

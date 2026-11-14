@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.9.0] - 2026-11-14
+
+**Live activity dashboard at /stats.** Every HTTP request is logged (category: probe/recall/inject/remember/sync/other; client via `x-ruyi-client`; request+response bytes; latency) into a new request_log table (schema v14). /stats serves a real-time dashboard to browsers (30s auto-refresh; per-day × category matrix, per-client rollup, last-30-events live feed — "did that conversation just trigger memory?" is answered by looking); JSON stays for API clients, /activity serves the raw aggregates. Own clients now identify themselves: mcp bridge, pi extension, CC hooks, sync script (`sync:<machine>`).
 ## [1.8.1] - 2026-11-14
 
 - dream triage moves from the dream tier to the recall tier (qwen3.7-flash thinking-off) — screening is screening, not extraction (#1267). Prompt-first, evidence-backed: the naive flash judge false-skipped exactly the most valuable content (user-stated UI/interaction preferences hiding in work talk — 3/3 spot-checked skips were wrong), so the prompt now carves out user voice explicitly ("preferences stated in the user's own words are always worth it") and re-balances false-worth vs false-skip. Validated on 20 real backlog segments: zero false-skips on user voice, correct skips on tool churn/bare approvals/notification-only segments

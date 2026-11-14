@@ -22,7 +22,7 @@ const TOKEN = process.env.RUYI_TOKEN ?? "";
 const OWNER = process.env.RUYI_OWNER ?? "default";
 
 try {
-	const headers = {};
+	const headers = { "x-ruyi-client": "cc-hook" };
 	if (TOKEN) headers.authorization = `Bearer ${TOKEN}`;
 	const res = await fetch(
 		`${BASE}/inject?owner=${encodeURIComponent(OWNER)}&cwd=${encodeURIComponent(process.cwd())}&scope=smart`,

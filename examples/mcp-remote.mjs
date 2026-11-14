@@ -33,7 +33,7 @@ const TOOLS = [
 ];
 
 async function api(path, { method = "GET", body, timeoutMs = 15_000 } = {}) {
-	const headers = { "content-type": "application/json" };
+	const headers = { "content-type": "application/json", "x-ruyi-client": "mcp-bridge" };
 	if (TOKEN) headers.authorization = `Bearer ${TOKEN}`;
 	const res = await fetch(`${BASE}${path}`, {
 		method, headers,
