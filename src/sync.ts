@@ -58,38 +58,55 @@ export interface SyncPushBody {
 	data: string;
 	sessionUid?: string;
 	totalSize?: number;
+	/** v2 line mode: client pre-slimmed jsonl lines + 1:1 line index. */
+	fromLine?: number;
+	lines?: string[];
 }
+
+/** Agent log formats the slim-and-push v2 client can produce. Rejecting the
+ *  rest at the door keeps garbage out of the dream queue. */
+const SYNC_AGENTS = new Set(["claude-code", "pi", "codex"]);
 
 export function syncPush(
 	config: Config,
 	body: SyncPushBody,
 	remoteIp?: string,
-): { ok: true; receivedBytes: number; already?: boolean } | { ok: false; status: number; error: string; receivedBytes?: number } {
+): { ok: true; receivedBytes?: number; storedLines?: number; already?: boolean } | { ok: false; status: number; error: string; receivedBytes?: number; storedLines?: number } {
 	const machine = sanitize(body.machine ?? "", false);
 	const agent = sanitize(body.agent ?? "", false);
 	const key = sanitize(body.sessionKey ?? "", true);
 	const uid = body.sessionUid ? sanitize(body.sessionUid, false) : null;
 	if (!machine || !agent || !key) return { ok: false, status: 400, error: "invalid machine/agent/sessionKey" };
-	if (typeof body.offset !== "number" || body.offset < 0) return { ok: false, status: 400, error: "invalid offset" };
-	if (typeof body.data !== "string") return { ok: false, status: 400, error: "data must be a string" };
-
-	const dir = join(syncRoot(config), machine);
-	mkdirSync(dir, { recursive: true });
 
 	// Activity ledger: who pushed, from where, when, how much — for tracing a
 	// bad/foreign payload back to its source machine.
 	{
 		const db = getDb(config.dbPath);
-		const key = `sync:machines:${machine}`;
-		const prev = JSON.parse(getKv(db, key) ?? "{}");
-		setKv(db, key, JSON.stringify({
+		const k = `sync:machines:${machine}`;
+		const prev = JSON.parse(getKv(db, k) ?? "{}") as Record<string, unknown>;
+		const lineBytes = Array.isArray(body.lines) ? body.lines.reduce((n: number, l: string) => n + Buffer.byteLength(l, "utf8"), 0) : 0;
+		setKv(db, k, JSON.stringify({
 			agent,
 			ip: remoteIp ?? prev.ip,
 			firstSeen: prev.firstSeen ?? new Date().toISOString(),
 			lastSeen: new Date().toISOString(),
-			bytes: (prev.bytes ?? 0) + Buffer.byteLength(body.data ?? "", "utf8"),
+			bytes: ((prev.bytes as number) ?? 0) + Buffer.byteLength(body.data ?? "", "utf8") + lineBytes,
 		}));
 	}
+
+	// v2 line mode: client slims locally and pushes line-indexed deltas.
+	if (Array.isArray(body.lines)) {
+		if (!SYNC_AGENTS.has(agent)) return { ok: false, status: 400, error: `unsupported agent "${agent}" — supported: ${[...SYNC_AGENTS].join(", ")}` };
+		if (!uid) return { ok: false, status: 400, error: "line mode requires sessionUid" };
+		if (typeof body.fromLine !== "number" || body.fromLine < 0) return { ok: false, status: 400, error: "invalid fromLine" };
+		return syncPushLines(config, machine, agent, uid, body.fromLine, body.lines);
+	}
+
+	if (typeof body.offset !== "number" || body.offset < 0) return { ok: false, status: 400, error: "invalid offset" };
+	if (typeof body.data !== "string") return { ok: false, status: 400, error: "data must be a string" };
+
+	const dir = join(syncRoot(config), machine);
+	mkdirSync(dir, { recursive: true });
 
 	// remember which agent format this machine's logs use (dream reads this)
 	const metaPath = join(dir, "_meta.json");
@@ -181,4 +198,55 @@ export function syncMachineLedger(config: Config): Record<string, unknown> {
 	const out: Record<string, unknown> = {};
 	for (const r of rows) out[r.key.slice("sync:machines:".length)] = JSON.parse(r.value);
 	return out;
+}
+
+/** v2 line mode: append pre-slimmed lines to the canonical synced/<machine>/<uid>.jsonl.
+ *  Line indices are 1:1 with the client's original file (the slimmer never drops
+ *  a line), so fromLine is an exact resume coordinate. */
+function syncPushLines(
+	config: Config,
+	machine: string,
+	agent: string,
+	uid: string,
+	fromLine: number,
+	lines: string[],
+): { ok: true; storedLines: number } | { ok: false; status: number; error: string; storedLines?: number } {
+	const dir = join(syncRoot(config), machine);
+	mkdirSync(dir, { recursive: true });
+	const metaPath = join(dir, "_meta.json");
+	if (!existsSync(metaPath)) writeFileSync(metaPath, JSON.stringify({ agent }), "utf8");
+	const file = join(dir, `${uid}.jsonl`);
+
+	const db = getDb(config.dbPath);
+	const reg = getSessionRegistry(db, uid);
+	if (!reg) {
+		upsertSessionRegistry(db, uid, { agent, machine, path: file, bytes: 0 });
+	} else if (reg.path !== file && existsSync(reg.path) && !existsSync(file)) {
+		// Same session known from another channel (e.g. manual zip import):
+		// carry head + dream offset so the overlap is never distilled twice.
+		copyFileSync(reg.path, file);
+		const oldState = getDistillState(db, reg.path);
+		if (oldState && !getDistillState(db, file)) {
+			setDistillState(db, file, Math.min(oldState.processed_bytes, statSync(file).size), `carried from ${reg.path}`);
+		}
+		upsertSessionRegistry(db, uid, { agent, machine, path: file, bytes: statSync(file).size });
+	}
+
+	const countLines = (): number => {
+		if (!existsSync(file)) return 0;
+		const buf = readFileSync(file);
+		let n = 0;
+		for (let i = 0; i < buf.length; i++) if (buf[i] === 10) n++;
+		return n;
+	};
+	const stored = countLines();
+	if (fromLine !== stored) {
+		return { ok: false, status: 409, error: "line mismatch", storedLines: stored };
+	}
+	if (lines.length > 0) {
+		appendFileSync(file, lines.map((l) => l.replace(/\n/g, " ")).join("\n") + "\n", "utf8");
+	}
+	const storedLines = stored + lines.length;
+	upsertSessionRegistry(db, uid, { agent, machine, path: file, bytes: statSync(file).size });
+	return { ok: true, storedLines };
 }

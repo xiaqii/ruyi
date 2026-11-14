@@ -17,7 +17,10 @@ import {
 	reinforceMemory,
 	setDistillState,
 	supersedeMemory,
+	upsertSessionRegistry,
 } from "./db.ts";
+import { extractSessionUid } from "./sync.ts";
+import { readFileSync } from "node:fs";
 import { completeJson } from "./llm.ts";
 import { readSessionDelta, readSessionCwd } from "./preprocess.ts";
 import { loadPrompt } from "./prompts.ts";
@@ -84,7 +87,19 @@ async function* sessionFiles(dirs: { agent: string; dir: string; owner: string }
 			// Subagent transcripts are execution detail (mostly tool output);
 			// the user signal lives in the main session files.
 			if (e.includes("subagents/") || e.includes("subagents\\")) continue;
-			yield { agent: dir.agent, file: join(dir.dir, e), owner: dir.owner };
+			const file = join(dir.dir, e);
+			// Register every session file's content-derived uid, so a later sync of
+			// the SAME session (e.g. it was first imported manually as a zip, then the
+			// client installed sync) carries the dream offset over instead of
+			// re-distilling the overlap. Cheap: one 16KB head read per file per run.
+			if (dir.agent !== "text") {
+				try {
+					const head = readFileSync(file).subarray(0, 16384) as Buffer;
+					const uid = extractSessionUid(dir.agent, head, e);
+					upsertSessionRegistry(getDb(loadConfig().dbPath), uid, { agent: dir.agent, machine: "local", path: file, bytes: statSync(file).size });
+				} catch { /* unreadable/vanished file — the main loop handles it */ }
+			}
+			yield { agent: dir.agent, file, owner: dir.owner };
 		}
 	}
 }

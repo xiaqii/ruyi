@@ -263,7 +263,7 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 			if (req.method === "POST" && path === "/sync/session") {
 				const body = (await readBody(req)) as unknown as Parameters<typeof syncPush>[1];
 				const r = syncPush(config, body, req.socket.remoteAddress);
-				if (!r.ok) return send(res, r.status, { error: r.error, receivedBytes: r.receivedBytes });
+				if (!r.ok) return send(res, r.status, { error: r.error, receivedBytes: r.receivedBytes, storedLines: r.storedLines });
 				return send(res, 200, r);
 			}
 
