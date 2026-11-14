@@ -28,8 +28,8 @@
  * Env: RUYI_URL (required), RUYI_TOKEN (when the service is public)
  */
 
-import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join, relative, basename } from "node:path";
+import { readdirSync, statSync, readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { join, relative, basename, dirname } from "node:path";
 import { hostname } from "node:os";
 import { gzipSync } from "node:zlib";
 
@@ -84,7 +84,10 @@ const SUPPORTED = ["claude-code", "pi", "codex"];
 
 const STATE_FILE = join(DIR, ".ruyi-sync.json");
 const state = existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : { files: {} };
-const saveState = () => writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+const saveState = () => {
+	mkdirSync(dirname(STATE_FILE), { recursive: true }); // fresh machines have no projects/ yet
+	writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+};
 
 // ---------------------------------------------------------------- slimming
 
@@ -300,34 +303,6 @@ async function syncFile(rel, agent) {
 
 const isMain = !!process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href;
 if (isMain) {
-if (!BASE) {
-	console.error("RUYI_URL is not set. Example: $env:RUYI_URL='https://ruyi.example.com'");
-	process.exit(1);
-}
-await maybeSelfUpdate();
-// --install-hook: one-time setup. Writes ~/.ruyi-sync.config.json (needs
-// RUYI_URL/RUYI_TOKEN in env NOW) and registers a Claude Code SessionEnd hook
-// so every finished conversation syncs itself. Idempotent.
-if (args.includes("--install-hook")) {
-	const url = process.env.RUYI_URL ?? fileCfg.url;
-	const token = process.env.RUYI_TOKEN ?? fileCfg.token;
-	if (!url) {
-		console.error("RUYI_URL is required for --install-hook. Example:\n  $env:RUYI_URL='https://ruyi.example.com'; $env:RUYI_TOKEN='<token>'; node sync-sessions.mjs --install-hook");
-		process.exit(1);
-	}
-	writeFileSync(CONFIG_FILE, JSON.stringify({ url, token }, null, 2));
-	const ccSettings = join(`${process.env.HOME ?? process.env.USERPROFILE}`, ".claude", "settings.json");
-	const cfg = existsSync(ccSettings) ? JSON.parse(readFileSync(ccSettings, "utf8")) : {};
-	cfg.hooks ??= {};
-	cfg.hooks.SessionEnd ??= [];
-	const cmd = `node ${JSON.stringify(process.argv[1])}`;
-	const already = JSON.stringify(cfg.hooks.SessionEnd).includes("sync-sessions.mjs");
-	if (!already) {
-		cfg.hooks.SessionEnd.push({ hooks: [{ type: "command", command: cmd }] });
-		writeFileSync(ccSettings, JSON.stringify(cfg, null, 2));
-	}
-	console.log(`✓ config written to ${CONFIG_FILE}`);
-	console.log(`✓ SessionEnd hook ${already ? "already present" : "added"} in ${ccSettings}`);
 // --uninstall-hook: remove the SessionEnd hook and the stored credentials.
 // The script file itself and the MCP registration are removed separately
 // (delete the file; `claude mcp remove ruyi`). Synced data on the server is
@@ -347,10 +322,7 @@ if (args.includes("--uninstall-hook")) {
 			removed = 1;
 		}
 	}
-	if (existsSync(CONFIG_FILE)) {
-		const { rmSync } = await import("node:fs");
-		rmSync(CONFIG_FILE);
-	}
+	if (existsSync(CONFIG_FILE)) rmSync(CONFIG_FILE);
 	console.log(`✓ SessionEnd hook ${removed ? "removed" : "not present (nothing to do)"}`);
 	console.log("✓ ~/.ruyi-sync.config.json (stored url/token) deleted");
 	console.log("Remaining manual steps: delete sync-sessions.mjs itself, and remove the query bridge:");
@@ -359,10 +331,40 @@ if (args.includes("--uninstall-hook")) {
 	process.exit(0);
 }
 
+if (!BASE) {
+	console.error("RUYI_URL is not set. Example: $env:RUYI_URL='https://ruyi.example.com'");
+	process.exit(1);
+}
+// --install-hook: one-time setup. Writes ~/.ruyi-sync.config.json (needs
+// RUYI_URL/RUYI_TOKEN in env NOW) and registers a Claude Code SessionEnd hook
+// so every finished conversation syncs itself. Idempotent.
+if (args.includes("--install-hook")) {
+	const url = process.env.RUYI_URL ?? fileCfg.url;
+	const token = process.env.RUYI_TOKEN ?? fileCfg.token;
+	if (!url) {
+		console.error("RUYI_URL is required for --install-hook. Example:\n  $env:RUYI_URL='https://ruyi.example.com'; $env:RUYI_TOKEN='<token>'; node sync-sessions.mjs --install-hook");
+		process.exit(1);
+	}
+	writeFileSync(CONFIG_FILE, JSON.stringify({ url, token }, null, 2));
+	const ccSettings = join(`${process.env.HOME ?? process.env.USERPROFILE}`, ".claude", "settings.json");
+	mkdirSync(dirname(ccSettings), { recursive: true });
+	const cfg = existsSync(ccSettings) ? JSON.parse(readFileSync(ccSettings, "utf8")) : {};
+	cfg.hooks ??= {};
+	cfg.hooks.SessionEnd ??= [];
+	const cmd = `node ${JSON.stringify(process.argv[1])}`;
+	const already = JSON.stringify(cfg.hooks.SessionEnd).includes("sync-sessions.mjs");
+	if (!already) {
+		cfg.hooks.SessionEnd.push({ hooks: [{ type: "command", command: cmd }] });
+		writeFileSync(ccSettings, JSON.stringify(cfg, null, 2));
+	}
+	console.log(`✓ config written to ${CONFIG_FILE}`);
+	console.log(`✓ SessionEnd hook ${already ? "already present" : "added"} in ${ccSettings}`);
 	console.log("From now on every finished Claude Code conversation syncs itself.");
 	console.log(`Optional backstop (daily full scan): schtasks /create /tn ruyi-sync /tr "${cmd}" /sc daily /st 23:30`);
 	process.exit(0);
 }
+
+await maybeSelfUpdate();
 
 // Hook mode: Claude Code pipes {"transcript_path": "..."} on stdin (SessionEnd).
 let hookFile = ONLY_FILE;
