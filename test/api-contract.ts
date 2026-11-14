@@ -199,6 +199,17 @@ if (tmpId === -1) throw new Error("fixture insert blocked by tombstone — conte
 	const r5 = await call("POST", "/sync/session", { machine: "../evil", agent: "x", sessionKey: "x", offset: 0, data: "x" });
 	ok(r5.status === 400, "sync rejects path traversal");
 
+	// v2 line mode: slimmed lines with 1:1 line-index resume + agent whitelist
+	const luid = `uid-${RUN}`;
+	const l1 = await call("POST", "/sync/session", { machine, agent: "pi", sessionKey: `t/${RUN}/p.jsonl`, sessionUid: luid, fromLine: 0, lines: ['{"a":1}', '{"b":2}'] });
+	ok(l1.status === 200 && l1.json.storedLines === 2, "line mode: first push", JSON.stringify(l1.json));
+	const l2 = await call("POST", "/sync/session", { machine, agent: "pi", sessionKey: `t/${RUN}/p.jsonl`, sessionUid: luid, fromLine: 0, lines: ['{"a":1}'] });
+	ok(l2.status === 409 && l2.json.storedLines === 2, "line mode: index mismatch → 409 with true line count");
+	const l3 = await call("POST", "/sync/session", { machine, agent: "pi", sessionKey: `t/${RUN}/p.jsonl`, sessionUid: luid, fromLine: 2, lines: ['{"c":3}'] });
+	ok(l3.status === 200 && l3.json.storedLines === 3, "line mode: resume at server line count");
+	const l4 = await call("POST", "/sync/session", { machine, agent: "gemini", sessionKey: "x", sessionUid: luid, fromLine: 0, lines: [] });
+	ok(l4.status === 400 && String(l4.json.error).includes("unsupported agent"), "line mode: unknown agent format rejected loudly");
+
 	// auth model: loopback trusted; proxied/remote requests must carry the bearer token
 	{
 		// unknown route still passes the auth gate first — use a real authed route:

@@ -1,31 +1,37 @@
 #!/usr/bin/env node
 /**
- * ruyi session sync — push this machine's agent session logs to a ruyi server
- * for nightly dream distillation. Self-contained; no repo clone needed.
+ * ruyi session sync v2 — slim locally, push line-indexed deltas to a ruyi server.
+ * Self-contained; no repo clone needed.
+ *
+ * Flow per session file:
+ *   1. decode jsonl line by line (never loads the whole file as a string)
+ *   2. SLIM each line (deterministic, structure-aware — see slimLine):
+ *      thinking blocks out, images out, file-history-snapshot gutted,
+ *      tool_use kept as skeleton (name + path/command), tool_result capped at
+ *      500 chars (error headlines are lesson-dense), any string field >50KB
+ *      truncated head+tail. A line NEVER disappears — indices stay 1:1 with
+ *      the original file, which is what makes line-number resume exact.
+ *   3. push {machine, agent, sessionUid, fromLine, lines} — the server replies
+ *      409 {storedLines} on mismatch and we resume from there. Idempotent.
  *
  * Usage:
- *   node sync-sessions.mjs                      # incremental scan of --dir (progress shown)
- *   node sync-sessions.mjs --file <path>        # sync one file (SessionEnd hooks)
- *   node sync-sessions.mjs --status             # show local vs server byte counts
+ *   node sync-sessions.mjs                 # incremental sync of --dir
+ *   node sync-sessions.mjs --status        # dry-run inventory (uploads nothing)
+ *   node sync-sessions.mjs --file <path>   # one file (SessionEnd hooks)
  *
  * Options:
  *   --dir <path>      session log dir (default: ~/.claude/projects)
- *   --agent <name>    log format: claude-code (default) | pi
- *   --machine <name>  source machine id (default: hostname) — stamped on every
- *                     memory extracted from these logs; keep it stable!
+ *   --agent <name>    auto (default) | claude-code | pi | codex
+ *   --machine <name>  source machine id (default: hostname) — keep it stable,
+ *                     it is stamped on every memory from these logs
  *
  * Env: RUYI_URL (required), RUYI_TOKEN (when the service is public)
- *
- * Design: offset-based incremental append. Only new bytes are sent; the server
- * enforces offset continuity (a mismatch returns the true offset and the client
- * resumes there). Idempotent, resumable, safe to run anytime.
  */
 
 import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, relative, basename } from "node:path";
 import { hostname } from "node:os";
 import { gzipSync } from "node:zlib";
-import { createHash } from "node:crypto";
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => {
@@ -36,27 +42,163 @@ const opt = (name, dflt) => {
 const BASE = (process.env.RUYI_URL ?? "").replace(/\/+$/, "");
 const TOKEN = process.env.RUYI_TOKEN ?? "";
 const DIR = opt("dir", `${process.env.HOME ?? process.env.USERPROFILE}/.claude/projects`);
-const AGENT = opt("agent", "claude-code");
+const AGENT_OPT = opt("agent", "auto");
 const MACHINE = opt("machine", hostname());
 const ONLY_FILE = opt("file", null);
 const STATUS = args.includes("--status");
-const CHUNK = 900_000; // bytes per request — keeps JSON bodies ~1MB
+const CHUNK_LINES = 400; // lines per request
 
-if (!BASE) {
-	console.error("RUYI_URL is not set. Example: $env:RUYI_URL='https://ruyi.example.com'");
-	process.exit(1);
-}
+const SUPPORTED = ["claude-code", "pi", "codex"];
 
 const STATE_FILE = join(DIR, ".ruyi-sync.json");
 const state = existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : { files: {} };
 const saveState = () => writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+
+// ---------------------------------------------------------------- slimming
+
+const DROP_LINE_TYPES = new Set(["file-history-snapshot"]); // CC whole-file snapshots
+
+function truncateStr(s) {
+	if (s.length <= 50_000) return s;
+	return s.slice(0, 25_000) + `\n…[${(s.length - 50_000).toLocaleString()} chars dropped]…\n` + s.slice(-25_000);
+}
+
+/** Shallow-truncate every string leaf of an object to n chars (skeleton view). */
+function skeleton(v, n) {
+	if (typeof v === "string") return v.slice(0, n);
+	if (Array.isArray(v)) return v.map((x) => skeleton(x, n));
+	if (v && typeof v === "object") {
+		const out = {};
+		for (const [k, x] of Object.entries(v)) out[k] = skeleton(x, n);
+		return out;
+	}
+	return v;
+}
+
+function slimBlock(b) {
+	if (!b || typeof b !== "object") return b;
+	const t = b.type;
+	// thinking carries no durable memory value (user decision)
+	if (t === "thinking" || t === "reasoning" || t === "redacted_thinking") return { type: "thinking", stripped: true };
+	if (t === "image" || t === "input_image" || t === "image_url") return { type: "image", stripped: true };
+	if (t === "tool_use" || t === "function_call") {
+		const name = b.name ?? "";
+		const inp = b.input ?? b.arguments ?? {};
+		const keep = {};
+		if (typeof inp === "string") keep.args = inp.slice(0, 300);
+		else if (inp && typeof inp === "object") {
+			if (typeof inp.file_path === "string") keep.file_path = inp.file_path;
+			if (typeof inp.command === "string") keep.command = inp.command.slice(0, 300);
+			if (!Object.keys(keep).length) Object.assign(keep, skeleton(inp, 300));
+		}
+		return { type: "tool_use", name, input: keep };
+	}
+	if (t === "tool_result" || t === "function_call_output") {
+		let c = b.content ?? b.output ?? "";
+		if (Array.isArray(c)) c = c.map((x) => (typeof x?.text === "string" ? x.text : "")).join("\n");
+		// 500 chars keeps the error headline — the single most lesson-dense payload
+		return { type: "tool_result", content: String(c).slice(0, 500), truncated: String(c).length > 500 };
+	}
+	if (typeof b.text === "string") b = { ...b, text: truncateStr(b.text) };
+	return b;
+}
+
+function slimContainer(node) {
+	if (!node || typeof node !== "object") return;
+	if (Array.isArray(node.content)) node.content = node.content.map(slimBlock);
+	if (node.message && typeof node.message === "object") slimContainer(node.message);
+	for (const k of Object.keys(node)) {
+		const v = node[k];
+		if (typeof v === "string" && v.length > 50_000) node[k] = truncateStr(v);
+	}
+}
+
+/** Slim one parsed jsonl record (in place). Never returns null — line count is sacred. */
+export function slimLine(obj, agent) {
+	if (DROP_LINE_TYPES.has(obj.type)) return { type: obj.type, stripped: true };
+	if (agent === "codex" && obj.payload && typeof obj.payload === "object") slimContainer(obj.payload);
+	else slimContainer(obj);
+	return obj;
+}
+
+// ------------------------------------------------------------- format probe
+
+function* walk(dir, rel = "") {
+	for (const e of readdirSync(join(dir, rel), { withFileTypes: true })) {
+		const r = rel ? `${rel}/${e.name}` : e.name;
+		if (e.isDirectory()) yield* walk(dir, r);
+		else if (e.name.endsWith(".jsonl") && !r.includes("subagents/")) yield r;
+	}
+}
+
+/** Read complete lines of a file as [text] without ever making one giant string
+ *  (a single CC session can exceed the 512MB string cap — Buffer stays off-heap). */
+function readLines(file) {
+	const buf = readFileSync(file);
+	const lines = [];
+	let start = 0;
+	for (let i = 0; i < buf.length; i++) {
+		if (buf[i] === 10) {
+			lines.push(buf.subarray(start, i).toString("utf8"));
+			start = i + 1;
+		}
+	}
+	// trailing partial line (session in flight) is left for the next run
+	return { lines, completeBytes: start };
+}
+
+function parseFirstLine(file) {
+	const fd = readFileSync(file);
+	const nl = fd.indexOf(10);
+	try {
+		return JSON.parse(fd.subarray(0, nl > 0 ? nl : 4096).toString("utf8"));
+	} catch {
+		return null;
+	}
+}
+
+export function detectAgent(dir) {
+	for (const rel of walk(dir)) {
+		const file = join(dir, rel);
+		if (basename(rel).startsWith("rollout-")) {
+			const first = parseFirstLine(file);
+			if (first && (first.type === "session_meta" || first.payload)) return "codex";
+		}
+		const first = parseFirstLine(file);
+		if (!first) continue;
+		if (typeof first.sessionId === "string") return "claude-code";
+		if (first.type === "session" && typeof first.id === "string") return "pi";
+	}
+	return null;
+}
+
+function uidOf(agent, first, rel) {
+	if (agent === "claude-code") {
+		if (typeof first?.sessionId === "string" && first.sessionId.length >= 8) return first.sessionId;
+	}
+	if (agent === "pi") {
+		if (first?.type === "session" && typeof first.id === "string") return first.id;
+	}
+	if (agent === "codex") {
+		const p = first?.payload ?? {};
+		if (typeof p.id === "string" && p.id.length >= 8) return p.id;
+		if (typeof p.session_id === "string") return p.session_id;
+	}
+	// last resort: filename stem carries a uuid on pi/codex
+	const stem = basename(rel).replace(/\.jsonl$/, "");
+	const m = stem.match(/[0-9a-f-]{16,}/i);
+	if (m) return m[0];
+	return null;
+}
+
+// ------------------------------------------------------------------ pushing
 
 async function api(path, body) {
 	const headers = { "content-type": "application/json" };
 	if (TOKEN) headers.authorization = `Bearer ${TOKEN}`;
 	let payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body), "utf8");
 	if (payload && payload.length > 50_000) {
-		payload = gzipSync(payload); // session text compresses ~5-10x
+		payload = gzipSync(payload);
 		headers["content-encoding"] = "gzip";
 	}
 	const res = await fetch(`${BASE}${path}`, {
@@ -69,100 +211,101 @@ async function api(path, body) {
 	return { status: res.status, json };
 }
 
-/** Content-derived session identity: same session → same uid across channels. */
-function sessionUid(rel) {
+function failLoud(dir) {
+	console.error(`✗ 识别不了 ${dir} 里的会话日志格式。
+目前支持: ${SUPPORTED.join(" / ")}。
+如果你用的是其他客户端，请把日志里的一行样例（脱敏后）发到
+github.com/xiaqii/ruyi 提 issue，我们会加适配。
+（没有上传任何数据，你没有白装。）`);
+	process.exit(1);
+}
+
+async function syncFile(rel, agent) {
 	const file = join(DIR, rel);
-	const fd = readFileSync(file);
-	const head = fd.subarray(0, 16384);
-	if (AGENT === "claude-code") {
-		try {
-			const first = head.subarray(0, head.indexOf(10)).toString("utf8");
-			const sid = JSON.parse(first).sessionId;
-			if (typeof sid === "string" && sid.length >= 8) return sid;
-		} catch { /* fall through */ }
-	}
-	const stem = basename(rel).replace(/\.jsonl$/, "");
-	if (stem.length >= 12) return stem;
-	return createHash("sha256").update(head.subarray(0, 4096)).digest("hex").slice(0, 32);
-}
-
-function* walk(dir, rel = "") {
-	for (const e of readdirSync(join(dir, rel), { withFileTypes: true })) {
-		const r = rel ? `${rel}/${e.name}` : e.name;
-		if (e.isDirectory()) yield* walk(dir, r);
-		else if (e.name.endsWith(".jsonl") && !r.includes("subagents/")) yield r;
-	}
-}
-
-/** Slice buf[start .. start+maxLen] but never split a multi-byte UTF-8 char. */
-function utf8SafeEnd(buf, start, maxLen) {
-	let end = Math.min(start + maxLen, buf.length);
-	while (end > start && end < buf.length && (buf[end] & 0xc0) === 0x80) end--;
-	return end;
-}
-
-async function syncFile(rel) {
-	const file = join(DIR, rel);
-	const size = statSync(file).size;
 	const key = rel.replace(/\\/g, "/");
-	let sent = state.files[key] ?? 0;
-	if (sent > size) sent = 0; // file was truncated/rotated — resend whole
-	if (sent === size) return { rel, skipped: true };
+	const { lines } = readLines(file);
+	if (lines.length === 0) return { rel, skipped: true };
+	let first;
+	try {
+		first = JSON.parse(lines[0]);
+	} catch {
+		return { rel, skipped: true, reason: "unparseable head" };
+	}
+	const uid = uidOf(agent, first, rel);
+	if (!uid) return { rel, skipped: true, reason: "no session uid" };
 
-	const buf = readFileSync(file); // Buffer; offsets are BYTES (server counts bytes)
-	const uid = sessionUid(rel);
-	while (sent < size) {
-		const end = utf8SafeEnd(buf, sent, CHUNK);
-		const chunk = buf.subarray(sent, end).toString("utf8");
+	let sent = state.files[key]?.lines ?? 0;
+	if (sent > lines.length) sent = 0; // rotated/truncated — resend all
+	if (sent === lines.length) return { rel, skipped: true };
+
+	while (sent < lines.length) {
+		const batch = lines.slice(sent, sent + CHUNK_LINES).map((ln) => {
+			let obj;
+			try {
+				obj = JSON.parse(ln);
+			} catch {
+				return ln; // unparseable lines pass through verbatim (rare; server keeps them)
+			}
+			return JSON.stringify(slimLine(obj, agent));
+		});
 		const r = await api("/sync/session", {
-			machine: MACHINE, agent: AGENT, sessionKey: key, sessionUid: uid, totalSize: size,
-			offset: sent, data: chunk,
+			machine: MACHINE, agent, sessionKey: key, sessionUid: uid, fromLine: sent, lines: batch,
 		});
 		if (r.status === 409) {
-			sent = r.json.receivedBytes; // server knows the truth — resume from there
+			sent = r.json.storedLines ?? 0;
 			continue;
 		}
 		if (r.status !== 200) throw new Error(`sync ${key}: HTTP ${r.status} ${r.json.error ?? ""}`);
-		if (r.json.already) {
-			state.files[key] = size;
-			saveState();
-			return { rel, skipped: true, already: true };
-		}
-		sent = r.json.receivedBytes;
-		process.stdout.write(`\r  ${basename(rel)} ${(sent / 1024).toFixed(0)}/${(size / 1024).toFixed(0)} KB   `);
+		sent = r.json.storedLines;
+		process.stdout.write(`\r  ${basename(rel)} ${sent}/${lines.length} 行   `);
 	}
-	state.files[key] = sent;
+	state.files[key] = { lines: sent, uid };
 	saveState();
-	return { rel, skipped: false, bytes: size };
+	return { rel, skipped: false, lines: sent };
 }
 
+// --------------------------------------------------------------------- main
+
+const isMain = !!process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href;
+if (isMain) {
+if (!BASE) {
+	console.error("RUYI_URL is not set. Example: $env:RUYI_URL='https://ruyi.example.com'");
+	process.exit(1);
+}
+const AGENT = AGENT_OPT === "auto" ? detectAgent(DIR) : AGENT_OPT;
+if (!AGENT) failLoud(DIR);
+if (!SUPPORTED.includes(AGENT)) failLoud(DIR);
+
+const files = ONLY_FILE ? [relative(DIR, ONLY_FILE).replace(/\\/g, "/")] : [...walk(DIR)];
+
 if (STATUS) {
-	const r = await api(`/sync/state?machine=${encodeURIComponent(MACHINE)}`);
-	const server = r.json.sessions ?? {};
-	const rows = Object.keys(state.files).map((k) => {
-		const local = state.files[k];
-		const srv = server[k] ?? 0;
-		return `${srv === local ? "✓" : "↻"} ${k}  local ${local}B / server ${srv}B`;
-	});
-	console.log(rows.join("\n") || "(no sync history)");
+	console.log(`格式: ${AGENT} | 目录: ${DIR} | 机器: ${MACHINE}`);
+	let totalLines = 0;
+	for (const rel of files) {
+		const { lines } = readLines(join(DIR, rel));
+		totalLines += lines.length;
+		const st = state.files[rel.replace(/\\/g, "/")]?.lines ?? 0;
+		console.log(`${st === lines.length ? "✓" : "↻"} ${rel}  ${lines.length} 行 (已推 ${st})`);
+	}
+	console.log(`共 ${files.length} 个会话文件, ${totalLines.toLocaleString()} 行 — 未上传任何数据`);
 	process.exit(0);
 }
 
-const files = ONLY_FILE ? [relative(DIR, ONLY_FILE).replace(/\\/g, "/")] : [...walk(DIR)];
 let done = 0, skipped = 0, failed = 0;
-console.log(`ruyi sync: ${files.length} session file(s) from ${DIR} → ${BASE} (machine: ${MACHINE})`);
-	for (const rel of files) {
+console.log(`ruyi sync v2: ${files.length} 个会话文件 (${AGENT}) ${DIR} → ${BASE} (机器: ${MACHINE})`);
+for (const rel of files) {
 	try {
-		const r = await syncFile(rel);
-		if (r.skipped) { skipped++; if (r.already) console.log(`≡ ${rel} (already complete on server, zero transfer)`); }
+		const r = await syncFile(rel, AGENT);
+		if (r.skipped) skipped++;
 		else {
 			done++;
-			console.log(`\r✓ ${rel} (${((r.bytes ?? 0) / 1024).toFixed(0)} KB)                    `);
+			console.log(`\r✓ ${rel} (${r.lines} 行)                    `);
 		}
 	} catch (err) {
 		failed++;
 		console.error(`\n✗ ${rel}: ${err.message}`);
 	}
 }
-console.log(`done: ${done} updated, ${skipped} already in sync, ${failed} failed`);
+console.log(`done: ${done} 已更新, ${skipped} 已同步, ${failed} 失败`);
 process.exit(failed > 0 ? 1 : 0);
+}
