@@ -59,10 +59,20 @@ Then:
   set client timeouts to 45s+; the plain-SQL routes answer in milliseconds.
 - Degradation: if ruyi is unreachable, keep working as normal — memory is an
   accessory, not a dependency.
-- Optional: feed this machine's past sessions to the nightly dream (incremental,
-  resumable — never paste whole logs into ingest):
-    node sync-sessions.mjs --dir <your-sessions> --agent claude-code --machine <this-pc>
-    https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/examples/sync-sessions.mjs
+- Recommended: keep this machine's sessions flowing into memory automatically.
+  The sync script slims logs LOCALLY (thinking/images/file-snapshots stripped,
+  ~0.3% of original size) and pushes only new lines:
+    1. Download (single file):
+       https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/examples/sync-sessions.mjs
+    2. One-time automate (Claude Code):  node sync-sessions.mjs --install-hook
+       (writes ~/.ruyi-sync.config.json + registers a SessionEnd hook — every
+       finished conversation then syncs itself; other clients: run it on a
+       schedule instead)
+    3. First full sync:                  node sync-sessions.mjs
+    4. Anytime dry-run (uploads nothing): node sync-sessions.mjs --status
+  All steps are idempotent — re-downloading the file is how you update; running
+  the script again only sends what is new. Formats: claude-code / pi / codex
+  (auto-detected; unknown formats stop with a clear message, nothing uploaded).
 
 Humans: health check at GET /health — source & docs: https://github.com/xiaqii/ruyi
 `;
