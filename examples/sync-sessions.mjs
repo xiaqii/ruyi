@@ -39,8 +39,12 @@ const opt = (name, dflt) => {
 	return i >= 0 ? args[i + 1] : dflt;
 };
 
-const BASE = (process.env.RUYI_URL ?? "").replace(/\/+$/, "");
-const TOKEN = process.env.RUYI_TOKEN ?? "";
+// Config: env vars win; else ~/.ruyi-sync.config.json (written by --install-hook,
+// so the SessionEnd hook needs no environment at all).
+const CONFIG_FILE = join(`${process.env.HOME ?? process.env.USERPROFILE}`, ".ruyi-sync.config.json");
+const fileCfg = existsSync(CONFIG_FILE) ? JSON.parse(readFileSync(CONFIG_FILE, "utf8")) : {};
+const BASE = (process.env.RUYI_URL ?? fileCfg.url ?? "").replace(/\/+$/, "");
+const TOKEN = process.env.RUYI_TOKEN ?? fileCfg.token ?? "";
 const DIR = opt("dir", `${process.env.HOME ?? process.env.USERPROFILE}/.claude/projects`);
 const AGENT_OPT = opt("agent", "auto");
 const MACHINE = opt("machine", hostname());
@@ -272,11 +276,51 @@ if (!BASE) {
 	console.error("RUYI_URL is not set. Example: $env:RUYI_URL='https://ruyi.example.com'");
 	process.exit(1);
 }
+// --install-hook: one-time setup. Writes ~/.ruyi-sync.config.json (needs
+// RUYI_URL/RUYI_TOKEN in env NOW) and registers a Claude Code SessionEnd hook
+// so every finished conversation syncs itself. Idempotent.
+if (args.includes("--install-hook")) {
+	const url = process.env.RUYI_URL ?? fileCfg.url;
+	const token = process.env.RUYI_TOKEN ?? fileCfg.token;
+	if (!url) {
+		console.error("RUYI_URL is required for --install-hook. Example:\n  $env:RUYI_URL='https://ruyi.example.com'; $env:RUYI_TOKEN='<token>'; node sync-sessions.mjs --install-hook");
+		process.exit(1);
+	}
+	writeFileSync(CONFIG_FILE, JSON.stringify({ url, token }, null, 2));
+	const ccSettings = join(`${process.env.HOME ?? process.env.USERPROFILE}`, ".claude", "settings.json");
+	const cfg = existsSync(ccSettings) ? JSON.parse(readFileSync(ccSettings, "utf8")) : {};
+	cfg.hooks ??= {};
+	cfg.hooks.SessionEnd ??= [];
+	const cmd = `node ${JSON.stringify(process.argv[1])}`;
+	const already = JSON.stringify(cfg.hooks.SessionEnd).includes("sync-sessions.mjs");
+	if (!already) {
+		cfg.hooks.SessionEnd.push({ hooks: [{ type: "command", command: cmd }] });
+		writeFileSync(ccSettings, JSON.stringify(cfg, null, 2));
+	}
+	console.log(`✓ config written to ${CONFIG_FILE}`);
+	console.log(`✓ SessionEnd hook ${already ? "already present" : "added"} in ${ccSettings}`);
+	console.log("From now on every finished Claude Code conversation syncs itself.");
+	console.log(`Optional backstop (daily full scan): schtasks /create /tn ruyi-sync /tr "${cmd}" /sc daily /st 23:30`);
+	process.exit(0);
+}
+
+// Hook mode: Claude Code pipes {"transcript_path": "..."} on stdin (SessionEnd).
+let hookFile = ONLY_FILE;
+if (!hookFile && !process.stdin.isTTY && !STATUS) {
+	const raw = readFileSync(0, "utf8").trim();
+	if (raw) {
+		try {
+			const p = JSON.parse(raw).transcript_path;
+			if (typeof p === "string" && existsSync(p)) hookFile = p;
+		} catch { /* not hook json */ }
+	}
+}
+
 const AGENT = AGENT_OPT === "auto" ? detectAgent(DIR) : AGENT_OPT;
 if (!AGENT) failLoud(DIR);
 if (!SUPPORTED.includes(AGENT)) failLoud(DIR);
 
-const files = ONLY_FILE ? [relative(DIR, ONLY_FILE).replace(/\\/g, "/")] : [...walk(DIR)];
+const files = hookFile ? [relative(DIR, hookFile).replace(/\\/g, "/")] : [...walk(DIR)];
 
 if (STATUS) {
 	console.log(`格式: ${AGENT} | 目录: ${DIR} | 机器: ${MACHINE}`);
