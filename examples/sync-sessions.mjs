@@ -292,6 +292,8 @@ async function syncFile(rel, agent) {
 		}
 		if (r.status !== 200) throw new Error(`sync ${key}: HTTP ${r.status} ${r.json.error ?? ""}`);
 		sent = r.json.storedLines;
+		state.files[key] = { lines: sent, uid };
+		saveState(); // per-chunk checkpoint: a killed run (hook timeout, Ctrl-C) resumes here
 		process.stdout.write(`\r  ${basename(rel)} ${sent}/${lines.length} 行   `);
 	}
 	state.files[key] = { lines: sent, uid };

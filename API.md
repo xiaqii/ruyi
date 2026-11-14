@@ -258,6 +258,19 @@ content-addressed dedup:
   the client resumes from that offset
 - Response `200 {"receivedBytes": <new total>}`; bytes must be split on UTF-8 character boundaries
   (see `examples/sync-sessions.mjs`)
+
+**Line mode (v2, preferred)** — clients slim locally and push whole JSONL lines instead of bytes:
+
+```json
+{ "machine": "win11-laptop", "agent": "pi", "sessionKey": "sess/abc.jsonl",
+  "sessionUid": "…", "fromLine": 400, "lines": ["{…}", "{…}"] }
+```
+
+- `fromLine` must equal the server's stored line count for that session, otherwise
+  `409 {"storedLines": <actual>}` — the client resumes from that line index
+- `agent` is whitelisted in line mode (`claude-code`/`pi`/`codex`); unknown formats are rejected loudly
+- Response `200 {"storedLines": <new total>}`; slimming must never drop lines — line indexes stay 1:1
+  between the original file and the server copy
 - **Compression**: request bodies >50KB should be gzipped (`content-encoding: gzip`) — session text
   compresses ~5–10×; the server's decompression ceiling is 32MB (zip-bomb guard)
 - Data lands under `data/synced/<machine>/` on the server and automatically becomes a dream session
