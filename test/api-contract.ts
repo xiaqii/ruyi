@@ -210,6 +210,11 @@ if (tmpId === -1) throw new Error("fixture insert blocked by tombstone — conte
 	const l4 = await call("POST", "/sync/session", { machine, agent: "gemini", sessionKey: "x", sessionUid: luid, fromLine: 0, lines: [] });
 	ok(l4.status === 400 && String(l4.json.error).includes("unsupported agent"), "line mode: unknown agent format rejected loudly");
 
+	const cf1 = await fetch(`${BASE}/clients/sync-sessions.mjs`, { signal: AbortSignal.timeout(15_000) });
+	ok(cf1.status === 200 && (await cf1.text()).includes("SYNC_VERSION"), "client file served for self-update");
+	const cf2 = await call("GET", "/clients/evil.mjs");
+	ok(cf2.status === 404, "unknown client file rejected");
+
 	// auth model: loopback trusted; proxied/remote requests must carry the bearer token
 	{
 		// unknown route still passes the auth gate first — use a real authed route:

@@ -51,6 +51,34 @@ const MACHINE = opt("machine", hostname());
 const ONLY_FILE = opt("file", null);
 const STATUS = args.includes("--status");
 const CHUNK_LINES = 400; // lines per request
+const SYNC_VERSION = "2.1.0";
+
+/** Best-effort weekly self-update from the server (which serves the latest
+ *  client files from its own checkout). Never breaks a sync run over an update. */
+async function maybeSelfUpdate() {
+	const now = Date.now();
+	if (now - (state.lastUpdateCheck ?? 0) < 7 * 86_400_000) return;
+	state.lastUpdateCheck = now;
+	saveState();
+	try {
+		const headers = {};
+		if (TOKEN) headers.authorization = `Bearer ${TOKEN}`;
+		const r = await fetch(`${BASE}/clients/sync-sessions.mjs`, { headers, signal: AbortSignal.timeout(30_000) });
+		if (!r.ok) return;
+		const text = await r.text();
+		const m = text.match(/SYNC_VERSION\s*=\s*"([\d.]+)"/);
+		if (!m) return;
+		const cur = SYNC_VERSION.split(".").map(Number);
+		const newer = m[1].split(".").map(Number).some((n, i) => n > (cur[i] ?? 0));
+		if (!newer) return;
+		const tmp = `${process.argv[1]}.new`;
+		writeFileSync(tmp, text);
+		const { execFileSync } = await import("node:child_process");
+		execFileSync(process.execPath, ["--check", tmp]); // never replace with a broken file
+		writeFileSync(process.argv[1], text);
+		console.error(`[ruyi-sync] self-updated to v${m[1]} — takes effect on the next run`);
+	} catch { /* update is best-effort; sync must never fail because of it */ }
+}
 
 const SUPPORTED = ["claude-code", "pi", "codex"];
 
@@ -276,6 +304,7 @@ if (!BASE) {
 	console.error("RUYI_URL is not set. Example: $env:RUYI_URL='https://ruyi.example.com'");
 	process.exit(1);
 }
+await maybeSelfUpdate();
 // --install-hook: one-time setup. Writes ~/.ruyi-sync.config.json (needs
 // RUYI_URL/RUYI_TOKEN in env NOW) and registers a Claude Code SessionEnd hook
 // so every finished conversation syncs itself. Idempotent.
