@@ -65,8 +65,8 @@ function ok(cond: boolean, name: string, detail = ""): void {
 	}
 }
 
-async function call(method: string, path: string, body?: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
-	const headers: Record<string, string> = { "content-type": "application/json" };
+async function call(method: string, path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<{ status: number; json: Record<string, unknown> }> {
+	const headers: Record<string, string> = { "content-type": "application/json", ...(extraHeaders ?? {}) };
 	if (TOKEN) headers.authorization = `Bearer ${TOKEN}`;
 	const res = await fetch(`${BASE}${path}`, {
 		method,
@@ -214,6 +214,16 @@ if (tmpId === -1) throw new Error("fixture insert blocked by tombstone — conte
 	ok(cf1.status === 200 && (await cf1.text()).includes("SYNC_VERSION"), "client file served for self-update");
 	const cf2 = await call("GET", "/clients/evil.mjs");
 	ok(cf2.status === 404, "unknown client file rejected");
+
+	// request stats: requests are logged with client attribution and aggregate by day
+	await call("POST", "/probe", { question: "stats-contract-probe" });
+	const act = await call("GET", "/activity?days=1", undefined, { "x-ruyi-client": "contract-stats" });
+	const today = new Date().toISOString().slice(0, 10);
+	ok(act.status === 200 && act.json.byDay?.[today]?.probe?.n >= 1, "activity aggregates today's probe calls");
+	const cl = act.json.byClient?.["contract-stats"] ?? act.json.byClient?.unknown;
+	ok(!!cl, "activity attributes requests to the x-ruyi-client header");
+	const st = await fetch(`${BASE}/stats`, { headers: { accept: "text/html", ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}) }, signal: AbortSignal.timeout(15_000) });
+	ok(st.status === 200 && (st.headers.get("content-type") ?? "").includes("text/html"), "stats serves the dashboard page to browsers");
 
 	// auth model: loopback trusted; proxied/remote requests must carry the bearer token
 	{

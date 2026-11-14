@@ -40,7 +40,7 @@ try {
 	const prompt = typeof input.prompt === "string" ? input.prompt : "";
 	if (!sessionId || !prompt.trim()) process.exit(0);
 
-	const headers = { "content-type": "application/json" };
+	const headers = { "content-type": "application/json", "x-ruyi-client": "cc-hook" };
 	if (TOKEN) headers.authorization = `Bearer ${TOKEN}`;
 	const res = await fetch(`${BASE}/recall`, {
 		method: "POST",

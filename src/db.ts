@@ -20,7 +20,7 @@ const dbs = new Map<string, DatabaseSync>();
  * v10 = replies.answer/gist (layered topic context). v11 = memories.mini + profiles.abstract
  *       (selector listing). v12 = inbox_files (raw-material inbox: per-file×lens offsets).
  */
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
 
 function migrate(d: DatabaseSync, from: number): void {
 	if (from < 1) {
@@ -93,6 +93,9 @@ function migrate(d: DatabaseSync, from: number): void {
 	}
 	if (from < 13) {
 		createKv(d);
+	}
+	if (from < 14) {
+		createRequestLog(d);
 	}
 	if (from < 12) {
 		createInboxFiles(d);
@@ -580,6 +583,7 @@ CREATE TABLE IF NOT EXISTS profiles (
 	createInboxFiles(db); // idempotent, same rationale
 	createKv(db); // idempotent
 	createTopics(db); // idempotent; migrate() is a no-op for fresh DBs (user_version already current)
+	createRequestLog(db);
 	createTombstones(db);
 
 	if (!hadMemories) {
@@ -843,6 +847,58 @@ export function getDistillState(
 	return d.prepare(`SELECT processed_bytes, gist FROM distill_state WHERE session_file = ?`).get(file) as
 		| { processed_bytes: number; gist: string }
 		| undefined;
+}
+
+function createRequestLog(d: DatabaseSync): void {
+	d.exec(`CREATE TABLE IF NOT EXISTS request_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  at         TEXT NOT NULL,
+  category   TEXT NOT NULL,
+  route      TEXT NOT NULL,
+  client     TEXT NOT NULL DEFAULT '',
+  req_bytes  INTEGER NOT NULL DEFAULT 0,
+  res_bytes  INTEGER NOT NULL DEFAULT 0,
+  ms         INTEGER NOT NULL DEFAULT 0
+)`);
+	d.exec(`CREATE INDEX IF NOT EXISTS idx_request_log_at ON request_log(at)`);
+}
+
+/** One row per HTTP request, written at response time — powers the /stats dashboard. */
+export function logRequest(
+	d: DatabaseSync,
+	entry: { category: string; route: string; client: string; reqBytes: number; resBytes: number; ms: number },
+): void {
+	try {
+		d.prepare(
+			`INSERT INTO request_log (at, category, route, client, req_bytes, res_bytes, ms) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		).run(now(), entry.category, entry.route, entry.client, entry.reqBytes, entry.resBytes, entry.ms);
+	} catch { /* stats must never break a request */ }
+}
+
+export function requestStats(
+	d: DatabaseSync,
+	days: number,
+): { byDay: Record<string, Record<string, { n: number; req: number; res: number }>>; byClient: Record<string, Record<string, { n: number; req: number; res: number }>>; recent: { at: string; category: string; route: string; client: string; reqBytes: number; resBytes: number; ms: number }[] } {
+	const since = new Date(Date.now() - days * 86_400_000).toISOString();
+	const rows = d.prepare(
+		`SELECT substr(at, 1, 10) AS day, category, client, COUNT(*) n, SUM(req_bytes) req, SUM(res_bytes) res
+		 FROM request_log WHERE at >= ? GROUP BY day, category, client`,
+	).all(since) as unknown as { day: string; category: string; client: string; n: number; req: number; res: number }[];
+	const byDay: Record<string, Record<string, { n: number; req: number; res: number }>> = {};
+	const byClient: Record<string, Record<string, { n: number; req: number; res: number }>> = {};
+	for (const r of rows) {
+		const client = r.client || "unknown";
+		for (const [root, key] of [[byDay, r.day], [byClient, client]] as const) {
+			root[key] ??= {};
+			const cur = root[key][r.category] ?? { n: 0, req: 0, res: 0 };
+			cur.n += r.n; cur.req += r.req ?? 0; cur.res += r.res ?? 0;
+			root[key][r.category] = cur;
+		}
+	}
+	const recent = d.prepare(
+		`SELECT at, category, route, client, req_bytes reqBytes, res_bytes resBytes, ms FROM request_log ORDER BY id DESC LIMIT 30`,
+	).all() as unknown as { at: string; category: string; route: string; client: string; reqBytes: number; resBytes: number; ms: number }[];
+	return { byDay, byClient, recent };
 }
 
 export function logTokens(
