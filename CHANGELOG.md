@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.8.1] - 2026-11-14
+
+- dream triage moves from the dream tier to the recall tier (qwen3.7-flash thinking-off) — screening is screening, not extraction (#1267). Prompt-first, evidence-backed: the naive flash judge false-skipped exactly the most valuable content (user-stated UI/interaction preferences hiding in work talk — 3/3 spot-checked skips were wrong), so the prompt now carves out user voice explicitly ("preferences stated in the user's own words are always worth it") and re-balances false-worth vs false-skip. Validated on 20 real backlog segments: zero false-skips on user voice, correct skips on tool churn/bare approvals/notification-only segments
 ## [1.8.0] - 2026-11-14
 
 **Session sync v2 — slim-locally, line-indexed, self-maintaining clients.**
