@@ -15,7 +15,7 @@ import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readF
 import { createHash } from "node:crypto";
 import { dirname, join, normalize, basename } from "node:path";
 import type { Config } from "./types.ts";
-import { getDb, getDistillState, getSessionRegistry, setDistillState, upsertSessionRegistry } from "./db.ts";
+import { getDb, getDistillState, getKv, getSessionRegistry, setDistillState, setKv, upsertSessionRegistry } from "./db.ts";
 
 export function syncRoot(config: Config): string {
 	return join(dirname(config.dbPath), "synced");
@@ -63,6 +63,7 @@ export interface SyncPushBody {
 export function syncPush(
 	config: Config,
 	body: SyncPushBody,
+	remoteIp?: string,
 ): { ok: true; receivedBytes: number; already?: boolean } | { ok: false; status: number; error: string; receivedBytes?: number } {
 	const machine = sanitize(body.machine ?? "", false);
 	const agent = sanitize(body.agent ?? "", false);
@@ -74,6 +75,21 @@ export function syncPush(
 
 	const dir = join(syncRoot(config), machine);
 	mkdirSync(dir, { recursive: true });
+
+	// Activity ledger: who pushed, from where, when, how much — for tracing a
+	// bad/foreign payload back to its source machine.
+	{
+		const db = getDb(config.dbPath);
+		const key = `sync:machines:${machine}`;
+		const prev = JSON.parse(getKv(db, key) ?? "{}");
+		setKv(db, key, JSON.stringify({
+			agent,
+			ip: remoteIp ?? prev.ip,
+			firstSeen: prev.firstSeen ?? new Date().toISOString(),
+			lastSeen: new Date().toISOString(),
+			bytes: (prev.bytes ?? 0) + Buffer.byteLength(body.data ?? "", "utf8"),
+		}));
+	}
 
 	// remember which agent format this machine's logs use (dream reads this)
 	const metaPath = join(dir, "_meta.json");
@@ -155,5 +171,14 @@ export function syncedSessionDirs(config: Config): { agent: string; dir: string;
 		}
 		out.push({ agent, dir, owner: "default" });
 	}
+	return out;
+}
+
+/** All machines that have ever pushed, with agent/ip/first/last-seen/bytes. */
+export function syncMachineLedger(config: Config): Record<string, unknown> {
+	const db = getDb(config.dbPath);
+	const rows = db.prepare("SELECT key, value FROM kv WHERE key LIKE 'sync:machines:%'").all() as { key: string; value: string }[];
+	const out: Record<string, unknown> = {};
+	for (const r of rows) out[r.key.slice("sync:machines:".length)] = JSON.parse(r.value);
 	return out;
 }

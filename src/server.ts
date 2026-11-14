@@ -15,7 +15,7 @@ import {
 } from "./db.ts";
 import type { Candidate } from "./types.ts";
 import { runDream, distillText, explicitRemember } from "./distill.ts";
-import { syncPush, syncState } from "./sync.ts";
+import { syncMachineLedger, syncPush, syncState } from "./sync.ts";
 import { generateReplyGist, getInject, recall } from "./recall.ts";
 import { runSynthesize } from "./synthesize.ts";
 import { landingPage } from "./landing.ts";
@@ -256,11 +256,13 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 
 			// Session sync: remote machines push session-log deltas here for the nightly dream.
 			if (req.method === "GET" && path === "/sync/state") {
-				return send(res, 200, syncState(config, url.searchParams.get("machine") ?? ""));
+				const machine = url.searchParams.get("machine") ?? "";
+				const ledger = machine ? null : syncMachineLedger(config);
+				return send(res, 200, { ...syncState(config, machine), ...(ledger ? { machines: ledger } : {}) });
 			}
 			if (req.method === "POST" && path === "/sync/session") {
 				const body = (await readBody(req)) as unknown as Parameters<typeof syncPush>[1];
-				const r = syncPush(config, body);
+				const r = syncPush(config, body, req.socket.remoteAddress);
 				if (!r.ok) return send(res, r.status, { error: r.error, receivedBytes: r.receivedBytes });
 				return send(res, 200, r);
 			}
