@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.9.1] - 2026-11-14
+
+- /stats + /activity are now public (owner decision: aggregate metadata only — counts, bytes, client names; no memory content). Dashboard drops its token prompt. The dashboard's own 30s polling is excluded from request logging so it doesn't pollute the "other" bucket.
 ## [1.9.0] - 2026-11-14
 
 **Live activity dashboard at /stats.** Every HTTP request is logged (category: probe/recall/inject/remember/sync/other; client via `x-ruyi-client`; request+response bytes; latency) into a new request_log table (schema v14). /stats serves a real-time dashboard to browsers (30s auto-refresh; per-day × category matrix, per-client rollup, last-30-events live feed — "did that conversation just trigger memory?" is answered by looking); JSON stays for API clients, /activity serves the raw aggregates. Own clients now identify themselves: mcp bridge, pi extension, CC hooks, sync script (`sync:<machine>`).
