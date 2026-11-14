@@ -109,6 +109,8 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 				const files: Record<string, string> = {
 					"sync-sessions.mjs": "examples/sync-sessions.mjs",
 					"mcp-remote.mjs": "examples/mcp-remote.mjs",
+					"cc-session-start.mjs": "examples/claude-code/session-start.mjs",
+					"cc-user-prompt-submit.mjs": "examples/claude-code/user-prompt-submit.mjs",
 				};
 				const rel = files[name];
 				if (!rel) return send(res, 404, { error: "unknown client file" });
