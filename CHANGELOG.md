@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.9.2] - 2026-11-14
+
+- dashboard attribution chain: x-ruyi-client header → User-Agent (node/curl identify themselves, like Kimi sees its callers) → source IP. mcp-remote.mjs gains weekly self-update from /clients (takes effect next MCP session); sync's weekly refresh now also updates already-installed CC injection hooks, so older installs converge onto the current versions without a reinstall
 ## [1.9.1] - 2026-11-14
 
 - /stats + /activity are now public (owner decision: aggregate metadata only — counts, bytes, client names; no memory content). Dashboard drops its token prompt. The dashboard's own 30s polling is excluded from request logging so it doesn't pollute the "other" bucket.
