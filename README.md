@@ -62,8 +62,9 @@ ruyi. It **slims locally first** — thinking blocks, images and file snapshots 
 capped, typically ~0.3% of the raw bytes — then sends only new lines, resumable at line granularity with
 per-chunk checkpoints. Formats auto-detected (claude-code / pi / codex); unknown formats stop loudly with
 nothing uploaded. Claude Code can self-wire a SessionEnd hook (`--install-hook`) so every finished
-conversation syncs itself in seconds; the script self-updates weekly from your server, and
-`--uninstall-hook` removes all traces. Machines and their push activity are visible in the server ledger
+conversation syncs itself in seconds AND every conversation starts with memory in context
+(SessionStart/UserPromptSubmit injection + CLAUDE.md usage rules); the script self-updates
+weekly from your server, and `--uninstall-hook` removes all traces. Machines and their push activity are visible in the server ledger
 (`GET /sync/state`).
 
 ## Uninstall

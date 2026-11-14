@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.8.0] - 2026-11-14
+
+**Session sync v2 — slim-locally, line-indexed, self-maintaining clients.**
+- sync-sessions.mjs rewritten: slims logs LOCALLY (thinking/images/file-snapshots stripped, tool_use skeletonized, tool_result capped at 500 chars, >50KB fields truncated, CC top-level `toolUseResult` base64 strip — the single biggest volume source), then pushes whole lines; byte-targeted batching (4MB/request), per-line 2MB hard cap, per-chunk checkpoints
+- server `/sync/session` line mode: 409 line-count realign, agent whitelist (claude-code/pi/codex), machine activity ledger; oversized bodies get a clean 413 (was an opaque 500)
+- one-command client lifecycle: `--install-hook` installs SessionEnd sync + SessionStart/UserPromptSubmit injection hooks + CLAUDE.md memory-use rules; `--uninstall-hook` removes all traces; weekly self-update from the server's `/clients/<file>` endpoint (SYNC_VERSION)
+- distill registers every session file's content uid, and a synced session that collides with a previous manual import inherits its dream offset (verified live: a 408MB-processed archive mapped to its slimmed copy by line index, 8/8 boundary fields matching); scripts/reslim-synced.mjs re-slims already-stored files 1:1 (production: 1.52GB → 462MB)
+- dream hardening: SSE stream option per tier (gateways drop long non-streaming calls), thinking-aware budgets (reorganize 256K/8h effectively no timeout), key fallback on 402/quota-worded 400
+- probe/admin tool descriptions hardened: probe as-often-as-possible-and-first, profile is inspection-only never a retrieval path
+
 ## [1.7.3] - 2026-11-09
 
 - dream: tolerate vanishing session files (ENOENT mid-scan) and actually read inbox-kept .txt (the .jsonl filter starved the inbox→dream path); selector listing in stable id order with static-first prompt layout (prefix-cache friendly; flash +3/14 on bench); store card gains a NEW-SINCE strip for memories born after the last nightly build

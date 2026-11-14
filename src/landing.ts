@@ -65,9 +65,10 @@ Then:
     1. Download (single file):
        https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/examples/sync-sessions.mjs
     2. One-time automate (Claude Code):  node sync-sessions.mjs --install-hook
-       (writes ~/.ruyi-sync.config.json + registers a SessionEnd hook — every
-       finished conversation then syncs itself; other clients: run it on a
-       schedule instead)
+       (writes ~/.ruyi-sync.config.json, registers SessionEnd sync +
+       SessionStart/UserPromptSubmit memory-injection hooks, and teaches the
+       model when to use memory via CLAUDE.md — install once, works in every
+       conversation; other clients: run sync on a schedule instead)
     3. First full sync:                  node sync-sessions.mjs
     4. Anytime dry-run (uploads nothing): node sync-sessions.mjs --status
   All steps are idempotent — running the script again only sends what is new.
