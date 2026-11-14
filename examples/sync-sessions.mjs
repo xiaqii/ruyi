@@ -50,8 +50,55 @@ const AGENT_OPT = opt("agent", "auto");
 const MACHINE = opt("machine", hostname());
 const ONLY_FILE = opt("file", null);
 const STATUS = args.includes("--status");
-const CHUNK_LINES = 400; // lines per request
-const SYNC_VERSION = "2.1.0";
+// Batching is BYTE-targeted, not line-counted: slimmed lines are normally tiny,
+// but a session full of giant lines (huge pastes, retained tool output) must
+// never overflow the server's body limit (8MB compressed / 32MB gunzipped).
+const CHUNK_TARGET_BYTES = 4 * 1024 * 1024; // raw JSON per request — gzips far under the limit
+const LINE_HARD_CAP = 2 * 1024 * 1024;      // a single line never exceeds this
+
+/** Last-resort shrink for pathological lines: cut the longest string leaves
+ *  (middle of the string kept out, head kept) until the re-encoded line fits.
+ *  Never drops the line — the 1:1 line-index invariant holds. */
+function shrinkToFit(text) {
+	if (text.length <= LINE_HARD_CAP) return text;
+	let obj;
+	try {
+		obj = JSON.parse(text);
+	} catch {
+		return `${text.slice(0, LINE_HARD_CAP)}…[ruyi-sync hard-truncated]`;
+	}
+	const leaves = []; // [parent, key, length]
+	(function walk(v, parent, key) {
+		if (typeof v === "string") {
+			if (v.length > 4096) leaves.push([parent, key, v.length]);
+			return;
+		}
+		if (Array.isArray(v)) v.forEach((x, i) => walk(x, v, i));
+		else if (v && typeof v === "object") for (const k of Object.keys(v)) walk(v[k], v, k);
+	})(obj, null, null);
+	leaves.sort((a, b) => b[2] - a[2]);
+	let out = text;
+	for (const [parent, key, len] of leaves) {
+		if (out.length <= LINE_HARD_CAP) break;
+		const excess = out.length - LINE_HARD_CAP + 2000;
+		const keep = Math.max(500, len - excess);
+		parent[key] = `${parent[key].slice(0, keep)}\n…[ruyi-sync truncated ${len - keep} chars: line exceeded the request limit]`;
+		out = JSON.stringify(obj);
+	}
+	return out;
+}
+
+/** Slim one raw line and enforce the per-line hard cap. */
+function slimLineString(ln, agent) {
+	let obj;
+	try {
+		obj = JSON.parse(ln);
+	} catch {
+		return ln; // unparseable lines pass through verbatim (rare; server keeps them)
+	}
+	return shrinkToFit(JSON.stringify(slimLine(obj, agent)));
+}
+const SYNC_VERSION = "2.2.0";
 
 /** Best-effort weekly self-update from the server (which serves the latest
  *  client files from its own checkout). Never breaks a sync run over an update. */
@@ -274,15 +321,14 @@ async function syncFile(rel, agent) {
 	if (sent === lines.length) return { rel, skipped: true };
 
 	while (sent < lines.length) {
-		const batch = lines.slice(sent, sent + CHUNK_LINES).map((ln) => {
-			let obj;
-			try {
-				obj = JSON.parse(ln);
-			} catch {
-				return ln; // unparseable lines pass through verbatim (rare; server keeps them)
-			}
-			return JSON.stringify(slimLine(obj, agent));
-		});
+		const batch = [];
+		let bytes = 2; // "[]"
+		while (sent + batch.length < lines.length) {
+			const slim = slimLineString(lines[sent + batch.length], agent);
+			if (batch.length > 0 && bytes + slim.length + 1 > CHUNK_TARGET_BYTES) break;
+			batch.push(slim);
+			bytes += slim.length + 1;
+		}
 		const r = await api("/sync/session", {
 			machine: MACHINE, agent, sessionKey: key, sessionUid: uid, fromLine: sent, lines: batch,
 		});
