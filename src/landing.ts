@@ -70,9 +70,10 @@ Then:
        schedule instead)
     3. First full sync:                  node sync-sessions.mjs
     4. Anytime dry-run (uploads nothing): node sync-sessions.mjs --status
-  All steps are idempotent — re-downloading the file is how you update; running
-  the script again only sends what is new. Formats: claude-code / pi / codex
-  (auto-detected; unknown formats stop with a clear message, nothing uploaded).
+  All steps are idempotent — running the script again only sends what is new.
+  The script self-updates weekly from the server (no GitHub round-trips).
+  Formats: claude-code / pi / codex (auto-detected; unknown formats stop with
+  a clear message, nothing uploaded).
 
 Humans: health check at GET /health — source & docs: https://github.com/xiaqii/ruyi
 `;

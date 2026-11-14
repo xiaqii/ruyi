@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { gunzipSync } from "node:zlib";
+import { readFileSync } from "node:fs";
 import { loadConfig } from "./config.ts";
 import {
 	archiveMemory,
@@ -94,6 +95,26 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 
 			if (req.method === "GET" && path === "/health") {
 				return send(res, 200, { ok: true, ...memoryCounts(db) });
+			}
+
+			// Latest client scripts, served from this checkout (always current
+			// after the server itself updates). Clients self-update from here.
+			if (req.method === "GET" && path.startsWith("/clients/")) {
+				const name = path.slice("/clients/".length);
+				const files: Record<string, string> = {
+					"sync-sessions.mjs": "examples/sync-sessions.mjs",
+					"mcp-remote.mjs": "examples/mcp-remote.mjs",
+				};
+				const rel = files[name];
+				if (!rel) return send(res, 404, { error: "unknown client file" });
+				try {
+					const file = new URL(`../${rel}`, import.meta.url);
+					res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+					res.end(readFileSync(file, "utf8"));
+				} catch {
+					return send(res, 500, { error: "client file unavailable on this install" });
+				}
+				return;
 			}
 
 			if (!isLocal(req)) {
