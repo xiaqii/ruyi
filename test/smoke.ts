@@ -27,7 +27,8 @@ import {
 	supersedeMemory,
 	tombstoneDigest,
 	upsertProfile,
-, SCHEMA_VERSION} from "../src/db.ts";
+	SCHEMA_VERSION,
+} from "../src/db.ts";
 import { stripInjectedEnvelope } from "../src/preprocess.ts";
 import { runDecay } from "../src/decay.ts";
 import { loadConfig } from "../src/config.ts";
