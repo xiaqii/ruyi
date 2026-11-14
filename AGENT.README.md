@@ -232,49 +232,67 @@ the `ruyi_` prefix automatically).
 
 ### You are on a machine without ruyi (remote access)
 
-When ruyi runs on another machine/cloud host, use the **remote bridge**: `examples/mcp-remote.mjs` is a
-self-contained stdio→HTTP bridge (single file, no repo clone needed) exposing the six tools against the
-remote service.
+When ruyi runs on another machine/cloud host, connect via the **remote bridge** (single file) plus the
+**sync script** (single file). Everything below is **idempotent — safe whether this machine has never
+seen ruyi or already has parts installed**: detect what exists, install what is missing, re-downloading
+a file is how you update it. Work through this checklist in order; ask the user for the service URL and
+token up front if you do not have them (never invent them).
 
-**Full Windows + Claude Code flow** (other platforms/clients analogous):
+**Setup checklist (Claude Code shown; opencode/pi variants at the end):**
 
 ```powershell
-# 1. Download the bridge script (the jsDelivr mirror is steadier in some regions;
-#    otherwise use raw.githubusercontent.com)
+# 0. Ask the user for RUYI_URL and RUYI_TOKEN if not provided. Never guess.
+
+# 1. Bridge (query tools). If C:\tools\mcp-remote.mjs exists, re-download anyway (= update).
 curl -o C:\tools\mcp-remote.mjs https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/examples/mcp-remote.mjs
 
-# 2. Register MCP (with the URL and token the user gave you)
-claude mcp add ruyi -e RUYI_URL=https://<your-ruyi-host> -e RUYI_TOKEN=<token> -- node C:\tools\mcp-remote.mjs
+# 2. MCP registration. Check first: `claude mcp list` — if "ruyi" is already there, skip
+#    (or re-run to refresh env). Otherwise:
+claude mcp add ruyi -e RUYI_URL=<url> -e RUYI_TOKEN=<token> -- node C:\tools\mcp-remote.mjs
 
-# 3. Verify (mandatory)
-claude mcp list        # ruyi should appear
-```
+# 3. Verify the bridge (mandatory): open a fresh conversation, call the recall tool
+#    with "coding style". Content coming back = connected.
 
-Then open a fresh conversation and try: "use ruyi's recall to check what I've said before about coding
-conventions". Content coming back = connected.
-
-Optional — automatic injection (recommended): also download `examples/claude-code/session-start.mjs` and
-`examples/claude-code/user-prompt-submit.mjs` (per-turn semantic injection), register them as
-SessionStart / UserPromptSubmit hooks in `~/.claude/settings.json` (ready-made snippets in each script's
-header), and pass them the environment via settings.json's top-level
-`"env": {"RUYI_URL": "...", "RUYI_TOKEN": "..."}`.
-
-**Data sync (how old sessions become memories)**: MCP only queries and writes immediately; to get old
-sessions distilled by the nightly dream, use the sync script `examples/sync-sessions.mjs` (self-contained
-single file, download and run) — offset-incremental push, transfers only new bytes, progress display,
-auto-resume after interruption:
-
-```powershell
+# 4. Session sync (how conversations become memories). Re-download = update.
 curl -o C:\tools\sync-sessions.mjs https://cdn.jsdelivr.net/gh/xiaqii/ruyi@main/examples/sync-sessions.mjs
-# Full first sync (scans ~/.claude/projects, shows progress)
-node C:\tools\sync-sessions.mjs        # set RUYI_URL / RUYI_TOKEN env vars first
-# Afterwards hook it to SessionEnd or a scheduled task; each run sends only increments
+
+# 5. Dry-run inventory (uploads nothing; shows format detection + what would sync):
+node C:\tools\sync-sessions.mjs --status
+
+# 6. Automate forever (one time; writes ~/.ruyi-sync.config.json with the env you
+#    currently have set, and registers a SessionEnd hook — every finished
+#    conversation then syncs itself):
+$env:RUYI_URL='<url>'; $env:RUYI_TOKEN='<token>'; node C:\tools\sync-sessions.mjs --install-hook
+
+# 7. First full sync of history (slims locally first — typically ~0.3% of raw size):
+node C:\tools\sync-sessions.mjs
 ```
 
-Sync is byte-level incremental with server-side offset verification: the same byte is never transferred
-twice; after landing, the dream pipeline resumes from byte offsets, and the memory layer dedups via LLM
-merge adjudication (duplicates become reinforcement, not new entries). `--status` reconciles local vs
-server byte counts anytime.
+After step 7 the machine is done: conversations slim-and-push themselves at SessionEnd (increments
+only), and the nightly dream distills them. A daily scheduled task is a fine backstop (the
+`--install-hook` output prints a ready `schtasks` line).
+
+Variants:
+- **opencode**: bridge step 2 registers in `~/.config/opencode/opencode.jsonc` instead:
+  `"mcp": { "ruyi": { "type": "local", "command": ["node", "<bridge-path>"],
+  "environment": { "RUYI_URL": "<url>", "RUYI_TOKEN": "<token>" } } }`.
+  No SessionEnd hook support — automate sync with a cron/Task-Scheduler entry instead (step 6 →
+  scheduled daily/hourly run of `node sync-sessions.mjs`).
+- **pi on another host**: instead of the bridge, install the extension
+  `examples/pi-extension/ruyi.ts` into `~/.pi/agent/extensions/`, set `RUYI_URL`/`RUYI_TOKEN` in the
+  pi environment, restart pi. Sync (steps 4–7) is identical, with `--agent pi --dir ~/.pi/agent/sessions`.
+
+Notes:
+- Optional per-turn injection for Claude Code (recommended): also download
+  `examples/claude-code/session-start.mjs` and `examples/claude-code/user-prompt-submit.mjs`,
+  register them as SessionStart / UserPromptSubmit hooks in `~/.claude/settings.json` (ready-made
+  snippets in each script's header), and pass them the environment via settings.json's top-level
+  `"env": {"RUYI_URL": "...", "RUYI_TOKEN": "..."}`.
+- Sync dedup is three-layered (line index / session uid / memory merge): re-importing or re-syncing
+  the same conversation never double-distills it. A session first imported manually (e.g. zip) and
+  later synced carries its distillation offset over automatically.
+- If the sync script says it cannot recognize the log format, it uploaded nothing — do not force it;
+  report the format to the user.
 
 ### You are Hermes / another MCP client (ruyi installed locally)
 
