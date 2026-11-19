@@ -76,6 +76,20 @@ Then:
   Formats: claude-code / pi / codex (auto-detected; unknown formats stop with
   a clear message, nothing uploaded).
 
+## 4. Uninstall (the knowledge lives here, not in any file you might delete)
+
+Tell your agent: "uninstall ruyi from this machine" and point it here. Or manually:
+  1. node sync-sessions.mjs --uninstall-hook   (removes ALL hooks — SessionEnd
+     sync AND SessionStart/UserPromptSubmit injection — settings.json env keys,
+     ~/.claude/ruyi-hooks/, and the CLAUDE.md memory-rules block)
+     If you already deleted sync-sessions.mjs, re-download it just for this.
+  2. claude mcp remove ruyi                    (removes the query bridge registration)
+  3. delete mcp-remote.mjs and sync-sessions.mjs
+Order matters: the uninstaller lives IN the sync script — run it BEFORE deleting files.
+Note: hooks alone (injection + sync) work WITHOUT the MCP bridge — a valid
+minimal-footprint mode if tool conflicts ever make you drop the bridge.
+Server-side memories already learned are untouched by any client uninstall.
+
 Humans: health check at GET /health — source & docs: https://github.com/xiaqii/ruyi
 `;
 

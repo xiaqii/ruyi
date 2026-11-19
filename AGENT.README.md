@@ -296,6 +296,18 @@ Notes:
 - If the sync script says it cannot recognize the log format, it uploaded nothing — do not force it;
   report the format to the user.
 
+**Uninstalling the remote client** (do ALL of it — the pieces are registered in different places):
+1. `node sync-sessions.mjs --install-hook`'s counterpart: `--uninstall-hook` — removes the SessionEnd
+   sync hook, the SessionStart/UserPromptSubmit injection hooks, the settings.json env keys,
+   `~/.claude/ruyi-hooks/`, and the managed block in `~/.claude/CLAUDE.md`. If the script was already
+   deleted, re-download it solely to run this — deleting the file first is the classic half-uninstall
+   (MCP gone, hooks still firing, SessionEnd pointing at a missing path and erroring on every exit).
+2. `claude mcp remove ruyi` (or the opencode.jsonc entry) for the query bridge.
+3. Delete `mcp-remote.mjs` / `sync-sessions.mjs`.
+4. Verify: `grep -i ruyi ~/.claude/settings.json ~/.claude/CLAUDE.md` finds nothing.
+Partial mode that IS supported: hooks without MCP (injection + sync keep working; the model just
+loses on-demand probe/recall/remember). MCP without hooks also works (query-only, no auto-injection).
+
 ### You are Hermes / another MCP client (ruyi installed locally)
 
 Register `node <absolute repo path>/src/cli.ts mcp` as a stdio MCP server (check your client's MCP docs
