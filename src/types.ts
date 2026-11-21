@@ -150,6 +150,8 @@ export interface Config {
 	};
 	recall: {
 		defaultScope: "smart" | "cwd" | "all";
+		/** probe routing: two-level portrait hierarchy (default) or whole-store flat */
+		probeStrategy?: "hierarchical" | "flat";
 	};
 }
 

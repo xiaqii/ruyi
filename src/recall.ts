@@ -422,30 +422,180 @@ async function pick(
 // ledger. Designed to be called liberally: cheap, and the agent filters the
 // hints itself, so over-hinting is harmless while a missed hit is the real loss.
 // ---------------------------------------------------------------------------
+type ProbeResult = { hints: Array<{ id: number; kind: string; line: string }>; profiles: Array<{ id: number; title: string }> };
+
+function probeResult(
+	db: ReturnType<typeof getDb>,
+	pool: MemoryRow[],
+	picked: { ids: number[]; profileIds: number[] },
+): ProbeResult {
+	const byId = new Map(pool.map((m) => [m.id, m]));
+	const hints = picked.ids
+		.map((id) => byId.get(id))
+		.filter((m): m is MemoryRow => !!m)
+		.map((m) => ({ id: m.id, kind: m.kind, line: clip(m.summary, 100) }));
+	const profiles = picked.profileIds
+		.map((id) => getProfile(db, id))
+		.filter((p): p is NonNullable<typeof p> => !!p)
+		.map((p) => ({ id: p.id, title: p.title }));
+	return { hints, profiles };
+}
+
+/** Flat whole-store selector, kept as the fallback and the A/B baseline.
+ *  IMPORTANT: no 400-id head cut — that silently hid the newest memories once
+ *  the store grew past the cap (stable id order made it systematically the new
+ *  ones, not random ones). */
+export async function probeFlat(
+	question: string,
+	owner: string,
+	cwd: string | null = null,
+	scope?: RecallScope,
+): Promise<ProbeResult> {
+	const startedAt = Date.now();
+	const config = loadConfig();
+	const db = getDb(config.dbPath);
+	const pool = gatherChannels(db, owner, scope ?? config.recall.defaultScope, cwd).rows;
+	if (pool.length === 0) return { hints: [], profiles: [] };
+	const picked = await pick(db, question, pool, 8, owner, undefined, 5, "probe-pick");
+	const result = probeResult(db, pool, picked);
+	logRecall(db, { owner, query: question, mode: "probe", hits: result.hints.length, latencyMs: Date.now() - startedAt, detail: { pool: pool.length, strategy: "flat" } });
+	return result;
+}
+
+/** Two-step associative retrieval, modeled after how a person searches memory:
+ *  a thin self-index ("what do I roughly know") routes to specialist shelves;
+ *  only those shelves' chapter cards + memory pointers are then compared.
+ *
+ *  The hierarchy is NAVIGATION, NEVER A GATE: direct FTS hits and every
+ *  not-yet-woven memory join the second step even when the root router missed
+ *  their shelf. A wrong root therefore costs tokens, not recall.
+ *
+ *  L0 root portraits → L1 specialist cards/pointers → (caller fetches L2 full
+ *  content via recall/get). Raw sessions are L3, excavate-only. Two cheap LLM
+ *  calls at most; the content fetch itself is SQL. */
+export async function probeHierarchical(
+	question: string,
+	owner: string,
+	cwd: string | null = null,
+	scope?: RecallScope,
+): Promise<ProbeResult> {
+	const startedAt = Date.now();
+	const config = loadConfig();
+	const db = getDb(config.dbPath);
+	const effectiveScope = scope ?? config.recall.defaultScope;
+	const pool = gatherChannels(db, owner, effectiveScope, cwd).rows;
+	const allProfiles = listProfiles(db, owner);
+	if (pool.length === 0) return { hints: [], profiles: [] };
+	if (allProfiles.length === 0) return probeFlat(question, owner, cwd, effectiveScope);
+
+	const byProfile = new Map(allProfiles.map((p) => [p.id, p]));
+	const roots = allProfiles.filter((p) => !p.parent_id || !byProfile.has(p.parent_id));
+	if (roots.length === 0) return probeFlat(question, owner, cwd, effectiveScope);
+
+	// L0: the total portrait is just the root cards — thin but complete.
+	const rootListing = roots
+		.map((p) => `[id ${p.id}] ${p.title} — ${p.abstract || clip(p.content.replace(/\s+/g, " "), 80)}`)
+		.join("\n");
+	const route = await completeJson<{ root_ids?: unknown; search_terms?: unknown }>({
+		system: loadPrompt("probe-root"),
+		user: `SELF INDEX (root portraits):\n${rootListing}\n\nQUESTION:\n${question}\n\nPick up to 2 root ids.`,
+		step: "probe-pick",
+	});
+	const rootIds = (Array.isArray(route.root_ids) ? route.root_ids : [])
+		.map(Number)
+		.filter((id) => roots.some((p) => p.id === id))
+		.slice(0, 2);
+
+	// Selected roots + all their descendants form the specialist shelves.
+	const shelfProfiles = new Map<number, ProfileRow>();
+	const addTree = (id: number) => {
+		if (shelfProfiles.has(id)) return;
+		const p = byProfile.get(id);
+		if (!p) return;
+		shelfProfiles.set(id, p);
+		for (const child of allProfiles.filter((x) => x.parent_id === id)) addTree(child.id);
+	};
+	for (const id of rootIds) addTree(id);
+
+	const poolById = new Map(pool.map((m) => [m.id, m]));
+	const candidateMemories = new Map<number, MemoryRow>();
+	for (const p of shelfProfiles.values()) {
+		let ids: number[] = [];
+		try { ids = JSON.parse(p.memory_ids || "[]") as number[]; } catch { /* tolerate a bad old card */ }
+		for (const id of ids) {
+			const m = poolById.get(id);
+			if (m) candidateMemories.set(id, m);
+		}
+	}
+
+	// Direct-association bypass: model-suggested search terms → FTS/LIKE over
+	// the ENTIRE store, then scope-filtered. This catches mis-filed memories.
+	const terms = (Array.isArray(route.search_terms) ? route.search_terms : [])
+		.filter((x): x is string => typeof x === "string")
+		.map((x) => x.trim())
+		.filter(Boolean)
+		.slice(0, 6);
+	for (const hit of ftsSearchScored(db, [...terms, question].join(" "), 30, owner)) {
+		const m = poolById.get(hit.row.id);
+		if (m) candidateMemories.set(m.id, m);
+	}
+
+	// Recency/unwoven bypass: memories not yet referenced by any active profile
+	// are all visible (20 at the time of implementation). Nightly weaving must
+	// never be a prerequisite for being findable.
+	const woven = new Set<number>();
+	for (const p of allProfiles) {
+		try { for (const id of JSON.parse(p.memory_ids || "[]") as number[]) woven.add(id); } catch { /* ignore */ }
+	}
+	for (const m of pool) if (!woven.has(m.id)) candidateMemories.set(m.id, m);
+
+	const candidates = [...candidateMemories.values()].sort((a, b) => a.id - b.id);
+	const shelfList = [...shelfProfiles.values()];
+	// If the root router found nothing, direct/unwoven candidates still get a
+	// fair judgement; an empty candidate set is the only legitimate early exit.
+	if (candidates.length === 0 && shelfList.length === 0) {
+		logRecall(db, { owner, query: question, mode: "probe", hits: 0, latencyMs: Date.now() - startedAt, detail: { strategy: "hierarchical", rootIds, candidates: 0 } });
+		return { hints: [], profiles: [] };
+	}
+
+	const memoryListing = candidates.map((m) => `[id ${m.id}] (${m.kind}) ${clip(m.summary, 120)}`).join("\n");
+	const profileListing = shelfList
+		.map((p) => {
+			const parent = p.parent_id ? byProfile.get(p.parent_id) : undefined;
+			return `[id ${p.id}] ${parent ? `${parent.title} / ` : ""}${p.title} — ${p.abstract || clip(p.content.replace(/\s+/g, " "), 80)}`;
+		})
+		.join("\n");
+	const leaf = await completeJson<{ ids?: unknown; profile_ids?: unknown }>({
+		system: loadPrompt("probe-leaf"),
+		user: `SPECIALIST PORTRAITS:\n${profileListing || "(none)"}\n\nMEMORY POINTERS (including direct-search and unwoven bypass candidates):\n${memoryListing || "(none)"}\n\nQUESTION:\n${question}\n\nPick at most 8 memory ids and up to 5 profile ids.`,
+		step: "probe-pick",
+	});
+	const coerce = (arr: unknown) => (Array.isArray(arr) ? arr : []).map(Number).filter(Number.isInteger);
+	const ids = [...new Set(coerce(leaf.ids).filter((id) => candidateMemories.has(id)))].slice(0, 8);
+	const profileIds = [...new Set(coerce(leaf.profile_ids).filter((id) => shelfProfiles.has(id)))].slice(0, 5);
+	const result = probeResult(db, candidates, { ids, profileIds });
+	logRecall(db, {
+		owner, query: question, mode: "probe", hits: result.hints.length, latencyMs: Date.now() - startedAt,
+		detail: { strategy: "hierarchical", rootIds, shelves: shelfList.length, candidates: candidates.length, unwoven: pool.filter((m) => !woven.has(m.id)).length },
+	});
+	return result;
+}
+
 export async function probe(
 	question: string,
 	owner: string,
 	cwd: string | null = null,
 	scope?: RecallScope,
-): Promise<{ hints: Array<{ id: number; kind: string; line: string }>; profiles: Array<{ id: number; title: string }> }> {
-	const startedAt = Date.now();
+): Promise<ProbeResult> {
 	const config = loadConfig();
-	const db = getDb(config.dbPath);
-	const effectiveScope = scope ?? config.recall.defaultScope;
-	const pool = gatherChannels(db, owner, effectiveScope, cwd).rows.slice(0, Math.min(config.inject.recallCandidateMax, 400));
-	if (pool.length === 0) return { hints: [], profiles: [] };
-	const picked = await pick(db, question, pool, 8, owner, undefined, 5, "probe-pick");
-	const byId = new Map(pool.map((m) => [m.id, m]));
-	const hints = picked.ids
-		.map((id) => byId.get(id))
-		.filter((m): m is MemoryRow => !!m)
-		.map((m) => ({ id: m.id, kind: m.kind, line: m.mini || clip(m.summary, 60) }));
-	const profiles = picked.profileIds
-		.map((id) => getProfile(db, id))
-		.filter((p): p is NonNullable<typeof p> => !!p)
-		.map((p) => ({ id: p.id, title: p.title }));
-	logRecall(db, { owner, query: question, mode: "probe", hits: hints.length, latencyMs: Date.now() - startedAt, detail: { pool: pool.length } });
-	return { hints, profiles };
+	if (config.recall.probeStrategy === "flat") return probeFlat(question, owner, cwd, scope);
+	try {
+		return await probeHierarchical(question, owner, cwd, scope);
+	} catch {
+		// A routing failure must never make memory unavailable: degrade to the
+		// flat selector (which itself has the usual FTS degradation paths).
+		return probeFlat(question, owner, cwd, scope);
+	}
 }
 
 // ---------------------------------------------------------------------------

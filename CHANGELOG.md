@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.10.0] - 2026-11-22
+
+**Hierarchical probe (P1): less token, better coverage.** L0 root-portrait self-index routes to ≤2 specialist shelves; L1 compares only their chapter cards and memory summaries; the caller fetches L2 content by id (SQL). Raw sessions remain L3/excavate-only. Direct FTS hits from model-suggested terms plus EVERY unwoven memory bypass the hierarchy, so routing is navigation not a gate. Flat whole-store mode remains as fallback and `recall.probeStrategy:"flat"`. Also fixes two retrieval bugs exposed by real A/B: flat probe's stable-id 400-head cut systematically hid the newest 110 memories, and lossy `mini` lines made #1508 invisible to both selectors (its mini had dropped "小红书/prompt"). Two 12-question real benches: 7/7 key targets hit vs 6/7 flat, generic HTTP correctly empty, average input 18,563 → 6,147 tokens (-67%); two light calls add ~1s median latency. Production model slots remain kimi-for-coding thinking-off + k3.1-pro dream.
 ## [1.9.3] - 2026-11-21
 
 - Kimi coding endpoint thinking-off mapping: send `thinking:{type:"disabled"}` on OpenAI chat completions (the DashScope-style `enable_thinking:false` was accepted but silently ignored — reasoning_tokens still returned). Production model slots moved to kimi-for-coding thinking-off for recall/probe and k3.1-pro thinking-on for dream; live smoke: 0.9–1.2s selection calls, 2.1s dream call, probe finds the car fact (#18) correctly.

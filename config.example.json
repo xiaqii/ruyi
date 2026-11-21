@@ -55,7 +55,8 @@
     "profileMax": 3
   },
   "recall": {
-    "defaultScope": "smart"
+    "defaultScope": "smart",
+    "probeStrategy": "hierarchical"
   },
   "decay": {
     "inferredArchiveDays": 90,
