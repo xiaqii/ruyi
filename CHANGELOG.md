@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.9.3] - 2026-11-21
+
+- Kimi coding endpoint thinking-off mapping: send `thinking:{type:"disabled"}` on OpenAI chat completions (the DashScope-style `enable_thinking:false` was accepted but silently ignored — reasoning_tokens still returned). Production model slots moved to kimi-for-coding thinking-off for recall/probe and k3.1-pro thinking-on for dream; live smoke: 0.9–1.2s selection calls, 2.1s dream call, probe finds the car fact (#18) correctly.
 ## [1.9.2] - 2026-11-14
 
 - dashboard attribution chain: x-ruyi-client header → User-Agent (node/curl identify themselves, like Kimi sees its callers) → source IP. mcp-remote.mjs gains weekly self-update from /clients (takes effect next MCP session); sync's weekly refresh now also updates already-installed CC injection hooks, so older installs converge onto the current versions without a reinstall

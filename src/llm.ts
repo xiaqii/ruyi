@@ -161,9 +161,15 @@ function buildBody(llm: ResolvedLlm, opts: CompleteOptions, fixes: Set<string>):
 		// judgement that should not flip between identical calls.
 		const temp = opts.temperature ?? llm.temperature ?? (PROBE_STEPS.has(opts.step) ? 0 : RECALL_STEPS.has(opts.step) ? 0.2 : undefined);
 		if (!fixes.has("temperature") && temp !== undefined) body.temperature = temp;
-		// DashScope-style switch for thinking-capable OpenAI-compatible models
-		// (qwen3.x): dropped on 400 via the "thinking" downgrade fix.
-		if (llm.thinking === "off" && !fixes.has("thinking")) body.enable_thinking = false;
+		// Thinking-off is provider-specific. DashScope/qwen uses
+		// enable_thinking:false; Kimi's coding endpoint accepts that parameter but
+		// silently IGNORES it (verified: reasoning_tokens still returned). Its real
+		// switch is the Anthropic-shaped thinking object even on /v1/chat/completions;
+		// with thinking disabled it also requires temperature=0.6 (tier config).
+		if (llm.thinking === "off" && !fixes.has("thinking")) {
+			if (llm.baseUrl.includes("api.kimi.com/coding")) body.thinking = { type: "disabled" };
+			else body.enable_thinking = false;
+		}
 		// SSE streaming keeps long calls alive on gateways that silently drop
 		// long-running non-streaming requests (token-plan: >~2min = fetch failed).
 		if (llm.stream) {

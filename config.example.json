@@ -26,7 +26,8 @@
       "ruyi works best with TWO models: a cheap thinking-OFF model for per-turn selection (llm.steps.recall), and your strong model for nightly distillation (base llm).",
       "Single-model setups work but every user turn pays thinking-model latency/cost — doctor will WARN.",
       "Cheap-and-good recall options: qwen3.7-flash (new DashScope accounts get 1M free tokens), deepseek-chat, claude-haiku-4-5. Remember thinking:'off'.",
-      "OpenAI-compatible endpoints (DashScope/qwen): thinking:'off' is sent as enable_thinking:false automatically."
+      "OpenAI-compatible endpoints (DashScope/qwen): thinking:'off' is sent as enable_thinking:false automatically.",
+      "Kimi coding endpoint (api.kimi.com/coding): thinking:'off' is sent as thinking:{type:'disabled'}; use temperature:0.6 (enable_thinking:false is accepted but ignored). Verified with kimi-for-coding; k3.1-pro is available for the dream tier."
     ]
   },
   "_llm_notes": {
