@@ -37,6 +37,7 @@ Two integration surfaces with equivalent capability:
 |---|---|---|
 | GET `/health` | liveness + memory counts by status (no auth) | none |
 | GET `/inject` | opening bundle: profile directory tree | none |
+| POST `/probe` | pointer-only relevance check (`hints` + `profiles`), no content | hierarchical: two light calls; flat: one |
 | POST `/recall` | semantic recall of memories & profile chapters | fast: none / deep, excavate: yes |
 | GET `/memories` | list memories (one-line summaries) | none |
 | POST `/memories` | explicitly write one memory (via LLM merge adjudication) | yes |
@@ -85,6 +86,16 @@ Since v1.4 the directory tree primarily serves as **server-side selection materi
 the listing to pick chapters); thin clients need not render it into context at all — the pi philosophy is
 zero-resident context, with discovery and selection entirely server-side. Clients that want a directory
 (e.g. a one-shot session-start Claude hook) may still fetch it themselves.
+
+### POST /probe — cheap pointer-only relevance check
+
+`{ "question": "...", "cwd": "/optional/project" }` → `{ "hints": [{"id", "kind", "line"}], "profiles": [{"id", "title"}] }`.
+No memory/profile content is returned; fetch selected content via `/recall` or the by-id routes.
+
+Default routing is hierarchical: a thin root-portrait index selects up to two specialist shelves, then a
+second light model call compares only their chapter cards and memory summaries. Direct FTS hits and every
+not-yet-woven memory bypass the hierarchy, so a root-routing miss cannot hide a memory. Set
+`recall.probeStrategy: "flat"` for the legacy whole-store selector; flat remains the automatic fallback.
 
 ### POST /recall — semantic recall
 

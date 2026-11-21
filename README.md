@@ -51,7 +51,7 @@ Tell your agent both keys when installing; `ruyi doctor` verifies live and warns
 
 ## How it works (3 moving parts)
 
-1. **Daytime — select.** A cheap fast model reads your whole store as a one-line-per-item listing plus your current topic, and points at what matters. At human scale the whole store fits in one glance — no keyword gatekeeping, nothing gets shut out.
+1. **Daytime — select.** A thin index of root portraits routes the question to one or two specialist shelves; a cheap thinking-off model then compares only those chapter cards and memory pointers. Direct full-text hits and not-yet-woven memories bypass the hierarchy, so a routing miss can never hide a memory. The final content fetch is SQL, not another LLM call.
 2. **Night — distill.** A stronger model re-reads the day's session logs: extracts lessons, merges duplicates, archives the stale. Duplicates become reinforcement, not clutter.
 3. **Weekly — write the book.** Everything worth keeping gets distilled into profile chapters: your identity card, your working style, your health, your craft domains. Memories are raw material; **profiles are the product**.
 
