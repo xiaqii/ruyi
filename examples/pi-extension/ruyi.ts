@@ -61,7 +61,9 @@ async function api<T>(op: Op, path: string, init?: RequestInit, timeoutMs?: numb
 }
 
 const RecallParams = Type.Object({
-	query: Type.String({ description: "What you are working on or looking for in long-term memory" }),
+	query: Type.String({ description: "What you are looking for (also describe the purpose when fetching probe ids)" }),
+	ids: Type.Optional(Type.Array(Type.Number(), { description: "Memory ids from probe — direct SQL fetch, zero LLM" })),
+	profile_ids: Type.Optional(Type.Array(Type.Number(), { description: "Profile ids from probe — direct SQL fetch, zero LLM" })),
 	k: Type.Optional(Type.Number({ description: "Max memories to return (default 5)" })),
 	mode: Type.Optional(
 		Type.Union([Type.Literal("fast"), Type.Literal("deep"), Type.Literal("excavate")], {
@@ -295,7 +297,7 @@ export default function (pi: ExtensionAPI) {
 		name: "ruyi_probe",
 		label: "ruyi probe",
 		description:
-			"Cheap relevance probe of the user's long-term memory. Call it AS OFTEN AS POSSIBLE and ALWAYS FIRST: whenever the user's past, preferences, projects, devices or environment might matter, probe before answering from guesswork, and always probe before any full recall. Returns only one-line pointers (#id + title) and injects nothing. No relevant pointers → answer directly, no recall. Relevant pointers → fetch them with recall.",
+			"Cheap relevance probe of the user's long-term memory. Call it AS OFTEN AS POSSIBLE and ALWAYS FIRST: whenever the user's past, preferences, projects, devices or environment might matter, probe before answering from guesswork, and always probe before any full recall. Returns only one-line pointers (#id + title) and injects nothing. No relevant pointers → answer directly, no recall. Relevant pointers → fetch them with recall, passing ids/profile_ids (zero-LLM direct fetch).",
 		parameters: ProbeParams,
 		async execute(_toolCallId, params) {
 			const r = await api<{ hints?: Array<{ id: number; kind: string; line: string }>; profiles?: Array<{ id: number; title: string }>; serverTime?: string; error?: string }>(
@@ -308,7 +310,7 @@ export default function (pi: ExtensionAPI) {
 			];
 			if (r.error) lines.unshift(`(probe degraded: ${r.error})`);
 			const text = lines.length
-				? `Relevant pointers (fetch full entries with ruyi_recall if needed):\n${lines.join("\n")}`
+				? `Relevant pointers (fetch with ruyi_recall ids/profile_ids — zero LLM):\n${lines.join("\n")}`
 				: `No relevant memories found — safe to proceed without memory context.${r.serverTime ? `\n(顺带校准时间感: 这次提问发生于 ${r.serverTime} —— 这是提问时间,不是任何记忆的时间)` : ""}`;
 			return { content: [{ type: "text", text }], details: { hints: lines.length, degraded: !!r.error } };
 		},
@@ -336,7 +338,7 @@ export default function (pi: ExtensionAPI) {
 		name: "ruyi_recall",
 		label: "Memory Recall",
 		description:
-			"Fetch FULL memory entries. Relevant memories are auto-injected every turn and a store map rides each injection — never re-fetch what was injected. Typical flow: ruyi_probe first (cheap), then recall only the pointers that matter. Also use when the user references earlier context (\"continue\", \"last time\"). Skip for self-contained questions. mode: fast = keyword scan, deep = semantic (default), excavate = include archived; scope=\"all\" searches every directory. One deep call usually settles it.",
+			"Fetch FULL memory entries. Relevant memories are auto-injected every turn and a store map rides each injection — never re-fetch what was injected. Typical flow: ruyi_probe first (cheap), then pass its ids/profile_ids to recall for a zero-LLM content fetch; omit ids only for a fresh semantic search. Also use when the user references earlier context (\"continue\", \"last time\"). Skip for self-contained questions. mode: fast = keyword scan, deep = semantic (default), excavate = include archived; scope=\"all\" searches every directory. One deep call usually settles it.",
 		parameters: RecallParams,
 
 		async execute(_id, params, _signal, _onUpdate, _ctx) {
@@ -345,6 +347,8 @@ export default function (pi: ExtensionAPI) {
 				headers: { "content-type": "application/json" },
 				body: JSON.stringify({
 					query: params.query,
+					ids: params.ids,
+					profile_ids: params.profile_ids,
 					k: params.k,
 					owner: OWNER,
 					cwd: _ctx.cwd,

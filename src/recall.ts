@@ -558,7 +558,17 @@ export async function probeHierarchical(
 		return { hints: [], profiles: [] };
 	}
 
-	const memoryListing = candidates.map((m) => `[id ${m.id}] (${m.kind}) ${clip(m.summary, 120)}`).join("\n");
+	const memoryListing = candidates.map((m) => {
+		// Evidence for compare-and-choose, not an opaque salience number. The
+		// selector can now prefer a fresh user correction over an old inference.
+		const meta = [
+			m.origin === "user_stated" ? "USER-STATED" : "inferred",
+			`evidence×${m.evidence}`,
+			`confidence ${m.confidence.toFixed(2)}`,
+			`updated ${m.updated_at.slice(0, 10)}`,
+		].join(", ");
+		return `[id ${m.id}] (${m.kind}; ${meta}) ${clip(m.summary, 120)}`;
+	}).join("\n");
 	const profileListing = shelfList
 		.map((p) => {
 			const parent = p.parent_id ? byProfile.get(p.parent_id) : undefined;
@@ -609,7 +619,7 @@ export async function recall(
 	cwd: string | null = null,
 	scope?: RecallScope,
 	mode: RecallMode = "deep",
-	opts?: { conversation?: string; auto?: boolean },
+	opts?: { conversation?: string; auto?: boolean; ids?: number[]; profileIds?: number[] },
 ): Promise<RecallResult> {
 	const startedAt = Date.now();
 	const config = loadConfig();
@@ -630,6 +640,20 @@ export async function recall(
 		logReply(db, turn.topicId, turn.replyId, query, items);
 		void refreshSummaryFallback(db, turn.topicId, turn.replyId);
 	};
+
+	// L2 evidence fetch after probe: ids came from the pointer layer, so this is
+	// pure SQL — never pay for a second whole-store semantic selection.
+	if (opts?.ids !== undefined || opts?.profileIds !== undefined) {
+		const ids = [...new Set((opts.ids ?? []).filter(Number.isInteger))].slice(0, limit);
+		const profileIds = [...new Set((opts.profileIds ?? []).filter(Number.isInteger))].slice(0, 5);
+		const memories = getByIds(db, ids).filter((m) => m.owner === owner && (mode === "excavate" || m.status === "active"));
+		const profiles = profileIds
+			.map((id) => getProfile(db, id))
+			.filter((p): p is ProfileRow => !!p && p.owner === owner && (mode === "excavate" || p.status === "active"));
+		logNew(memories, profiles);
+		logRecall(db, { owner, query, mode, hits: memories.length, latencyMs: Date.now() - startedAt, detail: { byIds: true, memories: memories.length, profiles: profiles.length } });
+		return { memories, profiles, deduped: 0, topicId: turn?.topicId, replyId: turn?.replyId };
+	}
 
 	// fast / excavate: T1 only, zero tokens.
 	if (mode !== "deep") {
@@ -686,8 +710,10 @@ export async function recall(
 		}
 	}
 
-	const candidateCap = Math.min(config.inject.recallCandidateMax, 400);
-	const candidates = pool.rows.slice(0, candidateCap);
+	// No id-head cap: stable id order otherwise systematically hides the NEWEST
+	// memories once the store outgrows the cap. The cheap normal path is now
+	// probe → recall-by-ids; a full deep selection must at least be complete.
+	const candidates = pool.rows;
 
 	// Give the ranker visibility into what this conversation already has, so it
 	// rejects candidates that merely restate injected facts (returns empty).

@@ -113,6 +113,8 @@ not-yet-woven memory bypass the hierarchy, so a root-routing miss cannot hide a 
 | Field | Notes |
 |---|---|
 | `query` | required, non-empty |
+| `ids` | optional memory ids from `/probe`: direct SQL content fetch, zero LLM, no second semantic selection |
+| `profile_ids` | optional profile ids from `/probe`: same direct-fetch path |
 | `k` | max memories returned; server-configured default (6) |
 | `mode` | `fast` = pure keyword probe, zero LLM; `deep` (default) = one selector LLM call over a whole-store listing (every active memory's one-line "mini" + every chapter's abstract), picks what matters; `excavate` = also dig absorbed/archived memories |
 | `conversation` | **required when paired with `auto`** — the caller's unique conversation id (e.g. `pi:<sessionId>`). The server assigns it an internal `topic_id` (autoincrement) and numbers each turn a `reply_id`; the injection ledger records what was actually injected each turn. `auto=true` without it returns `400` |
