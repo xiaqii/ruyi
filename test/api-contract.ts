@@ -143,6 +143,11 @@ if (tmpId === -1) throw new Error("fixture insert blocked by tombstone — conte
 	ok(status === 200 && has(json.memory, MEMORY_ROW_FIELDS), "GET /memories/:id shape");
 }
 {
+	const { status, json } = await call("POST", "/recall", { query: "fetch the probe pointer", ids: [tmpId], mode: "deep" });
+	const ids = Array.isArray(json.memories) ? json.memories.map((m) => m.id) : [];
+	ok(status === 200 && ids.length === 1 && ids[0] === tmpId, "recall by probe ids fetches exactly that memory (L2, no re-selection)");
+}
+{
 	// pin channel removed (v0.10.4): iron rules belong to the agent platform's
 	// own AGENTS.md/CLAUDE.md; ruyi keeps no always-on injection channel.
 	const { status } = await call("POST", `/memories/${tmpId}/pin`, { pinned: 1 });

@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.11.0] - 2026-11-22
+
+**P1 compare-and-fetch chain.** Specialist probe candidates now carry evidence for judgement (user-stated vs inferred, evidence count, confidence, updated date), enabling fresh explicit corrections to beat stale inferences. `/recall` accepts `ids` + `profile_ids` from `/probe`: L2 content fetch is pure SQL with zero LLM and no repeated whole-store selection (verified live: probe #18 → recall-by-ids, 0 new token_log calls). Tool schemas/descriptions updated across local MCP, remote bridge and both pi extension copies. Removed the deep-recall 400-id head cut too — deep search no longer systematically hides the newest memories. Contract test covers exact id round-trip.
 ## [1.10.0] - 2026-11-22
 
 **Hierarchical probe (P1): less token, better coverage.** L0 root-portrait self-index routes to ≤2 specialist shelves; L1 compares only their chapter cards and memory summaries; the caller fetches L2 content by id (SQL). Raw sessions remain L3/excavate-only. Direct FTS hits from model-suggested terms plus EVERY unwoven memory bypass the hierarchy, so routing is navigation not a gate. Flat whole-store mode remains as fallback and `recall.probeStrategy:"flat"`. Also fixes two retrieval bugs exposed by real A/B: flat probe's stable-id 400-head cut systematically hid the newest 110 memories, and lossy `mini` lines made #1508 invisible to both selectors (its mini had dropped "小红书/prompt"). Two 12-question real benches: 7/7 key targets hit vs 6/7 flat, generic HTTP correctly empty, average input 18,563 → 6,147 tokens (-67%); two light calls add ~1s median latency. Production model slots remain kimi-for-coding thinking-off + k3.1-pro dream.

@@ -32,7 +32,7 @@ const TOOLS = [
 	{
 		name: "probe",
 		description:
-			"Cheap relevance probe of the user's long-term memory. Call it AS OFTEN AS POSSIBLE and ALWAYS FIRST: whenever the user's past, preferences, projects, devices or environment might matter, probe before answering from guesswork, and always probe before any full recall. Returns only one-line pointers (#id + title) and injects nothing. No relevant pointers → answer directly, no recall. Relevant pointers → fetch them with recall.",
+			"Cheap relevance probe of the user's long-term memory. Call it AS OFTEN AS POSSIBLE and ALWAYS FIRST: whenever the user's past, preferences, projects, devices or environment might matter, probe before answering from guesswork, and always probe before any full recall. Returns only one-line pointers (#id + title) and injects nothing. No relevant pointers → answer directly, no recall. Relevant pointers → fetch them with recall, passing ids/profile_ids (zero-LLM direct fetch).",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -44,11 +44,13 @@ const TOOLS = [
 	{
 		name: "recall",
 		description:
-			"Fetch full memory entries. Relevant memories are auto-injected every turn — never re-fetch what was injected. Typical flow: probe first (cheap), then recall only the pointers that matter. Also use when the user references earlier context. Skip for self-contained questions. mode: fast = keyword scan, deep = semantic (default), excavate = include archived.",
+			"Fetch full memory entries. Relevant memories are auto-injected every turn — never re-fetch what was injected. Typical flow: probe first (cheap), then recall with its ids/profile_ids for a zero-LLM content fetch; omit ids only when a fresh semantic search is needed. Also use when the user references earlier context. Skip for self-contained questions. mode: fast = keyword scan, deep = semantic (default), excavate = include archived.",
 		inputSchema: {
 			type: "object",
 			properties: {
-				query: { type: "string", description: "What you are working on / looking for" },
+				query: { type: "string", description: "What you are looking for (required even when fetching probe ids)" },
+				ids: { type: "array", items: { type: "number" }, description: "Memory ids returned by probe: direct SQL fetch, no LLM" },
+				profile_ids: { type: "array", items: { type: "number" }, description: "Profile ids returned by probe: direct SQL fetch, no LLM" },
 				k: { type: "number", description: "Max memories to return (default 5)" },
 				mode: {
 					type: "string",

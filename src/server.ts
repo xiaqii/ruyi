@@ -220,9 +220,13 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 				const conversation = typeof body.conversation === "string" ? body.conversation.slice(0, 200) : undefined;
 				const auto = body.auto === true;
 				if (auto && !conversation) return send(res, 400, { error: "auto recall requires conversation" });
+				const ids = Array.isArray(body.ids) ? body.ids.map(Number).filter(Number.isInteger).slice(0, 20) : undefined;
+				const profileIds = Array.isArray(body.profile_ids) ? body.profile_ids.map(Number).filter(Number.isInteger).slice(0, 5) : undefined;
 				const result = await recall(query, k, ownerOf(url, body), cwdOf(url, body), scopeOf(url, body), mode, {
 					conversation,
 					auto,
+					ids,
+					profileIds,
 				});
 				// The store map rides every recall response: the agent sees what the
 				// store COVERS, not just what was picked — so it knows when to probe.
