@@ -8,7 +8,7 @@
  * and the release aborts. Run: node test/api-contract.ts   (exit 1 on failure)
  */
 
-import { getDb, insertMemory } from "../src/db.ts";
+import { getDb, insertMemory, setMemoryVisibility } from "../src/db.ts";
 import { loadConfig } from "../src/config.ts";
 import { mkdtempSync, rmSync as rmDirSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -80,7 +80,7 @@ async function call(method: string, path: string, body?: unknown, extraHeaders?:
 const has = (obj: unknown, keys: string[]): boolean =>
 	typeof obj === "object" && obj !== null && keys.every((k) => k in (obj as Record<string, unknown>));
 
-const MEMORY_ROW_FIELDS = ["id", "owner", "kind", "summary", "content", "keywords", "status", "created_at", "updated_at"];
+const MEMORY_ROW_FIELDS = ["id", "owner", "visibility", "kind", "summary", "content", "keywords", "status", "created_at", "updated_at"];
 
 console.log("API contract (documented in API.md):");
 
@@ -147,6 +147,25 @@ if (tmpId === -1) throw new Error("fixture insert blocked by tombstone — conte
 	const ids = Array.isArray(json.memories) ? json.memories.map((m) => m.id) : [];
 	ok(status === 200 && ids.length === 1 && ids[0] === tmpId, "recall by probe ids fetches exactly that memory (L2, no re-selection)");
 }
+// Explicit project visibility: same query, only its owning cwd may recall it.
+const scopeToken = `scope${Date.now()}`;
+const projectId = insertMemory(
+	db,
+	{ kind: "fact", visibility: "project", summary: `scope fixture ${scopeToken}`, content: `project-only contract fixture ${scopeToken}`, keywords: [scopeToken], origin: "user_stated", confidence: 0.9 },
+	{ owner: "default", cwd: "/contract/project-a" },
+);
+{
+	const other = await call("POST", "/recall", { query: scopeToken, k: 20, mode: "fast", cwd: "/root/pi", scope: "smart" });
+	const own = await call("POST", "/recall", { query: scopeToken, k: 20, mode: "fast", cwd: "/contract/project-a", scope: "smart" });
+	const otherIds = (other.json.memories as { id: number }[]).map((m) => m.id);
+	const ownIds = (own.json.memories as { id: number }[]).map((m) => m.id);
+	ok(!otherIds.includes(projectId) && ownIds.includes(projectId), "visibility=project stays in its cwd under smart scope");
+	setMemoryVisibility(db, projectId, "personal");
+	const personal = await call("POST", "/recall", { query: scopeToken, k: 20, mode: "fast", cwd: "/root/pi", scope: "smart" });
+	ok((personal.json.memories as { id: number }[]).some((m) => m.id === projectId), "visibility=personal crosses cwds under smart scope");
+	await call("POST", `/memories/${projectId}/forget`);
+}
+
 {
 	// pin channel removed (v0.10.4): iron rules belong to the agent platform's
 	// own AGENTS.md/CLAUDE.md; ruyi keeps no always-on injection channel.

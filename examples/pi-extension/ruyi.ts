@@ -426,6 +426,7 @@ export default function (pi: ExtensionAPI) {
 			],
 			{ description: "Memory kind" },
 		),
+		visibility: Type.Optional(Type.Union([Type.Literal("personal"), Type.Literal("project")], { description: "personal = across directories; project = only this cwd" })),
 		summary: Type.String({ description: "One-line summary (<= 30 words)" }),
 		content: Type.String({ description: "Full memory content, concrete and self-contained" }),
 		domain: Type.Optional(Type.String({ description: "Short free-form tag" })),

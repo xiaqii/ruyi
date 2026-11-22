@@ -2,10 +2,14 @@ export type MemoryKind = "preference" | "fact" | "knowledge" | "lesson" | "skill
 export type MemoryOrigin = "user_stated" | "agent_inferred" | "mixed";
 export type MemoryStatus = "active" | "absorbed" | "superseded" | "archived";
 
+export type MemoryVisibility = "personal" | "project";
+
 export interface MemoryRow {
 	id: number;
 	owner: string;
 	cwd: string | null;
+	/** Explicit retrieval boundary; empty = legacy kind/cwd inference. */
+	visibility: MemoryVisibility | "";
 	kind: MemoryKind;
 	domain: string | null;
 	summary: string;
@@ -30,6 +34,7 @@ export interface MemoryRow {
 
 export interface Candidate {
 	kind: MemoryKind;
+	visibility?: MemoryVisibility;
 	domain?: string;
 	summary: string;
 	/** ≤50-char one-line positioning handle — what the full-listing selection reads. */

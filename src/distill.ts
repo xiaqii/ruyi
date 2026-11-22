@@ -14,6 +14,7 @@ import {
 	insertMemory,
 	logMemoryAction,
 	refineMemory,
+	setMemoryVisibility,
 	reinforceMemory,
 	setDistillState,
 	supersedeMemory,
@@ -283,6 +284,9 @@ export async function explicitRemember(
 	const existing = activeCandidates(db, 3650, scope.owner).slice(0, config.dream.mergeSummaryLimit);
 	const actions = await merge([candidate], existing, { runId: "manual", sessionFile: "(explicit write)" });
 	const action = actions[0] ?? { action: "NEW" as const, candidate };
+	if ((action.action === "REINFORCE" || action.action === "REFINE") && candidate.visibility) {
+		setMemoryVisibility(db, action.id, candidate.visibility);
+	}
 
 	switch (action.action) {
 		case "REINFORCE":
@@ -349,11 +353,13 @@ function applyActions(
 				break;
 			}
 			case "REINFORCE":
+				if (a.candidate.visibility) setMemoryVisibility(db, a.id, a.candidate.visibility);
 				reinforceMemory(db, a.id);
 				report.reinforced++;
 				logMemoryAction(db, runId, "REINFORCE", { id: a.id, summary: a.candidate.summary });
 				break;
 			case "REFINE":
+				if (a.candidate.visibility) setMemoryVisibility(db, a.id, a.candidate.visibility);
 				refineMemory(db, a.id, a.summary, a.content, a.keywords);
 				report.refined++;
 				logMemoryAction(db, runId, "REFINE", { id: a.id, summary: a.summary ?? a.candidate.summary });

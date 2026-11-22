@@ -28,6 +28,7 @@ Return ONLY a JSON object:
   "candidates": [
     {
       "kind": "preference|fact|knowledge|lesson|skill_index",
+      "visibility": "personal|project — personal for transferable person-level facts/preferences/lessons; project only for a durable environment fact or pointer bound to one cwd. Episode/progress is still forbidden.",
       "domain": "a short tag",
       "summary": "one line, <= 30 words",
       "mini": "one line, <= 50 chars: subject + verdict only; the line a selector reads when scanning the whole store",
