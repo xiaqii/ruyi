@@ -210,13 +210,15 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 					ids,
 					profileIds,
 				});
-				// The store map rides every recall response: the agent sees what the
-				// store COVERS, not just what was picked — so it knows when to probe.
+				// A store map is a dense, prescriptive portrait of its own. It must
+				// not bypass activation policy on routine recall/auto-injection.
 				let storeCard: string | null = null;
-				try {
-					const { getStoreCard } = await import("./storecard.ts");
-					storeCard = getStoreCard(ownerOf(url, body));
-				} catch { /* card is optional, never breaks recall */ }
+				if (body.include_store_card === true) {
+					try {
+						const { getStoreCard } = await import("./storecard.ts");
+						storeCard = getStoreCard(ownerOf(url, body));
+					} catch { /* card is optional, never breaks recall */ }
+				}
 				return send(res, 200, { ...result, storeCard, serverTime: new Date().toLocaleString("zh-CN", { hour12: false, timeZone: "Asia/Shanghai" }) });
 			}
 

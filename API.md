@@ -89,7 +89,7 @@ zero-resident context, with discovery and selection entirely server-side. Client
 
 ### POST /probe — cheap pointer-only relevance check
 
-`{ "question": "...", "cwd": "/optional/project" }` → `{ "hints": [{"id", "kind", "line"}], "profiles": [{"id", "title"}] }`.
+`{ "question": "...", "cwd": "/optional/project" }` → `{ "activation": "lookup|discussion|execution", "hints": [{"id", "kind", "line"}], "profiles": [{"id", "title"}] }`.
 No memory/profile content is returned; fetch selected content via `/recall` or the by-id routes.
 
 Default routing is hierarchical: a thin root-portrait index selects up to two specialist shelves, then a
@@ -116,9 +116,12 @@ not-yet-woven memory bypass the hierarchy, so a root-routing miss cannot hide a 
 | `ids` | optional memory ids from `/probe`: direct SQL content fetch, zero LLM, no second semantic selection |
 | `profile_ids` | optional profile ids from `/probe`: same direct-fetch path |
 | `k` | max memories returned; server-configured default (6) |
-| `mode` | `fast` = pure keyword probe, zero LLM; `deep` (default) = one selector LLM call over a whole-store listing (every active memory's one-line "mini" + every chapter's abstract), picks what matters; `excavate` = also dig absorbed/archived memories |
+| `mode` | `fast` = pure keyword probe, zero LLM; `deep` (default) = one selector LLM call over full memory summaries + chapter abstracts; `excavate` = also dig absorbed/archived memories |
+| `include_store_card` | optional diagnostic opt-in. Routine recall/auto-injection never carries the dense store map, because it would bypass activation policy |
 | `conversation` | **required when paired with `auto`** — the caller's unique conversation id (e.g. `pi:<sessionId>`). The server assigns it an internal `topic_id` (autoincrement) and numbers each turn a `reply_id`; the injection ledger records what was actually injected each turn. `auto=true` without it returns `400` |
 | `auto` | optional; `true` marks the **automatic injection** path: the server filters items already injected into this conversation (response carries a `deduped` count), and short-circuits with an empty result — skipping the LLM call entirely — when every candidate was already injected. The response also carries `topicId`/`replyId` (server-assigned turn numbers). **Do not** pass these two parameters for agent-initiated tool queries |
+
+**Activation boundary**: deep recall and probe classify the current turn as `lookup`, `discussion`, or `execution` in the existing selector call (no extra LLM request). Lookup/discussion return no portrait bodies and allow at most one prescriptive memory; discussion also excludes lessons/skill pointers and caps context at two entries. Execution allows at most two preference/lesson memories and one portrait. Facts needed to answer different parts of a question are not capped by the prescriptive quota. Evidence affects findability, never authority. Explicit recall-by-ids and excavate remain unchanged because the caller deliberately selected that content.
 
 **Topic context (since 0.9)**: calls carrying `conversation` get the topic's rolling summary plus the most
 recent turns' raw text fed into the selector alongside the query, so bare follow-ups ("which ones can't he
@@ -130,6 +133,7 @@ Response `200`:
 
 ```json
 {
+  "activation": "lookup",
   "memories": [{ "id": 86, "owner": "default", "cwd": null, "kind": "fact", "domain": "...",
                  "summary": "...", "content": "...", "keywords": "...",
                  "origin": "user_stated", "confidence": 0.9, "evidence": 3, "source": null,

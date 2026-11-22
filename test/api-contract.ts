@@ -146,6 +146,9 @@ if (tmpId === -1) throw new Error("fixture insert blocked by tombstone — conte
 	const { status, json } = await call("POST", "/recall", { query: "fetch the probe pointer", ids: [tmpId], mode: "deep" });
 	const ids = Array.isArray(json.memories) ? json.memories.map((m) => m.id) : [];
 	ok(status === 200 && ids.length === 1 && ids[0] === tmpId, "recall by probe ids fetches exactly that memory (L2, no re-selection)");
+	ok(json.storeCard === null, "routine recall does not smuggle the prescriptive store map around activation");
+	const mapped = await call("POST", "/recall", { query: "diagnostic store map", ids: [tmpId], include_store_card: true });
+	ok(mapped.json.storeCard === null || typeof mapped.json.storeCard === "string", "store map explicit diagnostic opt-in has the documented nullable shape");
 }
 // Explicit project visibility: same query, only its owning cwd may recall it.
 const scopeToken = `scope${Date.now()}`;
