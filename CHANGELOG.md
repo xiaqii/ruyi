@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.11.1] - 2026-11-22
+
+**P1 conflict quality, measured and bounded.** Fresh (72h) user-stated corrections carry a 160-char evidence excerpt into specialist comparison and are stably ordered before older selected background; hard caps are 5 memories + 3 profiles. Fixed merge adjudication seeing only old summaries: it now sees bounded old-content evidence, so added detail becomes REFINE instead of REINFORCE (verified on memory #2148). Normalizes single-object/`actions`-wrapped merge JSON instead of crashing explicit remembers with `raw is not iterable`. FTS now preserves real BM25 rank as a bounded score instead of flattening every hit to 1. Critical regression: current Kimi correction #2148 first, car #18, xiaohongshu #1508, generic HTTP empty.
 ## [1.11.0] - 2026-11-22
 
 **P1 compare-and-fetch chain.** Specialist probe candidates now carry evidence for judgement (user-stated vs inferred, evidence count, confidence, updated date), enabling fresh explicit corrections to beat stale inferences. `/recall` accepts `ids` + `profile_ids` from `/probe`: L2 content fetch is pure SQL with zero LLM and no repeated whole-store selection (verified live: probe #18 → recall-by-ids, 0 new token_log calls). Tool schemas/descriptions updated across local MCP, remote bridge and both pi extension copies. Removed the deep-recall 400-id head cut too — deep search no longer systematically hides the newest memories. Contract test covers exact id round-trip.

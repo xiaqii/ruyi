@@ -567,7 +567,9 @@ export async function probeHierarchical(
 			`confidence ${m.confidence.toFixed(2)}`,
 			`updated ${m.updated_at.slice(0, 10)}`,
 		].join(", ");
-		return `[id ${m.id}] (${m.kind}; ${meta}) ${clip(m.summary, 120)}`;
+		const freshExplicit = m.origin === "user_stated" && Date.now() - new Date(m.updated_at).getTime() < 3 * 86_400_000;
+		const excerpt = freshExplicit ? `\n  evidence: ${clip(m.content.replace(/\s+/g, " "), 160)}` : "";
+		return `[id ${m.id}] (${m.kind}; ${meta}) ${clip(m.summary, 120)}${excerpt}`;
 	}).join("\n");
 	const profileListing = shelfList
 		.map((p) => {
@@ -577,12 +579,19 @@ export async function probeHierarchical(
 		.join("\n");
 	const leaf = await completeJson<{ ids?: unknown; profile_ids?: unknown }>({
 		system: loadPrompt("probe-leaf"),
-		user: `SPECIALIST PORTRAITS:\n${profileListing || "(none)"}\n\nMEMORY POINTERS (including direct-search and unwoven bypass candidates):\n${memoryListing || "(none)"}\n\nQUESTION:\n${question}\n\nPick at most 8 memory ids and up to 5 profile ids.`,
+		user: `SPECIALIST PORTRAITS:\n${profileListing || "(none)"}\n\nMEMORY POINTERS (including direct-search and unwoven bypass candidates):\n${memoryListing || "(none)"}\n\nQUESTION:\n${question}\n\nPick at most 5 memory ids and up to 3 profile ids.`,
 		step: "probe-pick",
 	});
 	const coerce = (arr: unknown) => (Array.isArray(arr) ? arr : []).map(Number).filter(Number.isInteger);
-	const ids = [...new Set(coerce(leaf.ids).filter((id) => candidateMemories.has(id)))].slice(0, 8);
-	const profileIds = [...new Set(coerce(leaf.profile_ids).filter((id) => shelfProfiles.has(id)))].slice(0, 5);
+	const chosen = [...new Set(coerce(leaf.ids).filter((id) => candidateMemories.has(id)))];
+	// Stable partition: when the selector kept a fresh explicit correction, do
+	// not bury it below older background merely because of model output order.
+	const isFreshExplicit = (id: number) => {
+		const m = candidateMemories.get(id);
+		return !!m && m.origin === "user_stated" && Date.now() - new Date(m.updated_at).getTime() < 3 * 86_400_000;
+	};
+	const ids = [...chosen.filter(isFreshExplicit), ...chosen.filter((id) => !isFreshExplicit(id))].slice(0, 5);
+	const profileIds = [...new Set(coerce(leaf.profile_ids).filter((id) => shelfProfiles.has(id)))].slice(0, 3);
 	const result = probeResult(db, candidates, { ids, profileIds });
 	logRecall(db, {
 		owner, query: question, mode: "probe", hits: result.hints.length, latencyMs: Date.now() - startedAt,
