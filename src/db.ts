@@ -20,7 +20,7 @@ const dbs = new Map<string, DatabaseSync>();
  * v10 = replies.answer/gist (layered topic context). v11 = memories.mini + profiles.abstract
  *       (selector listing). v12 = inbox_files (raw-material inbox: per-file×lens offsets).
  */
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 15;
 
 function migrate(d: DatabaseSync, from: number): void {
 	if (from < 1) {
@@ -96,6 +96,9 @@ function migrate(d: DatabaseSync, from: number): void {
 	}
 	if (from < 14) {
 		createRequestLog(d);
+	}
+	if (from < 15) {
+		d.exec(`ALTER TABLE memories ADD COLUMN visibility TEXT NOT NULL DEFAULT ''`);
 	}
 	if (from < 12) {
 		createInboxFiles(d);
@@ -491,6 +494,7 @@ CREATE TABLE IF NOT EXISTS memories (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   owner         TEXT NOT NULL DEFAULT 'default',
   cwd           TEXT,
+  visibility    TEXT NOT NULL DEFAULT '',
   kind          TEXT NOT NULL,
   domain        TEXT,
   summary       TEXT NOT NULL,
@@ -618,13 +622,16 @@ export function insertMemory(
 	// and silently evaded every kind-based consumer. Unknown → lesson.
 	const VALID_KINDS = new Set(["preference", "fact", "knowledge", "lesson", "skill_index"]);
 	const kind = VALID_KINDS.has(c.kind as string) ? c.kind : "lesson";
+	// A project boundary needs a directory. Legacy/import paths without cwd
+	// retain legacy inference rather than creating a memory visible nowhere.
+	const visibility = c.visibility === "project" && !scope.cwd ? "" : c.visibility === "personal" || c.visibility === "project" ? c.visibility : "";
 	const t = now();
 	const r = d
 		.prepare(
-			`INSERT INTO memories (owner, cwd, kind, domain, summary, mini, content, keywords, origin, confidence, evidence, source, created_at, updated_at, last_seen_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+			`INSERT INTO memories (owner, cwd, visibility, kind, domain, summary, mini, content, keywords, origin, confidence, evidence, source, created_at, updated_at, last_seen_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
 		)
-		.run(scope.owner, scope.cwd, kind, c.domain ?? null, c.summary, c.mini ?? "", c.content, (c.keywords ?? []).join(" "), c.origin, c.confidence, c.source ?? null, t, t, t);
+		.run(scope.owner, scope.cwd, visibility, kind, c.domain ?? null, c.summary, c.mini ?? "", c.content, (c.keywords ?? []).join(" "), c.origin, c.confidence, c.source ?? null, t, t, t);
 	return Number(r.lastInsertRowid);
 }
 
@@ -633,6 +640,10 @@ export function reinforceMemory(d: DatabaseSync, id: number): void {
 		`UPDATE memories SET evidence = evidence + 1, last_seen_at = ?, updated_at = ?,
 		 confidence = MIN(1.0, confidence + 0.05) WHERE id = ?`,
 	).run(now(), now(), id);
+}
+
+export function setMemoryVisibility(d: DatabaseSync, id: number, visibility: "personal" | "project"): void {
+	d.prepare(`UPDATE memories SET visibility = ?, updated_at = ? WHERE id = ?`).run(visibility, now(), id);
 }
 
 export function refineMemory(
@@ -753,9 +764,12 @@ export type RecallScope = "smart" | "cwd" | "all";
  */
 export function scopeFilter(scope: RecallScope, cwd: string | null): { where: string; params: string[] } {
 	if (scope === "all" || !cwd) return { where: "", params: [] };
-	if (scope === "cwd") return { where: "AND (m.cwd = ? OR m.cwd IS NULL)", params: [cwd] };
+	if (scope === "cwd") return {
+		where: "AND (m.visibility = 'personal' OR m.cwd = ? OR (m.visibility = '' AND m.cwd IS NULL))",
+		params: [cwd],
+	};
 	return {
-		where: "AND (m.cwd = ? OR m.cwd IS NULL OR m.kind IN ('preference', 'fact', 'knowledge'))",
+		where: "AND (m.visibility = 'personal' OR m.cwd = ? OR (m.visibility = '' AND (m.cwd IS NULL OR m.kind IN ('preference', 'fact', 'knowledge'))))",
 		params: [cwd],
 	};
 }

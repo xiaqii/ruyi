@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.12.0] - 2026-11-22
+
+**Explicit memory visibility (schema v15).** New `visibility: personal | project` on MemoryRow/Candidate, extraction prompts, explicit remember API and every MCP/pi client. Personal memories cross directories; project memories stay in their cwd under both smart and strict-cwd scopes. Empty visibility preserves legacy kind/cwd inference, so existing stores need no bulk migration. REFINE/REINFORCE can apply a newly learned visibility. Project-without-cwd is rejected on explicit writes and falls back to legacy inference on imports instead of becoming invisible. Contract proves project isolation and personal cross-cwd recall against real HTTP + SQLite. A handful of clear ruyi-only production entries were scoped project; generic transferable lessons were left untouched.
 ## [1.11.1] - 2026-11-22
 
 **P1 conflict quality, measured and bounded.** Fresh (72h) user-stated corrections carry a 160-char evidence excerpt into specialist comparison and are stably ordered before older selected background; hard caps are 5 memories + 3 profiles. Fixed merge adjudication seeing only old summaries: it now sees bounded old-content evidence, so added detail becomes REFINE instead of REINFORCE (verified on memory #2148). Normalizes single-object/`actions`-wrapped merge JSON instead of crashing explicit remembers with `raw is not iterable`. FTS now preserves real BM25 rank as a bounded score instead of flattening every hit to 1. Critical regression: current Kimi correction #2148 first, car #18, xiaohongshu #1508, generic HTTP empty.

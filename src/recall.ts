@@ -92,6 +92,8 @@ const PERSONAL_KINDS = new Set(["preference", "fact", "knowledge"]);
 
 function scopeOk(m: MemoryRow, scope: RecallScope, cwd: string | null): boolean {
 	if (scope === "all" || !cwd) return true;
+	if (m.visibility === "personal") return true;
+	if (m.visibility === "project") return m.cwd === cwd;
 	if (scope === "cwd") return m.cwd === cwd || m.cwd === null;
 	return m.cwd === cwd || m.cwd === null || PERSONAL_KINDS.has(m.kind);
 }

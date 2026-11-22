@@ -105,6 +105,7 @@ const TOOLS = [
 			type: "object",
 			properties: {
 				kind: { type: "string", enum: ["preference", "fact", "knowledge", "lesson", "skill_index"], description: "Memory kind" },
+				visibility: { type: "string", enum: ["personal", "project"], description: "personal = recall across directories; project = only in its cwd. Omit for legacy inference." },
 				summary: { type: "string", description: "One-line summary (<= 30 words)" },
 				content: { type: "string", description: "Full memory content, concrete and self-contained" },
 				domain: { type: "string", description: "Short free-form tag" },

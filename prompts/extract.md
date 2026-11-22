@@ -53,6 +53,7 @@ Return ONLY a JSON object:
   "candidates": [
     {
       "kind": "preference|fact|knowledge|lesson|skill_index",
+      "visibility": "personal|project — personal for transferable person-level facts/preferences/lessons; project only for a durable environment fact or pointer bound to one cwd. Episode/progress is still forbidden.",
       "domain": "a short tag in your own words, e.g. coding-style, phone, writing",
       "summary": "one line, <= 30 words, uniquely identifiable",
       "mini": "one line, <= 50 chars: the positioning handle. Subject + verdict only ('PHP full-width punctuation swallows variable names', 'his car is a Chery Fengyun X3L'). Richer than a keyword, shorter than the summary — this is the line a selector reads when scanning the whole store. Write it question-facing: keep the concrete hook words a future question would literally contain (names, numbers, tool chains, file paths) — a selector matches on those.",

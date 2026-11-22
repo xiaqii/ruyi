@@ -262,9 +262,12 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 				const kind = typeof body.kind === "string" ? body.kind : "fact";
 				if (!summary || !content) return send(res, 400, { error: "summary and content are required" });
 				const owner = ownerOf(url, body);
-				const scope = { owner, cwd: cwdOf(url, body) };
+				const cwd = cwdOf(url, body);
+				if (body.visibility === "project" && !cwd) return send(res, 400, { error: "visibility=project requires cwd" });
+				const scope = { owner, cwd };
 				const candidate: Candidate = {
 					kind: kind as never,
+					visibility: body.visibility === "personal" || body.visibility === "project" ? body.visibility : undefined,
 					domain: typeof body.domain === "string" ? body.domain : undefined,
 					summary,
 					content,

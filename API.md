@@ -187,6 +187,7 @@ fire-and-forget on the session_compact event.
 ```json
 {
   "kind": "preference",
+  "visibility": "personal",
   "summary": "one-line summary (≤30 words)",
   "content": "full content, concrete and self-contained",
   "domain": "optional tag",
@@ -197,6 +198,7 @@ fire-and-forget on the session_compact event.
 ```
 
 `kind` ∈ `preference | fact | knowledge | lesson | skill_index` (default `fact`).
+`visibility` ∈ `personal | project`: personal memories cross directories; project memories stay in their cwd. Omit it for legacy kind/cwd inference.
 Writes go through the **same LLM merge adjudication** as the nightly dream — duplicate content becomes
 reinforcement rather than a new entry. **Takes ~10s; client timeout must be ≥45 seconds.**
 
@@ -313,7 +315,7 @@ the server name automatically: shown as `ruyi_recall` in opencode, `mcp__ruyi__r
 | `list` | GET /memories | `limit`, `owner` |
 | `get` | GET /memories/:id | `id`* |
 | `ingest` | POST /ingest | `text`*, `owner`, `cwd` |
-| `remember` | POST /memories | `summary`*, `content`*, `kind`, `domain`, `owner` |
+| `remember` | POST /memories | `summary`*, `content`*, `kind`, `visibility`, `domain`, `owner` |
 | `admin` | pin/forget/stats/profiles | `action`*(forget/stats/profile), `id`, `days`, `profileId`, `owner` |
 
 Client config examples (Claude Code: `claude mcp add ruyi -s user -- node <repo>/src/cli.ts mcp`;
