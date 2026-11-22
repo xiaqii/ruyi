@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.0] - 2026-11-22
+
+**Memory activation, not just memory relevance.** The existing selector now classifies each turn as `lookup`, `discussion`, or `execution` with no extra LLM call. Deterministic policy then limits behavioral authority: lookup/discussion get no portrait bodies and at most one prescriptive memory; discussion excludes lessons/pointers and caps context at two; execution gets at most two preference/lesson entries and one portrait. Facts can still answer multiple question parts. Unknown legacy kinds fail closed into the prescriptive quota. Evidence affects findability, never authority.
+
+Routine recall/auto-injection no longer carries STORE MAP, which otherwise bypassed the entire policy; `include_store_card=true` retains explicit diagnostic access. Selector outages degrade to actual FTS hits rather than arbitrary id-head memories. Deep selection reads full summaries instead of lossy mini cards. Pi wording now treats profiles/memories as historical references, never current instructions or permission to expand scope.
+
+Real eight-turn A/B: average injected payload 7,694 → 1,562 characters (-80%), portrait bodies 16 → 2; all 13 original key retrieval questions still hit. Counterfactual no-memory/old/new answer runs checked behavior drift (empty outputs rejected and rerun). Deterministic suites: smoke 63, API contract 61.
 ## [1.12.0] - 2026-11-22
 
 **Explicit memory visibility (schema v15).** New `visibility: personal | project` on MemoryRow/Candidate, extraction prompts, explicit remember API and every MCP/pi client. Personal memories cross directories; project memories stay in their cwd under both smart and strict-cwd scopes. Empty visibility preserves legacy kind/cwd inference, so existing stores need no bulk migration. REFINE/REINFORCE can apply a newly learned visibility. Project-without-cwd is rejected on explicit writes and falls back to legacy inference on imports instead of becoming invisible. Contract proves project isolation and personal cross-cwd recall against real HTTP + SQLite. A handful of clear ruyi-only production entries were scoped project; generic transferable lessons were left untouched.

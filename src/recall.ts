@@ -74,9 +74,13 @@ export function getInject(owner: string, cwd: string | null, scope: RecallScope)
 	};
 }
 
+export type ActivationMode = "lookup" | "discussion" | "execution";
+
 export interface RecallResult {
 	memories: MemoryRow[];
 	profiles: ProfileRow[];
+	/** Why historical memories were allowed to affect this turn. */
+	activation?: ActivationMode;
 	/** Items suppressed because this conversation already received them (auto-inject only). */
 	deduped?: number;
 	/** Server-side topic/reply numbering of this turn (auto-inject only). */
@@ -87,6 +91,50 @@ export interface RecallResult {
 // ---------------------------------------------------------------------------
 // T1: free candidate retrieval + fusion scoring (no LLM)
 // ---------------------------------------------------------------------------
+
+function fallbackActivation(query: string): ActivationMode {
+	const tail = query.trim().slice(-1000);
+	if (/帮我|请.*(?:改|做|写|查)|修改|实现|修复|排查|开发|搭建|部署|测试|重构|继续(?:做|改|修)|\b(?:fix|build|implement|debug|refactor|deploy|test)\b/i.test(tail)) return "execution";
+	if (/[?？]|是什么|哪个|哪里|谁(?:的)?|多少|是否|是不是|有没有|^\s*(?:what|where|which|who|when|how much)\b/i.test(tail)) return "lookup";
+	return "discussion";
+}
+
+function normalizeActivation(value: unknown, query: string): ActivationMode {
+	return value === "lookup" || value === "discussion" || value === "execution" ? value : fallbackActivation(query);
+}
+
+/**
+ * Relevance is not permission to influence behavior. Facts can accumulate when
+ * they answer different parts of a question; prescriptive memories cannot.
+ * The selector proposes, this deterministic boundary disposes.
+ */
+export function constrainActivation(
+	pool: MemoryRow[],
+	ids: number[],
+	profileIds: number[],
+	mode: ActivationMode,
+	limit: number,
+	profileMax: number,
+): { ids: number[]; profileIds: number[] } {
+	const byId = new Map(pool.map((m) => [m.id, m]));
+	const out: number[] = [];
+	let prescriptive = 0;
+	const prescriptiveCap = mode === "execution" ? 2 : 1;
+	for (const id of ids) {
+		const m = byId.get(id);
+		if (!m) continue;
+		const declarative = m.kind === "fact" || m.kind === "knowledge" || m.kind === "skill_index";
+		const prescriptiveKind = !declarative; // includes unknown legacy kinds: fail closed to authority
+		if (mode === "discussion" && !(m.kind === "fact" || m.kind === "knowledge" || m.kind === "preference")) continue;
+		if (prescriptiveKind) {
+			if (prescriptive >= prescriptiveCap) continue;
+			prescriptive++;
+		}
+		out.push(id);
+		if (out.length >= limit || (mode === "discussion" && out.length >= 2)) break;
+	}
+	return { ids: out, profileIds: mode === "execution" ? profileIds.slice(0, Math.min(1, profileMax)) : [] };
+}
 
 const PERSONAL_KINDS = new Set(["preference", "fact", "knowledge"]);
 
@@ -384,10 +432,13 @@ async function pick(
 	alreadyBlock?: string,
 	profileMax = 3,
 	step = "rerank",
-): Promise<{ ids: number[]; profileIds: number[]; gist: string | null }> {
-	if (pool.length === 0) return { ids: [], profileIds: [], gist: null };
+): Promise<{ ids: number[]; profileIds: number[]; gist: string | null; activation: ActivationMode }> {
+	if (pool.length === 0) return { ids: [], profileIds: [], gist: null, activation: fallbackActivation(query) };
 	const listing = pool
-		.map((m) => `[id ${m.id}] (${m.kind}) ${m.mini || clip(m.summary, 60)}`)
+		// Positioning mini is intentionally lossy; it hid the decisive
+		// "duplicate execution" hook in #2067 during the activation A/B.
+		// Selection reads the full one-line summary, not the shorter display tag.
+		.map((m) => `[id ${m.id}] (${m.kind}) ${clip(m.summary, 100)}`)
 		.join("\n");
 	const profiles = listProfiles(db, owner);
 	const profileById = new Map(profiles.map((p) => [p.id, p]));
@@ -399,7 +450,7 @@ async function pick(
 	};
 	const profileBlock = profiles.length > 0 ? `\n\nPORTRAIT CHAPTERS:\n${profiles.map(profileLine).join("\n")}` : "";
 	const already = alreadyBlock ? `\n\nALREADY INJECTED:\n${alreadyBlock}` : "";
-	const picked = await completeJson<{ ids?: number[]; profile_ids?: number[]; topic_gist?: string | null }>({
+	const picked = await completeJson<{ ids?: number[]; profile_ids?: number[]; topic_gist?: string | null; activation?: string }>({
 		system: loadPrompt("pick"),
 		// Static listing first, per-turn variables (query, already-injected) last:
 		// the provider's prefix cache then hits on the 13K-token listing every turn.
@@ -411,10 +462,19 @@ async function pick(
 	// The model may return ids as strings ("18") — coerce before matching.
 	const coerce = (arr: unknown): number[] =>
 		(Array.isArray(arr) ? arr : []).map((x) => Number(x)).filter((n) => Number.isInteger(n));
+	const activation = normalizeActivation(picked.activation, query);
+	const constrained = constrainActivation(
+		pool,
+		coerce(picked.ids).filter((id) => valid.has(id)),
+		coerce(picked.profile_ids).filter((id) => validProfiles.has(id)),
+		activation,
+		limit,
+		profileMax,
+	);
 	return {
-		ids: coerce(picked.ids).filter((id) => valid.has(id)).slice(0, limit),
-		profileIds: coerce(picked.profile_ids).filter((id) => validProfiles.has(id)).slice(0, profileMax),
+		...constrained,
 		gist: typeof picked.topic_gist === "string" ? picked.topic_gist : null,
+		activation,
 	};
 }
 
@@ -424,12 +484,13 @@ async function pick(
 // ledger. Designed to be called liberally: cheap, and the agent filters the
 // hints itself, so over-hinting is harmless while a missed hit is the real loss.
 // ---------------------------------------------------------------------------
-type ProbeResult = { hints: Array<{ id: number; kind: string; line: string }>; profiles: Array<{ id: number; title: string }> };
+type ProbeResult = { hints: Array<{ id: number; kind: string; line: string }>; profiles: Array<{ id: number; title: string }>; activation?: ActivationMode };
 
 function probeResult(
 	db: ReturnType<typeof getDb>,
 	pool: MemoryRow[],
 	picked: { ids: number[]; profileIds: number[] },
+	activation?: ActivationMode,
 ): ProbeResult {
 	const byId = new Map(pool.map((m) => [m.id, m]));
 	const hints = picked.ids
@@ -440,7 +501,7 @@ function probeResult(
 		.map((id) => getProfile(db, id))
 		.filter((p): p is NonNullable<typeof p> => !!p)
 		.map((p) => ({ id: p.id, title: p.title }));
-	return { hints, profiles };
+	return { hints, profiles, ...(activation ? { activation } : {}) };
 }
 
 /** Flat whole-store selector, kept as the fallback and the A/B baseline.
@@ -459,8 +520,8 @@ export async function probeFlat(
 	const pool = gatherChannels(db, owner, scope ?? config.recall.defaultScope, cwd).rows;
 	if (pool.length === 0) return { hints: [], profiles: [] };
 	const picked = await pick(db, question, pool, 8, owner, undefined, 5, "probe-pick");
-	const result = probeResult(db, pool, picked);
-	logRecall(db, { owner, query: question, mode: "probe", hits: result.hints.length, latencyMs: Date.now() - startedAt, detail: { pool: pool.length, strategy: "flat" } });
+	const result = probeResult(db, pool, picked, picked.activation);
+	logRecall(db, { owner, query: question, mode: "probe", hits: result.hints.length, latencyMs: Date.now() - startedAt, detail: { pool: pool.length, strategy: "flat", activation: picked.activation } });
 	return result;
 }
 
@@ -498,11 +559,12 @@ export async function probeHierarchical(
 	const rootListing = roots
 		.map((p) => `[id ${p.id}] ${p.title} — ${p.abstract || clip(p.content.replace(/\s+/g, " "), 80)}`)
 		.join("\n");
-	const route = await completeJson<{ root_ids?: unknown; search_terms?: unknown }>({
+	const route = await completeJson<{ root_ids?: unknown; search_terms?: unknown; activation?: string }>({
 		system: loadPrompt("probe-root"),
 		user: `SELF INDEX (root portraits):\n${rootListing}\n\nQUESTION:\n${question}\n\nPick up to 2 root ids.`,
 		step: "probe-pick",
 	});
+	const activation = normalizeActivation(route.activation, question);
 	const rootIds = (Array.isArray(route.root_ids) ? route.root_ids : [])
 		.map(Number)
 		.filter((id) => roots.some((p) => p.id === id))
@@ -581,7 +643,7 @@ export async function probeHierarchical(
 		.join("\n");
 	const leaf = await completeJson<{ ids?: unknown; profile_ids?: unknown }>({
 		system: loadPrompt("probe-leaf"),
-		user: `SPECIALIST PORTRAITS:\n${profileListing || "(none)"}\n\nMEMORY POINTERS (including direct-search and unwoven bypass candidates):\n${memoryListing || "(none)"}\n\nQUESTION:\n${question}\n\nPick at most 5 memory ids and up to 3 profile ids.`,
+		user: `SPECIALIST PORTRAITS:\n${profileListing || "(none)"}\n\nMEMORY POINTERS (including direct-search and unwoven bypass candidates):\n${memoryListing || "(none)"}\n\nACTIVATION MODE:\n${activation}\n\nQUESTION:\n${question}\n\nPick at most 5 memory ids and up to 3 profile ids.`,
 		step: "probe-pick",
 	});
 	const coerce = (arr: unknown) => (Array.isArray(arr) ? arr : []).map(Number).filter(Number.isInteger);
@@ -593,11 +655,12 @@ export async function probeHierarchical(
 		return !!m && m.origin === "user_stated" && Date.now() - new Date(m.updated_at).getTime() < 3 * 86_400_000;
 	};
 	const ids = [...chosen.filter(isFreshExplicit), ...chosen.filter((id) => !isFreshExplicit(id))].slice(0, 5);
-	const profileIds = [...new Set(coerce(leaf.profile_ids).filter((id) => shelfProfiles.has(id)))].slice(0, 3);
-	const result = probeResult(db, candidates, { ids, profileIds });
+	const profileIds = [...new Set(coerce(leaf.profile_ids).filter((id) => shelfProfiles.has(id)))];
+	const activated = constrainActivation(candidates, ids, profileIds, activation, 5, 3);
+	const result = probeResult(db, candidates, activated, activation);
 	logRecall(db, {
 		owner, query: question, mode: "probe", hits: result.hints.length, latencyMs: Date.now() - startedAt,
-		detail: { strategy: "hierarchical", rootIds, shelves: shelfList.length, candidates: candidates.length, unwoven: pool.filter((m) => !woven.has(m.id)).length },
+		detail: { strategy: "hierarchical", rootIds, shelves: shelfList.length, candidates: candidates.length, unwoven: pool.filter((m) => !woven.has(m.id)).length, activation },
 	});
 	return result;
 }
@@ -744,15 +807,18 @@ export async function recall(
 	let ids: number[];
 	let profileIds: number[];
 	let gist: string | null;
+	let activation = fallbackActivation(contextQuery);
 	let degraded = false;
 	try {
-		({ ids, profileIds, gist } = await pick(db, contextQuery, candidates, limit, owner, alreadyBlock, profileMax, opts?.auto ? "rerank" : "probe-pick"));
+		({ ids, profileIds, gist, activation } = await pick(db, contextQuery, candidates, limit, owner, alreadyBlock, profileMax, opts?.auto ? "rerank" : "probe-pick"));
 	} catch (err) {
-		// Graceful degradation: LLM down/quota out → pool order (evidence/recency),
-		// no profiles. 变笨但不断线.
+		// A selector outage must not inject arbitrary id-head entries. Degrade to
+		// actual keyword hits only, still bounded by the same activation policy.
 		degraded = true;
-		console.error(`[ruyi] pick failed, degraded to pool ordering: ${err instanceof Error ? err.message : err}`);
-		ids = candidates.slice(0, limit).map((m) => m.id);
+		console.error(`[ruyi] pick failed, degraded to FTS: ${err instanceof Error ? err.message : err}`);
+		const valid = new Set(candidates.map((m) => m.id));
+		const ftsIds = ftsSearchScored(db, contextQuery, 30, owner).map((h) => h.row.id).filter((id) => valid.has(id));
+		({ ids } = constrainActivation(candidates, ftsIds, [], activation, limit, 0));
 		profileIds = [];
 		gist = null;
 	}
@@ -771,7 +837,7 @@ export async function recall(
 	const freshProfiles = ledger ? result.profiles.filter((p) => !ledger.has(`p:${p.id}`)) : result.profiles;
 	suppressed += result.profiles.length - freshProfiles.length;
 	logNew(result.memories, freshProfiles);
-	const final: RecallResult = { memories: result.memories, profiles: freshProfiles, deduped: suppressed, topicId: turn?.topicId, replyId: turn?.replyId };
+	const final: RecallResult = { memories: result.memories, profiles: freshProfiles, deduped: suppressed, topicId: turn?.topicId, replyId: turn?.replyId, activation };
 	logRecall(db, {
 		owner,
 		query,
@@ -782,6 +848,7 @@ export async function recall(
 			candidates: candidates.length,
 			ftsHits: pool.ftsHitCount,
 			selector: true,
+			activation,
 			profiles: freshProfiles.length,
 			deduped: suppressed,
 			...(degraded ? { degraded: true } : {}),

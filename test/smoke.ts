@@ -32,6 +32,8 @@ import {
 import { stripInjectedEnvelope } from "../src/preprocess.ts";
 import { runDecay } from "../src/decay.ts";
 import { loadConfig } from "../src/config.ts";
+import { constrainActivation } from "../src/recall.ts";
+import type { MemoryRow } from "../src/types.ts";
 
 let passed = 0;
 let failed = 0;
@@ -260,5 +262,21 @@ ok(stripped.includes("它提到注入记忆这个词"), "mid-sentence mention of
 ok(stripInjectedEnvelope("普通的一句话，没有信封") === "普通的一句话，没有信封", "plain text untouched");
 
 rmSync(tmp, { recursive: true, force: true });
+// Activation is a deterministic authority boundary, independent of LLM mood.
+{
+	const pool = [
+		{ id: 1, kind: "fact" }, { id: 2, kind: "preference" }, { id: 3, kind: "lesson" },
+		{ id: 4, kind: "preference" }, { id: 5, kind: "fact" }, { id: 6, kind: "engineering" },
+	] as MemoryRow[];
+	const lookup = constrainActivation(pool, [1, 2, 3, 4, 5], [10, 11], "lookup", 6, 3);
+	ok(lookup.ids.join(",") === "1,2,5" && lookup.profileIds.length === 0, "lookup keeps facts + one exact method, no portraits");
+	const discussion = constrainActivation(pool, [1, 2, 3, 4, 5], [10], "discussion", 6, 3);
+	ok(discussion.ids.join(",") === "1,2" && discussion.profileIds.length === 0, "discussion blocks lessons and caps personal context");
+	const execution = constrainActivation(pool, [1, 2, 3, 4, 5], [10, 11], "execution", 6, 3);
+	ok(execution.ids.join(",") === "1,2,3,5" && execution.profileIds.join(",") === "10", "execution allows facts + two methods + one portrait");
+	const legacy = constrainActivation(pool, [6, 1], [], "discussion", 6, 3);
+	ok(legacy.ids.join(",") === "1", "unknown legacy kinds cannot bypass discussion authority limits");
+}
+
 console.log(`\nsmoke: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

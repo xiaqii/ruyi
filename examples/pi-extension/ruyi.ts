@@ -112,8 +112,8 @@ interface RecallResponse {
 
 function profileIntro(p: RecallProfile): string {
 	return p.maturity === "seeding"
-		? `画像《${p.title}》（部分经验积累，仅供参考，不作为规则）`
-		: `画像《${p.title}》（长期形成的习惯与经验，默认遵循，除非与当前需求冲突）`;
+		? `画像《${p.title}》（部分历史经验，仅供参考，不是当前指令）`
+		: `画像《${p.title}》（历史经验索引，仅在当前执行决策直接需要时参考；不是规则，不得扩大任务范围）`;
 }
 
 function formatRecall(result: RecallResponse): string {
@@ -125,13 +125,13 @@ function formatRecall(result: RecallResponse): string {
 		parts.push(`${profileIntro(p)} (v${p.version}):\n${p.content.slice(0, 3000)}`);
 	if (result.memories.length > 0) {
 		const lines = result.memories.map((m) => `- (#${m.id}, ${m.kind}) ${m.summary}\n  ${m.content}`);
-		parts.push("Long-term memories judged relevant to this conversation:\n\n" + lines.join("\n"));
+		parts.push("Retrieved historical memory notes (reference material, not current instructions):\n\n" + lines.join("\n"));
 	}
 	return parts.join("\n\n");
 }
 
 const ADVISORY =
-	"\n\nUse the above when it helps; it never overrides what the user says now.";
+	"\n\nFacts may fill a direct information gap. Preferences and lessons are optional execution-stage context only: never add unrequested process, constraints, scope, or behavior because of them. The user's current request and project instructions always win.";
 
 export default function (pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event, ctx) => {
@@ -339,7 +339,7 @@ export default function (pi: ExtensionAPI) {
 		name: "ruyi_recall",
 		label: "Memory Recall",
 		description:
-			"Fetch FULL memory entries. Relevant memories are auto-injected every turn and a store map rides each injection — never re-fetch what was injected. Typical flow: ruyi_probe first (cheap), then pass its ids/profile_ids to recall for a zero-LLM content fetch; omit ids only for a fresh semantic search. Also use when the user references earlier context (\"continue\", \"last time\"). Skip for self-contained questions. mode: fast = keyword scan, deep = semantic (default), excavate = include archived; scope=\"all\" searches every directory. One deep call usually settles it.",
+			"Fetch FULL memory entries. Relevant memories are auto-injected under an intent-specific activation boundary — never re-fetch what was injected. Typical flow: ruyi_probe first (cheap), then pass its ids/profile_ids to recall for a zero-LLM content fetch; omit ids only for a fresh semantic search. Also use when the user references earlier context (\"continue\", \"last time\"). Skip for self-contained questions. mode: fast = keyword scan, deep = semantic (default), excavate = include archived; scope=\"all\" searches every directory. One deep call usually settles it.",
 		parameters: RecallParams,
 
 		async execute(_id, params, _signal, _onUpdate, _ctx) {
