@@ -806,7 +806,15 @@ export function ftsSearchScored(
 					 ORDER BY rank LIMIT ?`,
 				)
 				.all(match, ...statuses, owner, limit) as unknown as (MemoryRow & { rank: number })[];
-			for (const row of rows) hits.set(row.id, { row, hitScore: 1 });
+			// FTS5 rank is BM25 (lower/more negative = better). Preserve its
+			// ordering as a bounded 0.5..1 score instead of flattening every hit
+			// to 1, which made relevance fusion meaningless.
+			const best = Math.min(...rows.map((r) => r.rank));
+			const worst = Math.max(...rows.map((r) => r.rank));
+			for (const row of rows) {
+				const normalized = rows.length === 1 || best === worst ? 1 : (row.rank - worst) / (best - worst);
+				hits.set(row.id, { row, hitScore: 0.5 + 0.5 * normalized });
+			}
 		} catch {
 			// FTS syntax errors must never break recall.
 		}

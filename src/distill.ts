@@ -220,17 +220,29 @@ export async function merge(
 		.join("\n\n");
 	const existingList =
 		existing.length > 0
-			? existing.map((m) => `[id ${m.id}] (${m.kind}, ${m.last_seen_at.slice(0, 10)}) ${m.summary}`).join("\n")
+			? existing.map((m) => `[id ${m.id}] (${m.kind}, updated ${m.updated_at.slice(0, 10)}, ${m.origin}, evidence×${m.evidence}) ${m.summary}\n  existing content: ${m.content.replace(/\s+/g, " ").slice(0, 180)}`).join("\n")
 			: "(store is empty)";
-	const raw = await completeJson<RawMergeAction[]>({
+	const parsed = await completeJson<unknown>({
 		system: loadPrompt("merge"),
 		user: `NEW CANDIDATES:\n${newList}\n\nEXISTING MEMORIES:\n${existingList}`,
 		step: "merge",
 		runId: meta.runId,
 		sessionFile: meta.sessionFile,
 	});
+	// Models occasionally unwrap a one-candidate array or wrap it in an actions
+	// key. That is valid JSON but not yet a merge list; normalize explicitly
+	// instead of crashing the whole explicit write with "raw is not iterable".
+	const container = parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
+	const raw: RawMergeAction[] = Array.isArray(parsed)
+		? parsed as RawMergeAction[]
+		: container && Array.isArray(container.actions)
+			? container.actions as RawMergeAction[]
+			: container && typeof container.action === "string"
+				? [container as unknown as RawMergeAction]
+				: (() => { throw new Error(`merge response is not an action array: ${JSON.stringify(parsed)?.slice(0, 500)}`); })();
 	const actions: MergeAction[] = [];
 	for (const a of raw) {
+		if (!a || typeof a !== "object") continue;
 		const candidate = candidates[a.index];
 		if (!candidate) continue;
 		if (Array.isArray(a.keywords) && a.keywords.length > 0 && (!candidate.keywords || candidate.keywords.length === 0)) {

@@ -6,9 +6,10 @@ Return POINTERS that would materially help answer the question for THIS person:
 - A directly asked personal fact is the answer (car, devices, address, past decision): select its exact memory even if the fact looks trivial.
 - Select a portrait when its base color would shape the whole answer, not merely when it shares vocabulary.
 - Select a memory only when directly on-point. An example/analogy is not the subject.
-- Prefer current user-stated facts and explicit corrections over stale inferred material when both are visible.
+- Prefer current user-stated facts and explicit corrections over stale inferred material when both are visible. For a current-state question, put the newest explicit correction first; include an older entry only when it still supplies a distinct applicable rule or necessary history.
 - Generic world knowledge needs nothing; empty arrays are correct.
-- This is a probe, not the final synthesis: when two candidates look genuinely useful, return both and let the caller inspect the content. A false pointer is cheap; a missed relevant memory is the real loss.
+- Return AT MOST 5 memory ids and 3 profile ids. Adjacent anecdotes, historical model shopping, and background that merely shares vocabulary are noise, not pointers.
+- This is a probe, not the final synthesis: when two candidates are both directly useful, return both and let the caller inspect the content. A false pointer is cheap; a missed relevant memory is the real loss.
 
 Do not invent ids. Output ONLY JSON:
 {"ids": [<memory ids>], "profile_ids": [<profile ids>]}
