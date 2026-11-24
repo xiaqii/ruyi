@@ -80,9 +80,20 @@ if [ -n "$RELEASE_BRANCH" ] && [ "$RELEASE_BRANCH" != "main" ]; then
 	# already has everything up to here" mark. The two branches share history in
 	# different shapes (merges, squashes), so patch-identity heuristics misfire;
 	# the tag range is exact. Non-merge commits only — merges carry nothing new.
-	PREV_TAG="$(git tag --sort=-v:refname --merged HEAD | grep -v "^v$NEW$" | head -1)"
-	[ -n "$PREV_TAG" ] || { say "no previous release tag reachable from HEAD — carry onto main manually"; exit 1; }
-	RELEASE_COMMITS="$(git rev-list --reverse --no-merges "$PREV_TAG"..HEAD)"
+	# Tags are re-pointed at main's commits (step 6c), so they are NOT reachable
+	# from the working branch — "previous release" must be read from main.
+	# The working-branch commit that produced the previous release is found by
+	# its release subject; everything after it on this branch is what main lacks.
+	PREV_ON_MAIN="$(git tag --sort=-v:refname --merged main | grep -v "^v$NEW$" | head -1)"
+	[ -n "$PREV_ON_MAIN" ] || { say "no previous release tag on main — carry onto main manually"; exit 1; }
+	PREV_SUBJ="$(git log -1 --format=%s "$PREV_ON_MAIN" | sed 's/^\(release: \)//')"
+	PREV_HERE="$(git log --format=%H --fixed-strings --grep="release: $PREV_SUBJ" HEAD | head -1)"
+	if [ -z "$PREV_HERE" ]; then
+		# Fall back: the version-number commit of that release on this branch.
+		PREV_HERE="$(git log --format=%H --fixed-strings --grep="v${PREV_ON_MAIN#v}" HEAD | head -1)"
+	fi
+	[ -n "$PREV_HERE" ] || { say "cannot locate $PREV_ON_MAIN's commit on '$RELEASE_BRANCH' — carry onto main manually"; exit 1; }
+	RELEASE_COMMITS="$(git rev-list --reverse --no-merges "$PREV_HERE"..HEAD)"
 	say "carrying $(echo "$RELEASE_COMMITS" | wc -w | tr -d ' ') commit(s) since $PREV_TAG"
 	[ -n "$RELEASE_COMMITS" ] || { say "nothing to carry onto main"; exit 1; }
 	WT="$(mktemp -d /tmp/ruyi-release-main.XXXXXX)"

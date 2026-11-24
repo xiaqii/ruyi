@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.15.3] - 2026-11-24
+
+- Relevance gate: auto-injection drops from ~22.8K to ~4.7K tokens per turn by deciding relevance from the root index before opening a shelf; merge/verify unwrap invented wrapper keys; release pipeline carries release commits onto public main and packs from a clean worktree
 ## [1.15.2] - 2026-11-24
 
 - Three-tier model routing (recall/probe thinking-off, extraction on a mid-tier thinking-on model, whole-store rewrites on the strong tier); activation boundary (lookup/discussion/execution); personal/project visibility; probe to recall-by-ids zero-LLM fetch; verify and merge hardened against wrapped arrays; PID dream lock; real-time /stats dashboard
