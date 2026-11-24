@@ -291,17 +291,18 @@ export default function (pi: ExtensionAPI) {
 
 	const ProbeParams = Type.Object({
 		question: Type.String({ description: "Self-contained question, e.g. 'how is the user's network entry point set up'" }),
+		fallback: Type.Optional(Type.Literal("keyword"), { description: "Set only if a previous probe reported degraded/unavailable: zero-LLM keyword fallback" }),
 	});
 
 	pi.registerTool({
 		name: "ruyi_probe",
 		label: "ruyi probe",
 		description:
-			"Cheap relevance probe of the user's long-term memory. Call it AS OFTEN AS POSSIBLE and ALWAYS FIRST: whenever the user's past, preferences, projects, devices or environment might matter, probe before answering from guesswork, and always probe before any full recall. Returns only one-line pointers (#id + title) and injects nothing. No relevant pointers → answer directly, no recall. Relevant pointers → fetch them with recall, passing ids/profile_ids (zero-LLM direct fetch).",
+			"Check whether the user's long-term memory holds anything about a subject BEFORE relying on guesswork. Call it liberally — it returns only one-line pointers (#id + title), costs no conversation context, and an empty answer is a normal, useful result. Trigger whenever a turn touches the person's own world: their devices and accounts, past decisions, standing preferences, projects, family, health, finances, or a rule they once set. Self-contained world knowledge (a recipe, a syntax question, today's news) needs no probe. This turn's relevant memories were already auto-injected — do not probe to re-find them; probe to look something up that is not in front of you. Pointers you need → fetch with ruyi_recall passing ids/profile_ids (zero-LLM direct fetch).",
 		parameters: ProbeParams,
 		async execute(_toolCallId, params) {
 			const r = await api<{ hints?: Array<{ id: number; kind: string; line: string }>; profiles?: Array<{ id: number; title: string }>; serverTime?: string; error?: string }>(
-				"probe", `/probe`, { method: "POST", body: { question: params.question, owner: OWNER } },
+				"probe", `/probe`, { method: "POST", body: { question: params.question, owner: OWNER, cwd: process.cwd(), tier: params.fallback === "keyword" ? "quick" : "semantic" } },
 			);
 			if (!r) return { content: [{ type: "text", text: "(probe unavailable — service error or timeout; proceed without memory context)" }], details: { unavailable: true } };
 			const lines = [
@@ -338,7 +339,7 @@ export default function (pi: ExtensionAPI) {
 		name: "ruyi_recall",
 		label: "Memory Recall",
 		description:
-			"Fetch FULL memory entries. Relevant memories are auto-injected under an intent-specific activation boundary — never re-fetch what was injected. Typical flow: ruyi_probe first (cheap), then pass its ids/profile_ids to recall for a zero-LLM content fetch; omit ids only for a fresh semantic search. Also use when the user references earlier context (\"continue\", \"last time\"). Skip for self-contained questions. mode: fast = keyword scan, deep = semantic (default), excavate = include archived; scope=\"all\" searches every directory. One deep call usually settles it.",
+			"Fetch FULL memory entries by id. Normal flow: ruyi_probe gives pointers → pass its ids/profile_ids here (zero-LLM direct fetch). Only omit ids for a fresh semantic search when probing could not express what you need. Relevant memories for the current turn are already auto-injected — never re-fetch those. mode: fast = keyword scan, deep = semantic (default), excavate = include archived; scope=\"all\" searches every directory.",
 		parameters: RecallParams,
 
 		async execute(_id, params, _signal, _onUpdate, _ctx) {

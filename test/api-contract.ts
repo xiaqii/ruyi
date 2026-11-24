@@ -166,6 +166,13 @@ const projectId = insertMemory(
 	setMemoryVisibility(db, projectId, "personal");
 	const personal = await call("POST", "/recall", { query: scopeToken, k: 20, mode: "fast", cwd: "/root/pi", scope: "smart" });
 	ok((personal.json.memories as { id: number }[]).some((m) => m.id === projectId), "visibility=personal crosses cwds under smart scope");
+	// Probe tiers on a real fixture: quick is the zero-LLM literal pass and must
+	// surface the exact token it was given; activation is always reported.
+	{
+		const quick = await call("POST", "/probe", { question: scopeToken, tier: "quick", cwd: "/contract/project-a" });
+		const ids = Array.isArray(quick.json.hints) ? (quick.json.hints as { id: number }[]).map((h) => h.id) : [];
+		ok(quick.status === 200 && ids.includes(projectId) && typeof quick.json.activation === "string", "probe quick tier: zero-LLM literal pointer hit");
+	}
 	await call("POST", `/memories/${projectId}/forget`);
 }
 

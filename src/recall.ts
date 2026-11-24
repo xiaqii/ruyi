@@ -434,11 +434,14 @@ async function pick(
 	step = "rerank",
 ): Promise<{ ids: number[]; profileIds: number[]; gist: string | null; activation: ActivationMode }> {
 	if (pool.length === 0) return { ids: [], profileIds: [], gist: null, activation: fallbackActivation(query) };
+	// One short positioning line per memory: the display handle when one
+	// exists, otherwise the clipped summary. Keywords are deliberately NOT
+	// shown — they feed the FTS bypass, and appending them doubled the listing
+	// (~50K chars) without improving selection in the A/B. Semantic matching is
+	// the model's job; literal matching is the index's job.
+	const handle = (m: MemoryRow): string => m.mini.trim() || clip(m.summary.replace(/\s+/g, " "), 48);
 	const listing = pool
-		// Positioning mini is intentionally lossy; it hid the decisive
-		// "duplicate execution" hook in #2067 during the activation A/B.
-		// Selection reads the full one-line summary, not the shorter display tag.
-		.map((m) => `[id ${m.id}] (${m.kind}) ${clip(m.summary, 100)}`)
+		.map((m) => `[id ${m.id}] (${m.kind}) ${handle(m)}`)
 		.join("\n");
 	const profiles = listProfiles(db, owner);
 	const profileById = new Map(profiles.map((p) => [p.id, p]));
@@ -525,17 +528,19 @@ export async function probeFlat(
 	return result;
 }
 
-/** Two-step associative retrieval, modeled after how a person searches memory:
- *  a thin self-index ("what do I roughly know") routes to specialist shelves;
- *  only those shelves' chapter cards + memory pointers are then compared.
+/**
+ * Three-step associative retrieval, modeled after how a person searches memory:
+ * a thin self-index ("what do I roughly know") routes to a root shelf, the
+ * root's chapter titles pick the specialist chapters worth opening, and only
+ * those chapters' memory pointers are compared.
  *
- *  The hierarchy is NAVIGATION, NEVER A GATE: direct FTS hits and every
- *  not-yet-woven memory join the second step even when the root router missed
- *  their shelf. A wrong root therefore costs tokens, not recall.
+ * The hierarchy is NAVIGATION, NEVER A GATE: direct FTS hits and every
+ * not-yet-woven memory join the final step even when routing missed their
+ * shelf. A wrong route therefore costs tokens, not recall.
  *
- *  L0 root portraits → L1 specialist cards/pointers → (caller fetches L2 full
- *  content via recall/get). Raw sessions are L3, excavate-only. Two cheap LLM
- *  calls at most; the content fetch itself is SQL. */
+ * L0 root cards → L1 chapter titles → L2 chapter memory pointers → (caller
+ * fetches full content via recall-by-ids). Three cheap LLM calls at most.
+ */
 export async function probeHierarchical(
 	question: string,
 	owner: string,
@@ -546,14 +551,12 @@ export async function probeHierarchical(
 	const config = loadConfig();
 	const db = getDb(config.dbPath);
 	const effectiveScope = scope ?? config.recall.defaultScope;
-	const pool = gatherChannels(db, owner, effectiveScope, cwd).rows;
-	const allProfiles = listProfiles(db, owner);
-	if (pool.length === 0) return { hints: [], profiles: [] };
-	if (allProfiles.length === 0) return probeFlat(question, owner, cwd, effectiveScope);
-
+	const allProfiles = listProfiles(db, owner).filter((p) => p.status === "active");
 	const byProfile = new Map(allProfiles.map((p) => [p.id, p]));
-	const roots = allProfiles.filter((p) => !p.parent_id || !byProfile.has(p.parent_id));
+	const roots = allProfiles.filter((p) => !p.parent_id);
 	if (roots.length === 0) return probeFlat(question, owner, cwd, effectiveScope);
+
+	const pool = gatherChannels(db, owner, effectiveScope, cwd).rows;
 
 	// L0: the total portrait is just the root cards — thin but complete.
 	const rootListing = roots
@@ -561,7 +564,7 @@ export async function probeHierarchical(
 		.join("\n");
 	const route = await completeJson<{ root_ids?: unknown; search_terms?: unknown; activation?: string }>({
 		system: loadPrompt("probe-root"),
-		user: `SELF INDEX (root portraits):\n${rootListing}\n\nQUESTION:\n${question}\n\nPick up to 2 root ids.`,
+		user: `SELF INDEX (root portraits):\n${rootListing}\n\nQUESTION:\n${question}\n\nPick exactly one root id; pick a second only when the question genuinely spans two shelves.`,
 		step: "probe-pick",
 	});
 	const activation = normalizeActivation(route.activation, question);
@@ -605,8 +608,8 @@ export async function probeHierarchical(
 	}
 
 	// Recency/unwoven bypass: memories not yet referenced by any active profile
-	// are all visible (20 at the time of implementation). Nightly weaving must
-	// never be a prerequisite for being findable.
+	// are all visible. Nightly weaving must never be a prerequisite for being
+	// findable.
 	const woven = new Set<number>();
 	for (const p of allProfiles) {
 		try { for (const id of JSON.parse(p.memory_ids || "[]") as number[]) woven.add(id); } catch { /* ignore */ }
@@ -615,11 +618,11 @@ export async function probeHierarchical(
 
 	const candidates = [...candidateMemories.values()].sort((a, b) => a.id - b.id);
 	const shelfList = [...shelfProfiles.values()];
-	// If the root router found nothing, direct/unwoven candidates still get a
-	// fair judgement; an empty candidate set is the only legitimate early exit.
+	// If routing found nothing, direct/unwoven candidates still get a fair
+	// judgement; an empty candidate set is the only legitimate early exit.
 	if (candidates.length === 0 && shelfList.length === 0) {
-		logRecall(db, { owner, query: question, mode: "probe", hits: 0, latencyMs: Date.now() - startedAt, detail: { strategy: "hierarchical", rootIds, candidates: 0 } });
-		return { hints: [], profiles: [] };
+		logRecall(db, { owner, query: question, mode: "probe", hits: 0, latencyMs: Date.now() - startedAt, detail: { strategy: "hierarchical3", rootIds, candidates: 0, activation } });
+		return { hints: [], profiles: [], activation };
 	}
 
 	const memoryListing = candidates.map((m) => {
@@ -633,7 +636,7 @@ export async function probeHierarchical(
 		].join(", ");
 		const freshExplicit = m.origin === "user_stated" && Date.now() - new Date(m.updated_at).getTime() < 3 * 86_400_000;
 		const excerpt = freshExplicit ? `\n  evidence: ${clip(m.content.replace(/\s+/g, " "), 160)}` : "";
-		return `[id ${m.id}] (${m.kind}; ${meta}) ${clip(m.summary, 120)}${excerpt}`;
+		return `[id ${m.id}] (${m.kind}; ${meta}) ${clip(m.summary, 90)}${excerpt}`;
 	}).join("\n");
 	const profileListing = shelfList
 		.map((p) => {
@@ -654,15 +657,60 @@ export async function probeHierarchical(
 		const m = candidateMemories.get(id);
 		return !!m && m.origin === "user_stated" && Date.now() - new Date(m.updated_at).getTime() < 3 * 86_400_000;
 	};
-	const ids = [...chosen.filter(isFreshExplicit), ...chosen.filter((id) => !isFreshExplicit(id))].slice(0, 5);
+	const ids = [...chosen.filter(isFreshExplicit), ...chosen.filter((id) => !isFreshExplicit(id))];
 	const profileIds = [...new Set(coerce(leaf.profile_ids).filter((id) => shelfProfiles.has(id)))];
 	const activated = constrainActivation(candidates, ids, profileIds, activation, 5, 3);
 	const result = probeResult(db, candidates, activated, activation);
 	logRecall(db, {
 		owner, query: question, mode: "probe", hits: result.hints.length, latencyMs: Date.now() - startedAt,
-		detail: { strategy: "hierarchical", rootIds, shelves: shelfList.length, candidates: candidates.length, unwoven: pool.filter((m) => !woven.has(m.id)).length, activation },
+		detail: { strategy: "hierarchical3", rootIds, chapters: shelfList.map((p) => p.id), candidates: candidates.length, unwoven: pool.filter((m) => !woven.has(m.id)).length, activation },
 	});
 	return result;
+}
+
+/**
+ * One-call semantic scan: the whole-store handle listing through the cheap
+ * probe model. It is what "frequent probing" should cost — one short call,
+ * no routing — while still understanding that "我开的什么车" is about the
+ * 风云X3L entry. Returns pointers only.
+ */
+export async function probeScan(
+	question: string,
+	owner: string,
+	cwd: string | null = null,
+	scope?: RecallScope,
+): Promise<ProbeResult> {
+	const startedAt = Date.now();
+	const config = loadConfig();
+	const db = getDb(config.dbPath);
+	const pool = gatherChannels(db, owner, scope ?? config.recall.defaultScope, cwd).rows;
+	if (pool.length === 0) return { hints: [], profiles: [] };
+	const picked = await pick(db, question, pool, 5, owner, undefined, 0, "probe-pick");
+	const result = probeResult(db, pool, { ids: picked.ids, profileIds: [] }, picked.activation);
+	logRecall(db, { owner, query: question, mode: "probe", hits: result.hints.length, latencyMs: Date.now() - startedAt, detail: { strategy: "scan", pool: pool.length, activation: picked.activation } });
+	return result;
+}
+
+export function probeQuick(
+	question: string,
+	owner: string,
+	cwd: string | null = null,
+	scope?: RecallScope,
+	limit = 5,
+): ProbeResult {
+	const startedAt = Date.now();
+	const config = loadConfig();
+	const db = getDb(config.dbPath);
+	const effectiveScope = scope ?? config.recall.defaultScope;
+	const pool = gatherCandidates(db, question, owner, effectiveScope, cwd);
+	// Only real matches are pointers: the recency/pinned channels alone would
+	// make every probe look like a hit.
+	const hits = pool.rows
+		.filter((m) => (pool.scores.get(m.id) ?? 0) >= 0.5)
+		.map((m) => ({ id: m.id, kind: m.kind, line: clip(m.summary, 100) }))
+		.slice(0, limit);
+	logRecall(db, { owner, query: question, mode: "probe", hits: hits.length, latencyMs: Date.now() - startedAt, detail: { strategy: "quick", pool: pool.rows.length, activation: fallbackActivation(question) } });
+	return { hints: hits, profiles: [], activation: fallbackActivation(question) };
 }
 
 export async function probe(
@@ -670,7 +718,16 @@ export async function probe(
 	owner: string,
 	cwd: string | null = null,
 	scope?: RecallScope,
+	tier: "quick" | "scan" | "semantic" = "semantic",
 ): Promise<ProbeResult> {
+	if (tier === "quick") return probeQuick(question, owner, cwd, scope);
+	if (tier === "scan") {
+		try {
+			return await probeScan(question, owner, cwd, scope);
+		} catch {
+			return probeQuick(question, owner, cwd, scope); // zero-LLM floor: never fail a scan
+		}
+	}
 	const config = loadConfig();
 	if (config.recall.probeStrategy === "flat") return probeFlat(question, owner, cwd, scope);
 	try {
