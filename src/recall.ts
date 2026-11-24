@@ -562,9 +562,9 @@ export async function probeHierarchical(
 	const rootListing = roots
 		.map((p) => `[id ${p.id}] ${p.title} — ${p.abstract || clip(p.content.replace(/\s+/g, " "), 80)}`)
 		.join("\n");
-	const route = await completeJson<{ root_ids?: unknown; search_terms?: unknown; activation?: string }>({
+	const route = await completeJson<{ relevant?: unknown; root_ids?: unknown; search_terms?: unknown; activation?: string }>({
 		system: loadPrompt("probe-root"),
-		user: `SELF INDEX (root portraits):\n${rootListing}\n\nQUESTION:\n${question}\n\nPick exactly one root id; pick a second only when the question genuinely spans two shelves.`,
+		user: `SELF INDEX (root portraits):\n${rootListing}\n\nQUESTION:\n${question}\n\nDecide relevance first. If relevant, pick exactly one root id; a second only when the question genuinely spans two shelves.`,
 		step: "probe-pick",
 	});
 	const activation = normalizeActivation(route.activation, question);
@@ -572,6 +572,20 @@ export async function probeHierarchical(
 		.map(Number)
 		.filter((id) => roots.some((p) => p.id === id))
 		.slice(0, 2);
+	// Relevance gate: a turn that would read the same for a stranger needs no
+	// memory at all. One short call (~1K tokens) instead of a whole-store pass.
+	if (route.relevant === false || (rootIds.length === 0 && route.relevant !== true)) {
+		const result: ProbeResult = { hints: [], profiles: [], activation };
+		logRecall(db, { owner, query: question, mode: "probe", hits: 0, latencyMs: Date.now() - startedAt, detail: { strategy: "hierarchical3", gate: "not-relevant", rootIds: [], activation } });
+		return result;
+	}
+	if (rootIds.length === 0) {
+		// Relevant but unroutable: fall through to the whole-store selector so a
+		// routing miss never hides a memory.
+		const flat = await probeFlat(question, owner, cwd, effectiveScope);
+		logRecall(db, { owner, query: question, mode: "probe", hits: flat.hints.length, latencyMs: Date.now() - startedAt, detail: { strategy: "flat-after-gate", activation } });
+		return { ...flat, activation };
+	}
 
 	// Selected roots + all their descendants form the specialist shelves.
 	const shelfProfiles = new Map<number, ProfileRow>();
@@ -739,6 +753,28 @@ export async function probe(
 	}
 }
 
+/**
+ * Cheap pre-check for automatic injection: would this turn read the same for a
+ * stranger? Only the root portrait index (a dozen lines) is shown. True means
+ * "no memory needed" — the expected outcome for most turns.
+ */
+export async function turnIsIrrelevant(db: ReturnType<typeof getDb>, query: string, owner: string): Promise<boolean> {
+	const roots = listProfiles(db, owner).filter((p) => p.status === "active" && !p.parent_id);
+	if (roots.length === 0) return false;
+	const listing = roots
+		.map((p) => `[id ${p.id}] ${p.title} — ${p.abstract || clip(p.content.replace(/\s+/g, " "), 80)}`)
+		.join("\n");
+	const route = await completeJson<{ relevant?: unknown; root_ids?: unknown }>({
+		system: loadPrompt("probe-root"),
+		user: `SELF INDEX (root portraits):\n${listing}\n\nTURN:\n${clip(query, 6000)}\n\nDecide relevance first. If relevant, pick exactly one root id.`,
+		step: "probe-pick",
+		maxTokens: 300,
+	});
+	if (route.relevant === false) return true;
+	const ids = (Array.isArray(route.root_ids) ? route.root_ids : []).map(Number).filter((id) => roots.some((p) => p.id === id));
+	return ids.length === 0 && route.relevant !== true;
+}
+
 // ---------------------------------------------------------------------------
 // Public entry: fast / deep / excavate
 // ---------------------------------------------------------------------------
@@ -841,6 +877,32 @@ export async function recall(
 		}
 	}
 
+	// Automatic injection rides the same hierarchical path as an agent probe:
+	// relevance gate (root index, ~1K tokens) → ONE shelf's pointers (~5–15K).
+	// The whole-store pass below is only the fallback when routing cannot place
+	// a relevant turn. Paying for the gate and then for the whole store anyway
+	// was the worst of both (74K tokens observed on one turn).
+	let hier: { ids: number[]; profileIds: number[]; activation: ActivationMode } | null = null;
+	let activation: ActivationMode = fallbackActivation(contextQuery);
+	try {
+		const h = await probeHierarchical(contextQuery, owner, cwd, effectiveScope);
+		activation = h.activation ?? activation;
+		hier = { ids: h.hints.map((x) => x.id).filter((id) => pool.rows.some((m) => m.id === id) && !ledger?.has(`m:${id}`)), profileIds: h.profiles.map((p) => p.id).filter((id) => !ledger?.has(`p:${id}`)), activation };
+		if (hier.ids.length === 0 && hier.profileIds.length === 0) {
+			// Gate said "not relevant" (or the shelf held nothing new for this
+			// conversation): nothing to inject, nothing more to pay for.
+			if (turn) {
+				logReply(db, turn.topicId, turn.replyId, query, []);
+				void refreshSummaryFallback(db, turn.topicId, turn.replyId);
+			}
+			logRecall(db, { owner, query, mode: "deep", hits: 0, latencyMs: Date.now() - startedAt, detail: { gate: "not-relevant", deduped: suppressed, activation } });
+			return { memories: [], profiles: [], deduped: suppressed, topicId: turn?.topicId, replyId: turn?.replyId, activation };
+		}
+	} catch (err) {
+		// Routing/gate outage must never make memory unavailable: whole-store selection.
+		console.error(`[ruyi] hierarchical inject failed, falling back to whole-store: ${err instanceof Error ? err.message : err}`);
+	}
+
 	// No id-head cap: stable id order otherwise systematically hides the NEWEST
 	// memories once the store outgrows the cap. The cheap normal path is now
 	// probe → recall-by-ids; a full deep selection must at least be complete.
@@ -863,10 +925,11 @@ export async function recall(
 	const profileMax = config.inject.profileMax ?? 3;
 	let ids: number[];
 	let profileIds: number[];
-	let gist: string | null;
-	let activation = fallbackActivation(contextQuery);
+	let gist: string | null = null;
 	let degraded = false;
-	try {
+	if (hier) {
+		({ ids, profileIds } = hier);
+	} else try {
 		({ ids, profileIds, gist, activation } = await pick(db, contextQuery, candidates, limit, owner, alreadyBlock, profileMax, opts?.auto ? "rerank" : "probe-pick"));
 	} catch (err) {
 		// A selector outage must not inject arbitrary id-head entries. Degrade to

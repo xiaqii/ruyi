@@ -149,6 +149,12 @@ if (tmpId === -1) throw new Error("fixture insert blocked by tombstone — conte
 	ok(json.storeCard === null, "routine recall does not smuggle the prescriptive store map around activation");
 	const mapped = await call("POST", "/recall", { query: "diagnostic store map", ids: [tmpId], include_store_card: true });
 	ok(mapped.json.storeCard === null || typeof mapped.json.storeCard === "string", "store map explicit diagnostic opt-in has the documented nullable shape");
+	// Relevance gate: a turn any stranger would answer identically must not
+	// open the store. Costs ~1K tokens, returns nothing, and is not an error.
+	{
+		const g = await call("POST", "/recall", { query: "What is the capital of Australia?", k: 6, mode: "deep" });
+		ok(g.status === 200 && Array.isArray(g.json.memories) && g.json.memories.length === 0 && typeof g.json.activation === "string", "relevance gate stops a generic turn without opening the store");
+	}
 }
 // Explicit project visibility: same query, only its owning cwd may recall it.
 const scopeToken = `scope${Date.now()}`;
