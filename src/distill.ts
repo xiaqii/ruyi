@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, writeSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { loadConfig, STATE_ROOT } from "./config.ts";
@@ -21,7 +21,7 @@ import {
 	upsertSessionRegistry,
 } from "./db.ts";
 import { extractSessionUid } from "./sync.ts";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { completeJson } from "./llm.ts";
 import { readSessionDelta, readSessionCwd } from "./preprocess.ts";
 import { loadPrompt } from "./prompts.ts";
@@ -60,10 +60,23 @@ function acquireLock(): () => void {
 	const lockPath = resolve(STATE_ROOT, "data", "dream.lock");
 	if (existsSync(lockPath)) {
 		const age = Date.now() - statSync(lockPath).mtimeMs;
-		if (age < LOCK_STALE_MS) throw new Error("another dream run is in progress");
+		// A lock is only real while its holder is alive. A systemd restart sends
+		// SIGTERM (no finally block runs) and leaves the file behind; waiting out
+		// the 2h staleness timer then silently skipped the whole night.
+		const holder = readFileSync(lockPath, "utf8").trim();
+		if (/^\d+$/.test(holder)) {
+			// PID lock: live only while that process exists.
+			let alive = false;
+			try { process.kill(Number(holder), 0); alive = true; } catch { alive = false; }
+			if (alive && Number(holder) !== process.pid) throw new Error(`another dream run is in progress (pid ${holder})`);
+		} else if (age < LOCK_STALE_MS) {
+			// Legacy empty lock from before PIDs were recorded: only staleness can tell.
+			throw new Error("another dream run is in progress");
+		}
 		rmSync(lockPath);
 	}
 	const fd = openSync(lockPath, "wx");
+	writeSync(fd, String(process.pid));
 	closeSync(fd);
 	return () => {
 		try {
@@ -192,7 +205,13 @@ export async function verify(db: ReturnType<typeof getDb>, candidates: Candidate
 		sessionFile: meta.sessionFile,
 	});
 	const container = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
-	const raw = (Array.isArray(parsed) ? parsed : container && Array.isArray(container.verdicts) ? container.verdicts : container && typeof container.index === "number" ? [container] : []) as { index?: unknown; verdict?: unknown; confidence?: unknown; origin?: unknown }[];
+	// Observed wrapper keys on the thinking-on mid-tier model: {"candidates":[…]}
+	// (bleed-over from the extractor schema), {"verdicts":[…]}, {"results":[…]},
+	// a bare object, or a bare array. Accept any array-valued member as a last
+	// resort so a wrapper key we have not seen cannot disable the gate.
+	const wrapped = container ? ["verdicts", "candidates", "results", "judgements", "entries"].find((k) => Array.isArray(container[k])) : undefined;
+	const anyArray = !wrapped && container ? Object.values(container).find((v) => Array.isArray(v)) as unknown[] | undefined : undefined;
+	const raw = (Array.isArray(parsed) ? parsed : wrapped ? container![wrapped] : anyArray ?? (container && typeof container.index === "number" ? [container] : [])) as { index?: unknown; verdict?: unknown; confidence?: unknown; origin?: unknown }[];
 	const byIndex = new Map<number, { verdict: string; confidence?: number; origin?: Candidate["origin"] }>();
 	for (const v of raw) {
 		if (!v || typeof v !== "object") continue;
