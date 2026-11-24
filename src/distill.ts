@@ -176,26 +176,39 @@ async function extract(
 	return parsed;
 }
 
-async function verify(candidates: Candidate[], meta: { runId: string; sessionFile: string }): Promise<Candidate[]> {
+export async function verify(db: ReturnType<typeof getDb>, candidates: Candidate[], meta: { runId: string; sessionFile: string }): Promise<Candidate[]> {
 	const listing = candidates
 		.map((c, i) => `[${i}] (${c.kind}/${c.origin}, confidence ${c.confidence}) ${c.summary}\n  content: ${c.content}\n  quote: ${c.quote ?? "(none)"}`)
 		.join("\n\n");
-	const verdicts = await completeJson<{ index: number; verdict: string; confidence?: number; origin?: Candidate["origin"] }[]>({
+	// The prompt demands one entry per candidate, but models do return a lone
+	// object or a wrapped array. Normalize every shape; a candidate the gate
+	// simply forgot is kept at the extractor's judgment, not silently dropped
+	// and never allowed to crash the whole segment.
+	const parsed = await completeJson<unknown>({
 		system: loadPrompt("verify"),
-		user: `CANDIDATES:\n${listing}`,
+		user: `CANDIDATES (${candidates.length}):\n${listing}\n\nReturn a JSON array with exactly ${candidates.length} entries.`,
 		step: "verify",
 		runId: meta.runId,
 		sessionFile: meta.sessionFile,
 	});
-	const kept: Candidate[] = [];
-	for (const v of verdicts) {
-		if (v.verdict !== "keep") continue;
-		const c = candidates[v.index];
-		if (!c) continue;
-		if (typeof v.confidence === "number") c.confidence = v.confidence;
-		if (v.origin) c.origin = v.origin;
-		kept.push(c);
+	const container = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+	const raw = (Array.isArray(parsed) ? parsed : container && Array.isArray(container.verdicts) ? container.verdicts : container && typeof container.index === "number" ? [container] : []) as { index?: unknown; verdict?: unknown; confidence?: unknown; origin?: unknown }[];
+	const byIndex = new Map<number, { verdict: string; confidence?: number; origin?: Candidate["origin"] }>();
+	for (const v of raw) {
+		if (!v || typeof v !== "object") continue;
+		const idx = Number(v.index);
+		if (!Number.isInteger(idx)) continue;
+		byIndex.set(idx, { verdict: String(v.verdict ?? ""), ...(typeof v.confidence === "number" ? { confidence: v.confidence } : {}), ...(v.origin ? { origin: v.origin as Candidate["origin"] } : {}) });
 	}
+	const kept: Candidate[] = [];
+	candidates.forEach((c, i) => {
+		const v = byIndex.get(i);
+		if (v && v.verdict && v.verdict !== "keep") return; // explicit drop
+		if (v?.confidence !== undefined) c.confidence = v.confidence;
+		if (v?.origin) c.origin = v.origin;
+		kept.push(c);
+	});
+	if (byIndex.size < candidates.length) logMemoryAction(db, meta.runId, "VERIFY_INCOMPLETE", { sessionFile: meta.sessionFile, candidates: candidates.length, answered: byIndex.size });
 	return kept;
 }
 
@@ -530,7 +543,7 @@ export async function runDream(opts: DreamOptions = {}): Promise<DreamReport> {
 
 					const survivors =
 						pipeline === "full" && extracted.candidates.length > 0
-							? await verify(extracted.candidates, meta)
+							? await verify(db, extracted.candidates, meta)
 							: extracted.candidates;
 
 					const actions = await merge(survivors, existing, meta);
@@ -664,7 +677,7 @@ export async function distillText(
 		return { triaged: false, actions: 0, new: 0, reinforced: 0, refined: 0, superseded: 0 };
 	}
 	const survivors =
-		config.dream.pipeline === "full" ? await verify(extracted.candidates, meta) : extracted.candidates;
+		config.dream.pipeline === "full" ? await verify(db, extracted.candidates, meta) : extracted.candidates;
 	const actions = await merge(survivors, existing, meta);
 	applyActions(db, actions, source, runId, report, scope);
 	return {

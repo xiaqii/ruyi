@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.14.2] - 2026-11-24
+
+**Dream-prompt A/B on a mid-tier model, and a real verify bug it exposed.** Same three real session segments, same extract/verify prompts: `kimi-for-coding` (thinking on, medium) finished each segment in 10–14s vs 84–130s for `k3.1-pro`, and kept 8 candidates vs ≤1 — including reusable compliance knowledge (WeChat deep-synthesis category evidence, Aliyun Bailian "technical supporter" filing path with filing numbers) and environment facts (ECS nginx layout, self-compiled PHP stack, fake-ip download workaround) that the strong model's gate dropped as "one-off". On a pure methodology segment the strong model was slightly better. Selection and distillation both over-think on strong models; a mid-tier model is a credible dream tier, with a slightly stricter verify for unendorsed assistant conclusions.
+
+Fixes a defect both models hit: `verify` returned a single object instead of an array, which would crash the whole segment. The prompt now demands one entry per candidate, and the code normalizes lone/wrapped objects, keeps candidates the gate forgot at the extractor's judgment, and logs `VERIFY_INCOMPLETE`. Smoke 67, API contract 62.
 ## [1.14.1] - 2026-11-24
 
 **Prompt robustness proven on a mid-tier model.** Same 21 probe questions, same prompts and hierarchy, probe tier switched to `kimi-for-coding` with thinking ON at low effort: 19/19 effective hits (two scoring-key mismatches were adjacent correct answers), matching the production thinking-off tier — including intent classification, single-root routing and fresh-correction priority. Thinking-on cost ~2x latency (5.3s vs 2.7s) and more input (8.2K vs 6.9K) for no accuracy gain, and over-thought one root routing into an empty result. The selector prompts are not dependent on a strong model.

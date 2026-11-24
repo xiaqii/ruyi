@@ -11,6 +11,8 @@ For each candidate, ask yourself:
 
 Trust your judgment over the extractor's enthusiasm. Dropping half the candidates is a normal, healthy outcome; a small store of true memories beats a large store of plausible ones.
 
+Return ONLY a JSON array. It MUST contain exactly one entry for EVERY candidate — every candidate gets one entry, in the same order. Never return a single object, never return fewer entries than there are candidates.
+
 Return ONLY a JSON array, one entry per candidate, in the same order:
 
 ```json
