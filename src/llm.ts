@@ -107,6 +107,8 @@ interface ResolvedLlm {
 	maxTokens: number;
 	requestTimeoutMs: number;
 	thinking: "off" | "default" | number;
+	/** OpenAI-style reasoning effort; only sent while thinking runs. */
+	reasoningEffort?: "low" | "medium" | "high";
 	stream?: boolean;
 	temperature?: number;
 }
@@ -135,6 +137,7 @@ export function resolveLlm(step: string): ResolvedLlm {
 		// trigger the 400 downgrade path. Dream tier keeps the base setting:
 		// thinking is where distillation quality comes from.
 		thinking: override?.thinking ?? (tier === "recall" ? "off" : (base.thinking ?? "default")),
+		reasoningEffort: override?.reasoningEffort ?? base.reasoningEffort,
 	};
 }
 
@@ -144,7 +147,7 @@ interface Attempt {
 }
 
 /** Build provider request body; `fixes` records downgrades already applied (for 400-driven retry). */
-function buildBody(llm: ResolvedLlm, opts: CompleteOptions, fixes: Set<string>): Record<string, unknown> {
+export function buildBody(llm: ResolvedLlm, opts: CompleteOptions, fixes: Set<string>): Record<string, unknown> {
 	const maxTok = opts.maxTokens ?? llm.maxTokens;
 	if (llm.protocol === "openai") {
 		const body: Record<string, unknown> = {
@@ -169,7 +172,12 @@ function buildBody(llm: ResolvedLlm, opts: CompleteOptions, fixes: Set<string>):
 		if (llm.thinking === "off" && !fixes.has("thinking")) {
 			if (llm.baseUrl.includes("api.kimi.com/coding")) body.thinking = { type: "disabled" };
 			else body.enable_thinking = false;
+		} else if (!fixes.has("thinking") && typeof llm.thinking === "number") {
+			body.thinking = { type: "enabled", budget_tokens: llm.thinking };
 		}
+		// Reasoning effort only matters while thinking runs; providers that reject
+		// the parameter take the usual 400 downgrade path.
+		if (llm.thinking !== "off" && llm.reasoningEffort && !fixes.has("reasoning_effort")) body.reasoning_effort = llm.reasoningEffort;
 		// SSE streaming keeps long calls alive on gateways that silently drop
 		// long-running non-streaming requests (token-plan: >~2min = fetch failed).
 		if (llm.stream) {
@@ -188,6 +196,9 @@ function buildBody(llm: ResolvedLlm, opts: CompleteOptions, fixes: Set<string>):
 	if (!fixes.has("thinking")) {
 		if (llm.thinking === "off") body.thinking = { type: "disabled" };
 		else if (typeof llm.thinking === "number") body.thinking = { type: "enabled", budget_tokens: llm.thinking };
+		// Reasoning effort is only meaningful while thinking runs; providers that
+		// reject the parameter go through the usual 400 downgrade path.
+		if (llm.thinking !== "off" && llm.reasoningEffort) body.reasoning_effort = llm.reasoningEffort;
 	}
 	const temp = opts.temperature ?? llm.temperature ?? (PROBE_STEPS.has(opts.step) ? 0 : RECALL_STEPS.has(opts.step) ? 0.2 : undefined);
 	if (!fixes.has("temperature") && temp !== undefined) body.temperature = temp;

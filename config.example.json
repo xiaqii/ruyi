@@ -27,6 +27,7 @@
       "Single-model setups work but every user turn pays thinking-model latency/cost — doctor will WARN.",
       "Cheap-and-good recall options: qwen3.7-flash (new DashScope accounts get 1M free tokens), deepseek-chat, claude-haiku-4-5. Remember thinking:'off'.",
       "OpenAI-compatible endpoints (DashScope/qwen): thinking:'off' is sent as enable_thinking:false automatically.",
+      "Optional llm.reasoningEffort: 'low'|'medium'|'high' for OpenAI-style endpoints that expose it; only sent while thinking is on. Measured on kimi-for-coding: probe with thinking-on/low matched thinking-off on 21 questions but was ~2x slower — selection tasks do not need thinking.",
       "Kimi coding endpoint (api.kimi.com/coding): thinking:'off' is sent as thinking:{type:'disabled'}; use temperature:0.6 (enable_thinking:false is accepted but ignored). Verified with kimi-for-coding; k3.1-pro is available for the dream tier."
     ]
   },
