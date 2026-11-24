@@ -67,15 +67,50 @@ git add package.json package-lock.json CHANGELOG.md
 # the version lives in the tag and CHANGELOG
 git commit -q -m "release: $NOTE"
 git tag -a "v$NEW" -m "v$NEW: $NOTE"
-git push --follow-tags
+
+# 6b. The public branch is always "main". Production may run on a local
+#     long-lived branch (experimental work never gets pushed); in that case the
+#     release commits — and only those — are carried onto main via a throwaway
+#     worktree, and the tag is re-pointed at main's commit. Pushing the working
+#     branch itself would publish the experiments.
+RELEASE_BRANCH="$(git branch --show-current)"
+if [ -n "$RELEASE_BRANCH" ] && [ "$RELEASE_BRANCH" != "main" ]; then
+	say "carrying release onto main from '$RELEASE_BRANCH'"
+	# The previous release tag on the working branch is the authoritative "main
+	# already has everything up to here" mark. The two branches share history in
+	# different shapes (merges, squashes), so patch-identity heuristics misfire;
+	# the tag range is exact. Non-merge commits only — merges carry nothing new.
+	PREV_TAG="$(git tag --sort=-v:refname --merged HEAD | grep -v "^v$NEW$" | head -1)"
+	[ -n "$PREV_TAG" ] || { say "no previous release tag reachable from HEAD — carry onto main manually"; exit 1; }
+	RELEASE_COMMITS="$(git rev-list --reverse --no-merges "$PREV_TAG"..HEAD)"
+	say "carrying $(echo "$RELEASE_COMMITS" | wc -w | tr -d ' ') commit(s) since $PREV_TAG"
+	[ -n "$RELEASE_COMMITS" ] || { say "nothing to carry onto main"; exit 1; }
+	WT="$(mktemp -d /tmp/ruyi-release-main.XXXXXX)"
+	git worktree add -q "$WT" main
+	# shellcheck disable=SC2086
+	( cd "$WT" && git cherry-pick $RELEASE_COMMITS ) || { git worktree remove --force "$WT"; say "cherry-pick onto main failed — resolve manually"; exit 1; }
+	( cd "$WT" && git tag -f "v$NEW" HEAD >/dev/null && git push -q origin main && git push -q origin "v$NEW" --force )
+	MAIN_COMMIT="$(git -C "$WT" rev-parse HEAD)"
+	git worktree remove --force "$WT"
+	git branch -f main "$MAIN_COMMIT"
+	git tag -f "v$NEW" "$MAIN_COMMIT" >/dev/null
+else
+	git push -q origin main
+	git push -q origin "v$NEW" --force
+fi
 
 # 7. attach an installable tarball to the GitHub release.
 # Why: npm i -g github:… is blocked twice over on npm ≥12 (git fetches need --allow-git,
 # install scripts need --allow-scripts) — a prebuilt tarball over https needs neither.
 say "pack + upload release asset ruyi.tgz"
 rm -f ruyi-*.tgz ruyi.tgz
-npm pack >/dev/null
-mv ruyi-*.tgz ruyi.tgz
+# Pack from the public commit in a clean worktree: the package must never contain
+# files that exist only on the working branch. npm ci is needed for prepack (tsc).
+PACK_DIR="$(mktemp -d /tmp/ruyi-release-pack.XXXXXX)"
+git worktree add -q "$PACK_DIR" "v$NEW"
+( cd "$PACK_DIR" && npm ci --ignore-scripts >/dev/null 2>&1; npm pack >/dev/null && mv ruyi-*.tgz "$OLDPWD/ruyi.tgz" )
+git worktree remove --force "$PACK_DIR"
+[ -f ruyi.tgz ] || { say "tarball build failed"; exit 1; }
 if gh release view "v$NEW" >/dev/null 2>&1; then
 	gh release upload "v$NEW" ruyi.tgz --clobber
 else
