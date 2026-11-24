@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.15.4] - 2026-11-24
+
+- Relevance gate: auto-injection drops from ~22.8K to ~4.7K tokens per turn by deciding relevance from the root index before opening a shelf; merge/verify unwrap invented wrapper keys; release pipeline carries release commits onto public main and packs from a clean worktree
 ## [1.15.3] - 2026-11-24
 
 - Relevance gate: auto-injection drops from ~22.8K to ~4.7K tokens per turn by deciding relevance from the root index before opening a shelf; merge/verify unwrap invented wrapper keys; release pipeline carries release commits onto public main and packs from a clean worktree
