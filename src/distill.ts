@@ -204,14 +204,7 @@ export async function verify(db: ReturnType<typeof getDb>, candidates: Candidate
 		runId: meta.runId,
 		sessionFile: meta.sessionFile,
 	});
-	const container = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
-	// Observed wrapper keys on the thinking-on mid-tier model: {"candidates":[…]}
-	// (bleed-over from the extractor schema), {"verdicts":[…]}, {"results":[…]},
-	// a bare object, or a bare array. Accept any array-valued member as a last
-	// resort so a wrapper key we have not seen cannot disable the gate.
-	const wrapped = container ? ["verdicts", "candidates", "results", "judgements", "entries"].find((k) => Array.isArray(container[k])) : undefined;
-	const anyArray = !wrapped && container ? Object.values(container).find((v) => Array.isArray(v)) as unknown[] | undefined : undefined;
-	const raw = (Array.isArray(parsed) ? parsed : wrapped ? container![wrapped] : anyArray ?? (container && typeof container.index === "number" ? [container] : [])) as { index?: unknown; verdict?: unknown; confidence?: unknown; origin?: unknown }[];
+	const raw = unwrapArray<{ index?: unknown; verdict?: unknown; confidence?: unknown; origin?: unknown }>(parsed, () => [], (c) => typeof c.index === "number" ? [c as never] : []);
 	const byIndex = new Map<number, { verdict: string; confidence?: number; origin?: Candidate["origin"] }>();
 	for (const v of raw) {
 		if (!v || typeof v !== "object") continue;
@@ -242,6 +235,24 @@ interface RawMergeAction {
 	domain?: string;
 }
 
+/**
+ * Models asked for a JSON array sometimes return it wrapped in an invented
+ * key, or as a lone element. Normalize: bare array → as is; object with an
+ * array-valued member (known keys first, then any) → that member; otherwise
+ * `lone` may promote a single element; finally `onMiss` decides (throw or []).
+ */
+export function unwrapArray<T>(parsed: unknown, onMiss: () => T[], lone?: (c: Record<string, unknown>) => T[]): T[] {
+	if (Array.isArray(parsed)) return parsed as T[];
+	const c = parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
+	if (!c) return onMiss();
+	for (const k of ["actions", "verdicts", "candidates", "results", "judgements", "entries", "items"]) {
+		if (Array.isArray(c[k])) return c[k] as T[];
+	}
+	const any = Object.values(c).find((v) => Array.isArray(v));
+	if (any) return any as T[];
+	return lone ? lone(c) : onMiss();
+}
+
 export async function merge(
 	candidates: Candidate[],
 	existing: MemoryRow[],
@@ -265,14 +276,13 @@ export async function merge(
 	// Models occasionally unwrap a one-candidate array or wrap it in an actions
 	// key. That is valid JSON but not yet a merge list; normalize explicitly
 	// instead of crashing the whole explicit write with "raw is not iterable".
-	const container = parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
-	const raw: RawMergeAction[] = Array.isArray(parsed)
-		? parsed as RawMergeAction[]
-		: container && Array.isArray(container.actions)
-			? container.actions as RawMergeAction[]
-			: container && typeof container.action === "string"
-				? [container as unknown as RawMergeAction]
-				: (() => { throw new Error(`merge response is not an action array: ${JSON.stringify(parsed)?.slice(0, 500)}`); })();
+	// The thinking-on mid-tier model wraps its array in an unpredictable key
+	// ("candidates", "actions", "results", …) — the same bleed-over seen in
+	// verify. Accept any array-valued member; a wrapper we have not seen must
+	// not turn a third of explicit writes into 500s.
+	const raw: RawMergeAction[] = unwrapArray<RawMergeAction>(parsed, () => {
+		throw new Error(`merge response is not an action array: ${JSON.stringify(parsed)?.slice(0, 500)}`);
+	});
 	const actions: MergeAction[] = [];
 	for (const a of raw) {
 		if (!a || typeof a !== "object") continue;

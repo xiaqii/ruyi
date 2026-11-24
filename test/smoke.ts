@@ -33,6 +33,7 @@ import { stripInjectedEnvelope } from "../src/preprocess.ts";
 import { runDecay } from "../src/decay.ts";
 import { loadConfig } from "../src/config.ts";
 import { constrainActivation } from "../src/recall.ts";
+import { unwrapArray } from "../src/distill.ts";
 import { buildBody, resolveLlm, extractJson } from "../src/llm.ts";
 import type { MemoryRow } from "../src/types.ts";
 
@@ -312,8 +313,12 @@ rmSync(tmp, { recursive: true, force: true });
 		'[{"index":0,"verdict":"keep"}]',
 		'{"index":0,"verdict":"keep"}',
 	];
-	const unwrap = (p: unknown): unknown[] => { const c = p && typeof p === "object" && !Array.isArray(p) ? p as Record<string, unknown> : null; const named = c ? ["verdicts","candidates","results"].find((k) => Array.isArray(c[k])) : undefined; const any = !named && c ? Object.values(c).find((v) => Array.isArray(v)) as unknown[] | undefined : undefined; return Array.isArray(p) ? p : named ? c![named] as unknown[] : any ?? (c && typeof c.index === "number" ? [c] : []); };
+	const unwrap = (p: unknown): unknown[] => unwrapArray<unknown>(p, () => [], (c) => (typeof c.index === "number" ? [c] : []));
 	ok(shapes.every((s) => unwrap(extractJson<unknown>(s)).length === 1), "verify gate unwraps every observed and one unseen wrapper shape");
+	// merge: same helper, same failure class (a wrapped array once turned 1 in 3 explicit writes into a 500).
+	const m = unwrapArray<{ index: number; action: string }>(extractJson<unknown>('{"candidates":[{"index":0,"action":"NEW"}]}'), () => []);
+	ok(m.length === 1 && m[0]?.action === "NEW", "merge unwraps a candidates-wrapped action list");
+	ok(unwrapArray<unknown>(extractJson<unknown>('{"error":"x"}'), () => []).length === 0, "unwrapArray falls back cleanly on a non-array object");
 }
 
 console.log(`\nsmoke: ${passed} passed, ${failed} failed`);
