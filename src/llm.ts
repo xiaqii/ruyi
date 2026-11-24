@@ -96,6 +96,13 @@ export const RECALL_STEPS = new Set(["pick", "rerank", "topic-summary", "reply-g
 // more than precision here — the output is one-line hints the agent filters itself, so an
 // over-eager strong-but-cheap model (e.g. qwen3.8-max thinking-off) beats a timid one.
 export const PROBE_STEPS = new Set(["probe-pick"]);
+// Whole-store rewrite steps (profile synthesis, reorganize, audits): very long
+// outputs over the entire store. They keep the strong "strong" tier even when
+// the extraction chain runs on a cheaper dream model — a mid-tier model is a
+// credible distiller (A/B 2026-11-24) but has not been validated for 13K-token
+// portrait rewrites.
+export const STRONG_STEPS = new Set(["synthesize-cluster", "reorganize", "audit-triage", "audit-rewrite", "store-card"]);
+const strongStep = (step: string): boolean => STRONG_STEPS.has(step) || step.startsWith("synthesize-theme:");
 
 interface ResolvedLlm {
 	protocol: "anthropic" | "openai";
@@ -117,8 +124,11 @@ interface ResolvedLlm {
 export function resolveLlm(step: string): ResolvedLlm {
 	const config = loadConfig();
 	const base = config.llm;
-	const tier = RECALL_STEPS.has(step) ? "recall" : PROBE_STEPS.has(step) ? "probe" : "dream";
-	const override: LlmTierConfig | undefined = base.steps?.[tier] ?? (tier === "probe" ? base.steps?.recall : undefined);
+	const tier = RECALL_STEPS.has(step) ? "recall" : PROBE_STEPS.has(step) ? "probe" : strongStep(step) ? "strong" : "dream";
+	// "strong" falls back to the base llm config, then to dream — so a config
+	// without an explicit strong tier behaves exactly as before.
+	const override: LlmTierConfig | undefined =
+		base.steps?.[tier] ?? (tier === "strong" ? undefined : tier === "probe" ? base.steps?.recall : undefined);
 	const keys = (override?.apiKeys ?? base.apiKeys ?? [override?.apiKey ?? base.apiKey]).filter((k) => !!k);
 	if (keys.length === 0) keys.push(base.apiKey);
 	return {

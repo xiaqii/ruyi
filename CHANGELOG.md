@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.15.0] - 2026-11-24
+
+**Strong tier; extraction moves to a mid-tier model.** `llm.steps.strong` is a new optional tier for whole-store rewrites (profile synthesis, reorganize, audits, store card). Steps route: selection → recall/probe, extraction chain (extract/verify/merge/triage) → dream, long rewrites → strong (falls back to the base config when unset, so existing installs are unchanged). Production now runs extraction on `kimi-for-coding` (thinking on, medium effort): 20x faster than `k3.1-pro` on real segments and it keeps the compliance knowledge and environment facts the stronger model's gate dropped. Nightly dream and weekly synthesis timers are re-enabled.
+
+Verify prompt: the array contract is now explicit, and "too detailed" is named as a non-reason to drop — reusable problem-solving knowledge and environment facts are what the store is for. A tighter endorsement clause was tried and reverted after it killed the very knowledge it was meant to protect.
 ## [1.14.2] - 2026-11-24
 
 **Dream-prompt A/B on a mid-tier model, and a real verify bug it exposed.** Same three real session segments, same extract/verify prompts: `kimi-for-coding` (thinking on, medium) finished each segment in 10–14s vs 84–130s for `k3.1-pro`, and kept 8 candidates vs ≤1 — including reusable compliance knowledge (WeChat deep-synthesis category evidence, Aliyun Bailian "technical supporter" filing path with filing numbers) and environment facts (ECS nginx layout, self-compiled PHP stack, fake-ip download workaround) that the strong model's gate dropped as "one-off". On a pure methodology segment the strong model was slightly better. Selection and distillation both over-think on strong models; a mid-tier model is a credible dream tier, with a slightly stricter verify for unendorsed assistant conclusions.

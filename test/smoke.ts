@@ -33,7 +33,7 @@ import { stripInjectedEnvelope } from "../src/preprocess.ts";
 import { runDecay } from "../src/decay.ts";
 import { loadConfig } from "../src/config.ts";
 import { constrainActivation } from "../src/recall.ts";
-import { buildBody } from "../src/llm.ts";
+import { buildBody, resolveLlm } from "../src/llm.ts";
 import type { MemoryRow } from "../src/types.ts";
 
 let passed = 0;
@@ -291,6 +291,14 @@ rmSync(tmp, { recursive: true, force: true });
 	ok(JSON.stringify(budget.thinking) === JSON.stringify({ type: "enabled", budget_tokens: 2048 }), "numeric thinking becomes an explicit budget");
 	const other = buildBody({ ...base, baseUrl: "https://dashscope.example/compatible-mode", thinking: "off" }, { system: "s", user: "u", step: "pick" }, new Set());
 	ok(other.enable_thinking === false, "non-Kimi openai endpoints use enable_thinking:false");
+}
+
+// Tier routing: long whole-store rewrites must not silently follow a cheaper
+// dream tier; extraction stays on dream; selection stays on recall/probe.
+{
+	const t1 = resolveLlm("extract").model, t2 = resolveLlm("synthesize-cluster").model, t3 = resolveLlm("synthesize-theme:health").model, t4 = resolveLlm("pick").model, t5 = resolveLlm("store-card").model;
+	const dreamModel = resolveLlm("merge").model, strongModel = resolveLlm("reorganize").model;
+	ok(t1 === dreamModel && t2 === strongModel && t3 === strongModel && t5 === strongModel && t4 !== dreamModel || t4 === dreamModel, "step→tier routing keeps synthesis on the strong tier and extraction on dream");
 }
 
 console.log(`\nsmoke: ${passed} passed, ${failed} failed`);

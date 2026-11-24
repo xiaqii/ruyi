@@ -109,7 +109,13 @@ export interface Config {
 		/** Per-tier overrides: "recall" = selection-side steps (pick/topic-summary/reply-gist/inbox-filter — cheap/fast),
 		 *  "probe" = agent-initiated probe/deep-recall selection (strong but cheap per call — recall matters, over-hinting is harmless),
 		 *  "dream" = everything else. */
-		steps?: { recall?: LlmTierConfig; probe?: LlmTierConfig; dream?: LlmTierConfig };
+		steps?: {
+			recall?: LlmTierConfig;
+			probe?: LlmTierConfig;
+			dream?: LlmTierConfig;
+			/** Whole-store rewrites (profile synthesis, reorganize, audits). Defaults to the base llm config. */
+			strong?: LlmTierConfig;
+		};
 	};
 	inbox: {
 		/** Drop directory: users toss raw material (zip/tar.gz/jsonl/txt/md) here; the nightly
