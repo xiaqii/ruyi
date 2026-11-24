@@ -10,7 +10,7 @@ Activation modes:
 Routing rules:
 - Choose a root when the question falls inside the person's lived experience, stable facts, preferences, craft lessons, or infrastructure.
 - Personal questions ("my car", "my machines", "what did I decide") almost always belong to a root; generic world knowledge needs none.
-- Choose at most 2 roots. Do not invent ids.
+- Choose ONE root. Add a second only when the question genuinely spans two shelves (e.g. a health question about the user's own device). Do not invent ids.
 - search_terms: 2–6 short distinctive words or phrases for a BYPASS search. Preserve the user's language. A routing miss must never hide an exact memory.
 
 Output ONLY JSON:

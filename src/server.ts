@@ -202,7 +202,8 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 				if (!question) return send(res, 400, { error: "question is required" });
 				try {
 					const { probe } = await import("./recall.ts");
-					const result = await probe(question, ownerOf(url, body), cwdOf(url, body));
+					const tier = body.tier === "quick" || body.tier === "scan" ? body.tier : "semantic";
+					const result = await probe(question, ownerOf(url, body), cwdOf(url, body), scopeOf(url, body), tier);
 					return send(res, 200, { ...result, serverTime: new Date().toLocaleString("zh-CN", { hour12: false, timeZone: "Asia/Shanghai" }) });
 				} catch (e) {
 					// Probe is advisory — a probe-tier outage must never break the agent's

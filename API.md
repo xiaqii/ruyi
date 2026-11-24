@@ -92,6 +92,10 @@ zero-resident context, with discovery and selection entirely server-side. Client
 `{ "question": "...", "cwd": "/optional/project" }` → `{ "activation": "lookup|discussion|execution", "hints": [{"id", "kind", "line"}], "profiles": [{"id", "title"}] }`.
 No memory/profile content is returned; fetch selected content via `/recall` or the by-id routes.
 
+`tier`: `semantic` (default) = hierarchical two-step routing (root index → one shelf's chapter cards and
+memory pointers, single-root by default); `scan` = whole-store single-call selector; `quick` = zero-LLM
+keyword pass (fallback only: literal matching misses paraphrased facts).
+
 Default routing is hierarchical: a thin root-portrait index selects up to two specialist shelves, then a
 second light model call compares only their chapter cards and memory summaries. Direct FTS hits and every
 not-yet-woven memory bypass the hierarchy, so a root-routing miss cannot hide a memory. Set
@@ -116,7 +120,7 @@ not-yet-woven memory bypass the hierarchy, so a root-routing miss cannot hide a 
 | `ids` | optional memory ids from `/probe`: direct SQL content fetch, zero LLM, no second semantic selection |
 | `profile_ids` | optional profile ids from `/probe`: same direct-fetch path |
 | `k` | max memories returned; server-configured default (6) |
-| `mode` | `fast` = pure keyword probe, zero LLM; `deep` (default) = one selector LLM call over full memory summaries + chapter abstracts; `excavate` = also dig absorbed/archived memories |
+| `mode` | `fast` = pure keyword probe, zero LLM; `deep` (default) = one selector LLM call over each memory's short positioning handle + chapter abstracts; `excavate` = also dig absorbed/archived memories |
 | `include_store_card` | optional diagnostic opt-in. Routine recall/auto-injection never carries the dense store map, because it would bypass activation policy |
 | `conversation` | **required when paired with `auto`** — the caller's unique conversation id (e.g. `pi:<sessionId>`). The server assigns it an internal `topic_id` (autoincrement) and numbers each turn a `reply_id`; the injection ledger records what was actually injected each turn. `auto=true` without it returns `400` |
 | `auto` | optional; `true` marks the **automatic injection** path: the server filters items already injected into this conversation (response carries a `deduped` count), and short-circuits with an empty result — skipping the LLM call entirely — when every candidate was already injected. The response also carries `topicId`/`replyId` (server-assigned turn numbers). **Do not** pass these two parameters for agent-initiated tool queries |

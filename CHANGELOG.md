@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.0] - 2026-11-24
+
+**Make frequent probing affordable.** Selector listings now show only each memory's short positioning handle (`mini`, avg 22 chars) — not full summaries and not FTS keyword strings, which had silently doubled the listing. Auto-injection drops from ~27.5K to ~18K input tokens and 3.5–7s to ~2s per turn with every key hit preserved. Hierarchical probe routes to a single root by default (second root only for genuinely cross-domain questions): probe input falls to ~4–15K tokens, typically ~2.5s.
+
+New probe tiers: `semantic` (default, two-step), `scan` (whole-store single call), and `quick` (zero-LLM keyword pass, exposed only as an explicit fallback because literal matching misses paraphrased facts like "我开的车" → 风云X3L). Tool descriptions across pi/MCP/bridge now give one consistent signal: probe liberally for anything in the person's own world, do not probe to re-find what was auto-injected, fetch pointers via recall-by-ids.
+
+Measured on 21 probe questions and 8 auto-injection scenarios; an intermediate three-step chapter routing was tried and reverted after it added a call without reducing tokens.
 ## [1.13.0] - 2026-11-22
 
 **Memory activation, not just memory relevance.** The existing selector now classifies each turn as `lookup`, `discussion`, or `execution` with no extra LLM call. Deterministic policy then limits behavioral authority: lookup/discussion get no portrait bodies and at most one prescriptive memory; discussion excludes lessons/pointers and caps context at two; execution gets at most two preference/lesson entries and one portrait. Facts can still answer multiple question parts. Unknown legacy kinds fail closed into the prescriptive quota. Evidence affects findability, never authority.

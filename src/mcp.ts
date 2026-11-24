@@ -32,7 +32,7 @@ const TOOLS = [
 	{
 		name: "probe",
 		description:
-			"Cheap relevance probe of the user's long-term memory. Call it AS OFTEN AS POSSIBLE and ALWAYS FIRST: whenever the user's past, preferences, projects, devices or environment might matter, probe before answering from guesswork, and always probe before any full recall. Returns only one-line pointers (#id + title) and injects nothing. No relevant pointers → answer directly, no recall. Relevant pointers → fetch them with recall, passing ids/profile_ids (zero-LLM direct fetch).",
+			"Check whether the user's long-term memory holds anything about a subject before relying on guesswork. Call it liberally: it returns only one-line pointers (#id + title), costs no conversation context, and an empty answer is a normal result. Trigger whenever a turn touches the person's own world — devices, accounts, past decisions, standing preferences, projects, family, health, finances, rules they set. Self-contained world knowledge needs no probe. Pointers you need → fetch with recall passing ids/profile_ids (zero-LLM direct fetch).",
 		inputSchema: {
 			type: "object",
 			properties: {
