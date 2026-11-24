@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.15.1] - 2026-11-24
+
+Two defects found by the first live night on the mid-tier dream model. (1) The verify gate was effectively disabled: the thinking-on model persistently wraps its array in an unpredictable key (`candidates`, `verdicts`, `results`, …), the gate parsed none of them and logged `VERIFY_INCOMPLETE` with zero answers — every candidate passed on the extractor's judgment. The gate now unwraps any array-valued member, so an unseen key cannot disable it; a unit test pins seven shapes. (2) The dream lock survived a systemd restart: SIGTERM runs no finally, the empty lock file stayed, and the 2h staleness timer would have silently skipped the night. The lock now records its holder PID and is live only while that PID exists.
 ## [1.15.0] - 2026-11-24
 
 **Strong tier; extraction moves to a mid-tier model.** `llm.steps.strong` is a new optional tier for whole-store rewrites (profile synthesis, reorganize, audits, store card). Steps route: selection → recall/probe, extraction chain (extract/verify/merge/triage) → dream, long rewrites → strong (falls back to the base config when unset, so existing installs are unchanged). Production now runs extraction on `kimi-for-coding` (thinking on, medium effort): 20x faster than `k3.1-pro` on real segments and it keeps the compliance knowledge and environment facts the stronger model's gate dropped. Nightly dream and weekly synthesis timers are re-enabled.

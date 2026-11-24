@@ -33,7 +33,7 @@ import { stripInjectedEnvelope } from "../src/preprocess.ts";
 import { runDecay } from "../src/decay.ts";
 import { loadConfig } from "../src/config.ts";
 import { constrainActivation } from "../src/recall.ts";
-import { buildBody, resolveLlm } from "../src/llm.ts";
+import { buildBody, resolveLlm, extractJson } from "../src/llm.ts";
 import type { MemoryRow } from "../src/types.ts";
 
 let passed = 0;
@@ -299,6 +299,21 @@ rmSync(tmp, { recursive: true, force: true });
 	const t1 = resolveLlm("extract").model, t2 = resolveLlm("synthesize-cluster").model, t3 = resolveLlm("synthesize-theme:health").model, t4 = resolveLlm("pick").model, t5 = resolveLlm("store-card").model;
 	const dreamModel = resolveLlm("merge").model, strongModel = resolveLlm("reorganize").model;
 	ok(t1 === dreamModel && t2 === strongModel && t3 === strongModel && t5 === strongModel && t4 !== dreamModel || t4 === dreamModel, "step→tier routing keeps synthesis on the strong tier and extraction on dream");
+}
+
+// The verify gate must survive any wrapper the model invents around its array.
+{
+	const shapes = [
+		'{"verdicts":[{"index":0,"verdict":"keep"}]}',
+		'{"candidates":null,"verdicts":[{"index":0,"verdict":"keep"}]}',
+		'{"candidates":[{"index":0,"verdict":"drop"}]}',
+		'{"results":[{"index":0,"verdict":"keep"}]}',
+		'{"something_new":[{"index":0,"verdict":"keep"}]}',
+		'[{"index":0,"verdict":"keep"}]',
+		'{"index":0,"verdict":"keep"}',
+	];
+	const unwrap = (p: unknown): unknown[] => { const c = p && typeof p === "object" && !Array.isArray(p) ? p as Record<string, unknown> : null; const named = c ? ["verdicts","candidates","results"].find((k) => Array.isArray(c[k])) : undefined; const any = !named && c ? Object.values(c).find((v) => Array.isArray(v)) as unknown[] | undefined : undefined; return Array.isArray(p) ? p : named ? c![named] as unknown[] : any ?? (c && typeof c.index === "number" ? [c] : []); };
+	ok(shapes.every((s) => unwrap(extractJson<unknown>(s)).length === 1), "verify gate unwraps every observed and one unseen wrapper shape");
 }
 
 console.log(`\nsmoke: ${passed} passed, ${failed} failed`);
