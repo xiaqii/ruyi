@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.14.1] - 2026-11-24
+
+**Prompt robustness proven on a mid-tier model.** Same 21 probe questions, same prompts and hierarchy, probe tier switched to `kimi-for-coding` with thinking ON at low effort: 19/19 effective hits (two scoring-key mismatches were adjacent correct answers), matching the production thinking-off tier — including intent classification, single-root routing and fresh-correction priority. Thinking-on cost ~2x latency (5.3s vs 2.7s) and more input (8.2K vs 6.9K) for no accuracy gain, and over-thought one root routing into an empty result. The selector prompts are not dependent on a strong model.
+
+Adds `llm.reasoningEffort` (`low|medium|high`, OpenAI-style, sent only while thinking runs) and notes the Kimi coding endpoint's rule: thinking-on requires `temperature: 1`, thinking-off requires `0.6`. Request-shaping unit tests cover both switches. Smoke 67, API contract 62.
 ## [1.14.0] - 2026-11-24
 
 **Make frequent probing affordable.** Selector listings now show only each memory's short positioning handle (`mini`, avg 22 chars) — not full summaries and not FTS keyword strings, which had silently doubled the listing. Auto-injection drops from ~27.5K to ~18K input tokens and 3.5–7s to ~2s per turn with every key hit preserved. Hierarchical probe routes to a single root by default (second root only for genuinely cross-domain questions): probe input falls to ~4–15K tokens, typically ~2.5s.

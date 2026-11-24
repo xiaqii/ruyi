@@ -33,6 +33,7 @@ import { stripInjectedEnvelope } from "../src/preprocess.ts";
 import { runDecay } from "../src/decay.ts";
 import { loadConfig } from "../src/config.ts";
 import { constrainActivation } from "../src/recall.ts";
+import { buildBody } from "../src/llm.ts";
 import type { MemoryRow } from "../src/types.ts";
 
 let passed = 0;
@@ -276,6 +277,20 @@ rmSync(tmp, { recursive: true, force: true });
 	ok(execution.ids.join(",") === "1,2,3,5" && execution.profileIds.join(",") === "10", "execution allows facts + two methods + one portrait");
 	const legacy = constrainActivation(pool, [6, 1], [], "discussion", 6, 3);
 	ok(legacy.ids.join(",") === "1", "unknown legacy kinds cannot bypass discussion authority limits");
+}
+
+// Provider request shaping is deterministic: thinking-off and reasoning effort
+// must never both be sent, and Kimi's coding endpoint needs its own switch.
+{
+	const base = { protocol: "openai" as const, baseUrl: "https://api.kimi.com/coding", apiKey: "k", apiKeys: ["k"], model: "m", maxTokens: 100, requestTimeoutMs: 1000 };
+	const off = buildBody({ ...base, thinking: "off", reasoningEffort: "low" }, { system: "s", user: "u", step: "probe-pick" }, new Set());
+	ok(JSON.stringify(off.thinking) === JSON.stringify({ type: "disabled" }) && off.reasoning_effort === undefined, "thinking-off sends disabled and drops reasoning_effort");
+	const low = buildBody({ ...base, thinking: "default", reasoningEffort: "low", temperature: 1 }, { system: "s", user: "u", step: "probe-pick" }, new Set());
+	ok(low.reasoning_effort === "low" && low.thinking === undefined, "reasoning_effort rides only when thinking is on");
+	const budget = buildBody({ ...base, thinking: 2048 }, { system: "s", user: "u", step: "extract" }, new Set());
+	ok(JSON.stringify(budget.thinking) === JSON.stringify({ type: "enabled", budget_tokens: 2048 }), "numeric thinking becomes an explicit budget");
+	const other = buildBody({ ...base, baseUrl: "https://dashscope.example/compatible-mode", thinking: "off" }, { system: "s", user: "u", step: "pick" }, new Set());
+	ok(other.enable_thinking === false, "non-Kimi openai endpoints use enable_thinking:false");
 }
 
 console.log(`\nsmoke: ${passed} passed, ${failed} failed`);

@@ -64,6 +64,8 @@ export interface LlmTierConfig {
 	requestTimeoutMs?: number;
 	/** "off" = disable thinking (best effort), number = budget tokens, "default" = model default. */
 	thinking?: "off" | "default" | number;
+	/** OpenAI-style reasoning effort for models that expose it (kimi-for-coding: "low"|"medium"|"high"). Ignored when thinking is off. */
+	reasoningEffort?: "low" | "medium" | "high";
 	/** Sampling temperature override for this tier (per-call opts.temperature still wins). */
 	temperature?: number;
 	/** openai protocol only: use SSE streaming. Some gateways (e.g. Aliyun token-plan)
@@ -98,6 +100,7 @@ export interface Config {
 		maxTokens: number;
 		requestTimeoutMs: number;
 		thinking?: "off" | "default" | number;
+		reasoningEffort?: "low" | "medium" | "high";
 		/** openai protocol only: SSE streaming for this tier (survives gateways that
 		 *  drop long non-streaming calls, e.g. Aliyun token-plan). */
 		stream?: boolean;
