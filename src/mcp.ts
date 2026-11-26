@@ -167,18 +167,6 @@ async function handleToolCall(
 				return reply(id, toolResult(`Blocked: this content was previously forgotten (tombstone) — not re-saved. If it genuinely matters now, say so explicitly and rephrase it.`));
 			return reply(id, toolResult(`Saved to long-term memory as #${result.id} (${result.action}): ${summary}`));
 		}
-		case "wiki_ask": {
-			// Lazy-loaded and self-contained: a broken wiki must never take the memory tools down.
-			const { wikiAsk } = await import("./wiki.ts");
-			const question = String(args.question ?? "").trim();
-			if (!question) return replyError(id, -32602, "question is required");
-			const text = await wikiAsk({
-				question,
-				library: typeof args.library === "string" ? args.library : undefined,
-				deep: args.deep === true,
-			});
-			return reply(id, toolResult(text));
-		}
 		case "admin": {
 			const action = String(args.action ?? "");
 			switch (action) {
