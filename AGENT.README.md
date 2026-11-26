@@ -448,6 +448,6 @@ large**. By default only the last 14 days are processed (`dream.initialMaxDays`)
 
 Tell the user: installation complete + doctor results + memory count + night-dream time (systemd timer or
 cron) + whether daily self-update is on.
-Daily use requires nothing from you: work normally by day; recall via `ruyi_recall` when needed (probe with
-fast, deep for important answers); when the user says "remember …" use `ruyi_remember`; at night it dreams
-and grows on its own.
+Daily use requires nothing from you: work normally by day — relevant memories surface automatically
+each turn; search with `ruyi_recall` whenever the answer depends on who the user is; when the user says
+"remember …" use `ruyi_remember`; at night it dreams and grows on its own.

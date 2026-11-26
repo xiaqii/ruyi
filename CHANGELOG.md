@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.16.0] - 2026-11-26
+
+- Three memory tools (was eight): recall absorbs probe/list/get/ingest — search returns entries directly, ids fetch directly; remember; admin. wiki_ask tool unregistered (0 calls ever; wiki stays a local-branch experiment). Over-injection stays bounded: relevance gate, activation caps, per-conversation dedup ledger, compaction reset
 ## [1.15.4] - 2026-11-24
 
 - Relevance gate: auto-injection drops from ~22.8K to ~4.7K tokens per turn by deciding relevance from the root index before opening a shelf; merge/verify unwrap invented wrapper keys; release pipeline carries release commits onto public main and packs from a clean worktree

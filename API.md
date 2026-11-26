@@ -321,10 +321,7 @@ the server name automatically: shown as `ruyi_recall` in opencode, `mcp__ruyi__r
 
 | Tool | HTTP equivalent | Parameters (* required) |
 |---|---|---|
-| `recall` | POST /recall | `query`*, `k`, `mode`(fast/deep/excavate), `owner` |
-| `list` | GET /memories | `limit`, `owner` |
-| `get` | GET /memories/:id | `id`* |
-| `ingest` | POST /ingest | `text`*, `owner`, `cwd` |
+| `recall` | POST /recall | `query`*, or `ids`/`profile_ids` for a zero-LLM direct fetch; `k`, `mode`, `scope`, `owner` |
 | `remember` | POST /memories | `summary`*, `content`*, `kind`, `visibility`, `domain`, `owner` |
 | `admin` | pin/forget/stats/profiles | `action`*(forget/stats/profile), `id`, `days`, `profileId`, `owner` |
 

@@ -30,27 +30,15 @@ const PROTOCOL_VERSION = "2024-11-05";
 
 const TOOLS = [
 	{
-		name: "probe",
-		description:
-			"Check whether the user's long-term memory holds anything about a subject before relying on guesswork. Call it liberally: it returns only one-line pointers (#id + title), costs no conversation context, and an empty answer is a normal result. Trigger whenever a turn touches the person's own world — devices, accounts, past decisions, standing preferences, projects, family, health, finances, rules they set. Self-contained world knowledge needs no probe. Pointers you need → fetch with recall passing ids/profile_ids (zero-LLM direct fetch).",
-		inputSchema: {
-			type: "object",
-			properties: {
-				question: { type: "string", description: "Self-contained question, e.g. 'how is the user's server network entry point set up'" },
-			},
-			required: ["question"],
-		},
-	},
-	{
 		name: "recall",
 		description:
-			"Fetch full memory entries. Relevant memories are auto-injected every turn — never re-fetch what was injected. Typical flow: probe first (cheap), then recall with its ids/profile_ids for a zero-LLM content fetch; omit ids only when a fresh semantic search is needed. Also use when the user references earlier context. Skip for self-contained questions. mode: fast = keyword scan, deep = semantic (default), excavate = include archived.",
+			"Search the user's long-term memory and get the entries back. Use it whenever the answer depends on who this user is — devices, past decisions, standing preferences, projects, family, health, finances, rules they set — or when the user references earlier context. Self-contained world knowledge needs no call; an empty result is normal. Pass ids/profile_ids for a zero-LLM direct fetch. mode: fast = keyword only, deep = semantic (default), excavate = include archived.",
 		inputSchema: {
 			type: "object",
 			properties: {
-				query: { type: "string", description: "What you are looking for (required even when fetching probe ids)" },
-				ids: { type: "array", items: { type: "number" }, description: "Memory ids returned by probe: direct SQL fetch, no LLM" },
-				profile_ids: { type: "array", items: { type: "number" }, description: "Profile ids returned by probe: direct SQL fetch, no LLM" },
+				query: { type: "string", description: "What you are looking for (also names the purpose when fetching by ids)" },
+				ids: { type: "array", items: { type: "number" }, description: "Memory ids to fetch directly (zero LLM)" },
+				profile_ids: { type: "array", items: { type: "number" }, description: "Profile ids to fetch directly (zero LLM)" },
 				k: { type: "number", description: "Max memories to return (default 5)" },
 				mode: {
 					type: "string",
@@ -61,40 +49,6 @@ const TOOLS = [
 				owner: { type: "string", description: "Memory owner namespace (default 'default')" },
 			},
 			required: ["query"],
-		},
-	},
-	{
-		name: "list",
-		description: "List recent long-term memory entries (one-line summaries with ids).",
-		inputSchema: {
-			type: "object",
-			properties: {
-				limit: { type: "number", description: "Max entries (default 30)" },
-				owner: { type: "string", description: "Memory owner namespace (default 'default')" },
-			},
-		},
-	},
-	{
-		name: "get",
-		description: "Get a memory entry by id.",
-		inputSchema: {
-			type: "object",
-			properties: { id: { type: "number", description: "Memory id" } },
-			required: ["id"],
-		},
-	},
-	{
-		name: "ingest",
-		description:
-			"Submit raw conversation text or notes to the memory center; ruyi distills durable preferences/facts/lessons from it.",
-		inputSchema: {
-			type: "object",
-			properties: {
-				text: { type: "string", description: "Raw text to distill" },
-				owner: { type: "string", description: "Memory owner namespace (default 'default')" },
-				cwd: { type: "string", description: "Working directory the content relates to" },
-			},
-			required: ["text"],
 		},
 	},
 	{

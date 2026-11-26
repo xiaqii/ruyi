@@ -40,6 +40,7 @@ const TIMEOUTS = {
 	remember: 45_000, // POST /memories runs LLM merge synchronously (~10s)
 	probe: 30_000,
 	stats: 1_500,
+	wiki_ask: 60_000, // deep mode = 3 librarian calls + a distilled answer
 } as const;
 
 type Op = keyof typeof TIMEOUTS;
@@ -62,8 +63,8 @@ async function api<T>(op: Op, path: string, init?: RequestInit, timeoutMs?: numb
 
 const RecallParams = Type.Object({
 	query: Type.String({ description: "What you are looking for (also describe the purpose when fetching probe ids)" }),
-	ids: Type.Optional(Type.Array(Type.Number(), { description: "Memory ids from probe — direct SQL fetch, zero LLM" })),
-	profile_ids: Type.Optional(Type.Array(Type.Number(), { description: "Profile ids from probe — direct SQL fetch, zero LLM" })),
+	ids: Type.Optional(Type.Array(Type.Number(), { description: "Memory ids to fetch directly (zero LLM)" })),
+	profile_ids: Type.Optional(Type.Array(Type.Number(), { description: "Profile ids to fetch directly (zero LLM)" })),
 	k: Type.Optional(Type.Number({ description: "Max memories to return (default 5)" })),
 	mode: Type.Optional(
 		Type.Union([Type.Literal("fast"), Type.Literal("deep"), Type.Literal("excavate")], {
@@ -102,6 +103,7 @@ interface RecallProfile {
 }
 
 interface RecallResponse {
+	serverTime?: string;
 	memories: RecallMemory[];
 	profiles?: RecallProfile[];
 	deduped?: number;
@@ -289,57 +291,11 @@ export default function (pi: ExtensionAPI) {
 		});
 	});
 
-	const ProbeParams = Type.Object({
-		question: Type.String({ description: "Self-contained question, e.g. 'how is the user's network entry point set up'" }),
-		fallback: Type.Optional(Type.Literal("keyword"), { description: "Set only if a previous probe reported degraded/unavailable: zero-LLM keyword fallback" }),
-	});
-
-	pi.registerTool({
-		name: "ruyi_probe",
-		label: "ruyi probe",
-		description:
-			"Check whether the user's long-term memory holds anything about a subject BEFORE relying on guesswork. Call it liberally — it returns only one-line pointers (#id + title), costs no conversation context, and an empty answer is a normal, useful result. Trigger whenever a turn touches the person's own world: their devices and accounts, past decisions, standing preferences, projects, family, health, finances, or a rule they once set. Self-contained world knowledge (a recipe, a syntax question, today's news) needs no probe. This turn's relevant memories were already auto-injected — do not probe to re-find them; probe to look something up that is not in front of you. Pointers you need → fetch with ruyi_recall passing ids/profile_ids (zero-LLM direct fetch).",
-		parameters: ProbeParams,
-		async execute(_toolCallId, params) {
-			const r = await api<{ hints?: Array<{ id: number; kind: string; line: string }>; profiles?: Array<{ id: number; title: string }>; serverTime?: string; error?: string }>(
-				"probe", `/probe`, { method: "POST", body: { question: params.question, owner: OWNER, cwd: process.cwd(), tier: params.fallback === "keyword" ? "quick" : "semantic" } },
-			);
-			if (!r) return { content: [{ type: "text", text: "(probe unavailable — service error or timeout; proceed without memory context)" }], details: { unavailable: true } };
-			const lines = [
-				...(r.profiles ?? []).map((x) => `[profile ${x.id}] ${x.title}`),
-				...(r.hints ?? []).map((h) => `#${h.id} (${h.kind}) ${h.line}`),
-			];
-			if (r.error) lines.unshift(`(probe degraded: ${r.error})`);
-			const text = lines.length
-				? `Relevant pointers (fetch with ruyi_recall ids/profile_ids — zero LLM):\n${lines.join("\n")}`
-				: `No relevant memories found — safe to proceed without memory context.${r.serverTime ? `\n(顺带校准时间感: 这次提问发生于 ${r.serverTime} —— 这是提问时间,不是任何记忆的时间)` : ""}`;
-			return { content: [{ type: "text", text }], details: { hints: lines.length, degraded: !!r.error } };
-		},
-
-		renderCall(args, theme) {
-			return new Text(
-				theme.fg("toolTitle", theme.bold("ruyi_probe ")) + theme.fg("accent", `"${args.question}"`),
-				0,
-				0,
-			);
-		},
-
-		renderResult(result, { isPartial }, theme) {
-			if (isPartial) return new Text(theme.fg("warning", "探针扫描中..."), 0, 0);
-			const d = result.details as { hints?: number; unavailable?: boolean; degraded?: boolean } | undefined;
-			if (d?.unavailable) return new Text(theme.fg("dim", "记忆服务不可用（不影响主流程）"), 0, 0);
-			if (d?.degraded) return new Text(theme.fg("warning", "探针降级（probe 层模型故障）"), 0, 0);
-			return d?.hints
-				? new Text(theme.fg("success", `探到 ${d.hints} 条指向`), 0, 0)
-				: new Text(theme.fg("dim", "探针：无相关记忆"), 0, 0);
-		},
-	});
-
 	pi.registerTool({
 		name: "ruyi_recall",
 		label: "Memory Recall",
 		description:
-			"Fetch FULL memory entries by id. Normal flow: ruyi_probe gives pointers → pass its ids/profile_ids here (zero-LLM direct fetch). Only omit ids for a fresh semantic search when probing could not express what you need. Relevant memories for the current turn are already auto-injected — never re-fetch those. mode: fast = keyword scan, deep = semantic (default), excavate = include archived; scope=\"all\" searches every directory.",
+			"Search the user's long-term memory and get the entries back. Use it whenever the answer depends on who this user is — their devices, past decisions, standing preferences, projects, family, health, finances, rules they set — or when the user references earlier context. Self-contained world knowledge needs no call; an empty result is normal. Current-turn relevant memories are auto-injected — never re-fetch what is already in the conversation. Pass ids/profile_ids (from a pointer or a previous result) for a zero-LLM direct fetch. mode: fast = keyword only, deep = semantic (default), excavate = include archived; scope=\"all\" searches every directory.",
 		parameters: RecallParams,
 
 		async execute(_id, params, _signal, _onUpdate, _ctx) {
@@ -364,8 +320,9 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 			if (result.memories.length === 0 && (result.profiles ?? []).length === 0) {
+				const when = typeof result.serverTime === "string" ? ` (提问发生于 ${result.serverTime} — 这是提问时间，不是任何记忆的时间)` : "";
 				return {
-					content: [{ type: "text", text: "No relevant memories found." }],
+					content: [{ type: "text", text: `No relevant memories found — safe to answer without memory context.${when}` }],
 					details: { count: 0 },
 				};
 			}
@@ -585,6 +542,5 @@ export default function (pi: ExtensionAPI) {
 				: new Text(theme.fg("success", "done"), 0, 0);
 		},
 	})
-;
 ;
 }

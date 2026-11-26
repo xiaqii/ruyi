@@ -442,8 +442,10 @@ const projectId = insertMemory(
 	child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) + "\n");
 	await new Promise((r) => setTimeout(r, 4000));
 	child.kill("SIGKILL");
-	const documented = ["recall", "list", "get", "ingest", "remember", "admin"];
-	ok(documented.every((t) => buf.includes(`"${t}"`)), "MCP exposes all six documented tools");
+	const documented = ["recall", "remember", "admin"];
+	const absent = ["probe", "list", "get", "ingest", "wiki_ask"];
+	ok(documented.every((t) => buf.includes(`"name":"${t}"`)), "MCP exposes exactly the three memory tools (recall/remember/admin)");
+	ok(absent.every((n) => !buf.includes(`"name":"${n}"`)), "merged-away tools (probe/list/get/ingest/wiki_ask) no longer appear in tools/list");
 }
 
 server?.kill("SIGKILL");

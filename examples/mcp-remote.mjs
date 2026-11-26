@@ -48,11 +48,7 @@ try {
 const OWNER = process.env.RUYI_OWNER ?? "default";
 
 const TOOLS = [
-	{ name: "probe", description: "Check whether the user's long-term memory holds anything about a subject before relying on guesswork. Call it liberally: it returns only one-line pointers (#id + title), costs no conversation context, and an empty answer is a normal result. Trigger whenever a turn touches the person's own world — devices, accounts, past decisions, standing preferences, projects, family, health, finances, rules they set. Self-contained world knowledge needs no probe. Pointers you need → fetch with recall passing ids/profile_ids (zero-LLM direct fetch).", inputSchema: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } },
-	{ name: "recall", description: "Fetch full memory entries. Typical flow: probe first, then recall with its ids/profile_ids (zero-LLM direct fetch). Omit ids only for a fresh semantic search. mode: fast = keyword scan, deep = semantic (default), excavate = include archived.", inputSchema: { type: "object", properties: { query: { type: "string" }, ids: { type: "array", items: { type: "number" } }, profile_ids: { type: "array", items: { type: "number" } }, k: { type: "number" }, mode: { type: "string", enum: ["fast", "deep", "excavate"] } }, required: ["query"] } },
-	{ name: "list", description: "List recent long-term memory entries (one-line summaries with ids).", inputSchema: { type: "object", properties: { limit: { type: "number" } } } },
-	{ name: "get", description: "Get a memory entry by id.", inputSchema: { type: "object", properties: { id: { type: "number" } }, required: ["id"] } },
-	{ name: "ingest", description: "Submit raw conversation text or notes; ruyi distills durable memories from it.", inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } },
+	{ name: "recall", description: "Search the user's long-term memory and get the entries back — use whenever the answer depends on who this user is, or the user references earlier context. Empty result is normal. Pass ids/profile_ids for a zero-LLM direct fetch. mode: fast = keyword only, deep = semantic (default), excavate = include archived.", inputSchema: { type: "object", properties: { query: { type: "string" }, ids: { type: "array", items: { type: "number" } }, profile_ids: { type: "array", items: { type: "number" } }, k: { type: "number" }, mode: { type: "string", enum: ["fast", "deep", "excavate"] } }, required: ["query"] } },
 	{ name: "remember", description: "Explicitly save something to long-term memory RIGHT NOW when the user asks you to remember it, or when you identify a durable rule/convention. Goes through LLM merge judgement — duplicates become reinforcement. Not for one-off task details.", inputSchema: { type: "object", properties: { kind: { type: "string", enum: ["preference", "fact", "knowledge", "lesson", "skill_index"] }, visibility: { type: "string", enum: ["personal", "project"], description: "personal crosses directories; project stays in its cwd" }, summary: { type: "string" }, content: { type: "string" }, domain: { type: "string" } }, required: ["summary", "content"] } },
 	{ name: "admin", description: "Manage long-term memory: forget (archive by id, recoverable via recall mode=excavate), stats (token report, days param), profile (list chapters, or full content with profileId).", inputSchema: { type: "object", properties: { action: { type: "string", enum: ["forget", "stats", "profile"] }, id: { type: "number" }, days: { type: "number" }, profileId: { type: "number" } }, required: ["action"] } },
 ];
@@ -75,29 +71,12 @@ const text = (t) => ({ content: [{ type: "text", text: t }] });
 async function callTool(name, args = {}) {
 	if (!BASE) return text("RUYI_URL is not set — point it at your ruyi service, e.g. https://ruyi.example.com");
 	switch (name) {
-		case "probe": {
-			const r = await api("/probe", { method: "POST", timeoutMs: 30_000, body: { question: String(args.question ?? ""), owner: OWNER } });
-			const lines = [...(r.profiles ?? []).map((x) => `[profile ${x.id}] ${x.title}`), ...(r.hints ?? []).map((h) => `#${h.id} (${h.kind}) ${h.line}`)];
-			return text(lines.length ? `Relevant pointers (fetch full entries with recall if needed):\n${lines.join("\n")}` : "No relevant memories found.");
-		}
 		case "recall": {
-			const r = await api("/recall", { method: "POST", timeoutMs: 60_000, body: { query: String(args.query ?? ""), k: args.k, owner: OWNER, mode: args.mode ?? "deep" } });
+			const r = await api("/recall", { method: "POST", timeoutMs: 60_000, body: { query: String(args.query ?? ""), k: args.k, ids: args.ids, profile_ids: args.profile_ids, owner: OWNER, mode: args.mode ?? "deep" } });
 			const parts = [];
 			for (const p of r.profiles ?? []) parts.push(`PROFILE【${p.title}】v${p.version} (${p.maturity})\n${p.content}`);
 			for (const m of r.memories ?? []) parts.push(`#${m.id} [${m.kind}${m.domain ? "/" + m.domain : ""}] ${m.summary}\n${m.content}`);
-			return text(parts.join("\n\n") || "No relevant memories found.");
-		}
-		case "list": {
-			const r = await api(`/memories?owner=${OWNER}&status=active&limit=${args.limit ?? 30}`);
-			return text((r.memories ?? []).map((m) => `#${m.id} (${m.kind}, ${String(m.last_seen_at).slice(0, 10)}) ${m.summary}`).join("\n") || "(memory store is empty)");
-		}
-		case "get": {
-			const r = await api(`/memories/${Number(args.id)}?owner=${OWNER}`);
-			return text(JSON.stringify(r.memory ?? r, null, 2));
-		}
-		case "ingest": {
-			const r = await api("/ingest", { method: "POST", timeoutMs: 120_000, body: { text: String(args.text ?? ""), owner: OWNER, source: "mcp-remote" } });
-			return text(JSON.stringify(r));
+			return text(parts.join("\n\n") || `No relevant memories found — safe to answer without memory context.${r.serverTime ? ` (提问发生于 ${r.serverTime} — 这是提问时间，不是任何记忆的时间)` : ""}`);
 		}
 		case "remember": {
 			const r = await api("/memories", { method: "POST", timeoutMs: 60_000, body: { kind: args.kind ?? "fact", summary: args.summary, content: args.content, domain: args.domain, owner: OWNER } });
