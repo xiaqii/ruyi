@@ -36,7 +36,7 @@ try {
 		parts.push("Core long-term memory (always follow unless conflicting with the user):\n" +
 			inj.constitution.map((c) => `- ${c.summary}\n  ${c.content}`).join("\n"));
 	if (inj.index?.length)
-		parts.push("Memory index (one-liners; fetch full text via the ruyi MCP recall/get tools when relevant):\n" +
+		parts.push("Memory index (one-liners; fetch full entries via the ruyi MCP recall tool when relevant):\n" +
 			inj.index.map((m) => `- #${m.id} (${m.kind}, ${m.date}) ${m.summary}`).join("\n"));
 	if (inj.profileDirectory?.length)
 		parts.push("Profile chapters available (load at most one via ruyi recall when the task is squarely in that domain):\n" +

@@ -497,7 +497,7 @@ if (args.includes("--install-hook")) {
 		"<!-- ruyi-memory-rules -->",
 		"## Long-term memory (ruyi)",
 		"You have a ruyi long-term memory service (mcp__ruyi__* tools; some memories are also auto-injected by hooks).",
-		"- BEFORE answering anything about the user themselves — preferences, possessions, past decisions, projects, habits, \"what did I say about X\" — call mcp__ruyi__probe first; if it returns pointers, fetch them with mcp__ruyi__recall, then answer. Never answer such questions from guesswork while memory tools exist.",
+		"- BEFORE answering anything about the user themselves — preferences, possessions, past decisions, projects, habits, \"what did I say about X\" — call mcp__ruyi__recall and read the entries it returns, then answer. Never answer such questions from guesswork while memory tools exist.",
 		"- When the user asks you to remember something, write it with mcp__ruyi__remember.",
 		"- Memories already injected into this conversation need no re-fetching.",
 		"<!-- /ruyi-memory-rules -->",

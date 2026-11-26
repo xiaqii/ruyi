@@ -25,8 +25,8 @@ export function dashboardPage(): string {
   th { color: #8b949e; font-weight: 500; font-size: 12px; }
   tr.today td { color: #3fb950; font-weight: 600; }
   .cat { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; }
-  .cat-probe { background: #1f3a5f; color: #79c0ff; }
   .cat-recall { background: #2c1f5f; color: #d2a8ff; }
+  .cat-reply { background: #1f4d3a; color: #56d4aa; }
   .cat-inject { background: #0f3d2e; color: #56d4aa; }
   .cat-remember { background: #4d3a0f; color: #e3b341; }
   .cat-sync { background: #4d1f1f; color: #ff7b72; }
@@ -49,8 +49,11 @@ export function dashboardPage(): string {
   <div class="card"><h2>最近 30 条事件（刚才的对话触发了吗？看这里）</h2><div id="recent"></div></div>
 </div>
 <script>
-const CATS = ["probe", "recall", "inject", "remember", "sync", "other"];
-const CN = { probe: "查询·probe", recall: "召回·recall", inject: "注入·inject", remember: "写入·remember", sync: "同步·sync", other: "其他" };
+const CATS = ["recall", "inject", "reply", "remember", "sync", "other"];
+const CN = { recall: "召回·recall", inject: "注入·inject", reply: "回答上报·reply", remember: "写入·remember", sync: "同步·sync", other: "其他" };
+// historical rows logged before /probe retired still carry that category —
+// fold them into recall so the recent-events feed keeps its badge colors
+const LEGACY = { probe: "recall" };
 function fmt(b) { if (!b) return "—"; if (b < 1024) return b + "B"; if (b < 1048576) return (b/1024).toFixed(1) + "K"; if (b < 1073741824) return (b/1048576).toFixed(1) + "M"; return (b/1073741824).toFixed(2) + "G"; }
 async function boot() {
   try { await load(); } catch (e) {
@@ -83,7 +86,8 @@ function render(d) {
   document.getElementById("byClient").innerHTML = h2 + "</table>";
   let h3 = '<table class="feed"><tr><th>时间</th><th>类别</th><th>路由</th><th>客户端</th><th>数据</th><th>耗时</th></tr>';
   for (const e of d.recent) {
-    h3 += "<tr><td>" + e.at.slice(5, 19).replace("T", " ") + '</td><td><span class="cat cat-' + e.category + '">' + e.category + '</span></td><td class="muted">' + esc(e.route) + "</td><td>" + esc(e.client || "—") + "</td><td>" + fmt(e.resBytes || e.reqBytes) + "</td><td>" + (e.ms > 1000 ? (e.ms/1000).toFixed(1) + "s" : e.ms + "ms") + "</td></tr>";
+    const cat = LEGACY[e.category] ?? e.category;
+    h3 += "<tr><td>" + e.at.slice(5, 19).replace("T", " ") + '</td><td><span class="cat cat-' + cat + '">' + cat + '</span></td><td class="muted">' + esc(e.route) + "</td><td>" + esc(e.client || "—") + "</td><td>" + fmt(e.resBytes || e.reqBytes) + "</td><td>" + (e.ms > 1000 ? (e.ms/1000).toFixed(1) + "s" : e.ms + "ms") + "</td></tr>";
   }
   document.getElementById("recent").innerHTML = h3 + "</table>";
 }

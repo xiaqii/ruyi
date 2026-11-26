@@ -96,7 +96,8 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 		const category =
 			path === "/recall" ? "recall"
 			: path === "/inject" ? "inject"
-			: path === "/memories" || path === "/ingest" ? "remember"
+			: path === "/replies/answer" ? "reply"
+			: path === "/memories" || path === "/ingest" || (path.startsWith("/memories/") && path.endsWith("/forget")) ? "remember"
 			: path.startsWith("/sync") ? "sync"
 			: "other";
 		// attribution chain: explicit client header → User-Agent (node/curl/etc

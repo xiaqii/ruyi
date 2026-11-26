@@ -51,6 +51,7 @@ Two integration surfaces with equivalent capability:
 | POST `/distill` | run one dream now (async, 202) | yes |
 | GET `/stats` | memory counts + token usage report | none |
 | GET `/tokens` | per-day × per-model token usage (input / output / cache-served; live vs pipeline split) | none |
+| GET `/activity` | request stats by day × category × client (recall / inject / reply / remember / sync), feeds the dashboard | none |
 
 ---
 
@@ -322,7 +323,7 @@ opencode and other MCP clients analogous — see their docs).
 1. **Per user turn**: `POST /recall` with `conversation`+`auto:true` — server-side selection, dedup,
    and topic context all included (the reference implementation races a sync budget and degrades
    gracefully; see `examples/pi-extension/ruyi.ts`).
-2. **When remembering is needed**: `/recall` — probe with `mode=fast` (free), use `deep` for important
+2. **When deeper answers matter**: `/recall` with `mode=fast` (free keyword pass), `deep` for important
    answers, `excavate` for archaeology.
 3. **User says "remember …"**: `POST /memories` (timeout ≥45s).
 4. **Hand in conversation material**: either point the server's `config.local.json` `sessions` at the

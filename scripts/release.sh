@@ -105,9 +105,14 @@ if [ -n "$RELEASE_BRANCH" ] && [ "$RELEASE_BRANCH" != "main" ]; then
 	# release state is authoritative.
 	CARRY_FROM="$(git rev-parse "$PREV_HERE")"
 	CARRY_TO="$(git rev-parse HEAD)"
-	if ! ( cd "$WT" && git diff "$CARRY_FROM" "$CARRY_TO" -- . ':(exclude)package-lock.json' | git apply --3way - ); then
-		say "patch had conflicts — taking the working branch's release files wholesale"
-		( cd "$WT" && git checkout --theirs . 2>/dev/null; git checkout "$CARRY_TO" -- . )
+	# The carry set is strictly the files changed on the working branch since the
+	# previous release. NEVER `git checkout <branch> -- .` here: the working
+	# branch carries experiment-only files (src/wiki.ts, wiki prompts) that must
+	# not exist on public main — a whole-tree fallback leaks them.
+	CARRY_FILES="$(git diff --name-only "$CARRY_FROM" "$CARRY_TO" | grep -v '^package-lock.json$')"
+	if ! ( cd "$WT" && git diff "$CARRY_FROM" "$CARRY_TO" -- $CARRY_FILES | git apply --3way - ); then
+		say "patch had conflicts — taking the working branch's versions of the changed files only"
+		( cd "$WT" && git checkout "$CARRY_TO" -- $CARRY_FILES )
 	fi
 	( cd "$WT" && git add -A && git commit -q -m "release: $NOTE" )
 	( cd "$WT" && git tag -f "v$NEW" HEAD >/dev/null && git push -q origin main && git push -q origin "v$NEW" --force )

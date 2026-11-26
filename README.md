@@ -43,11 +43,12 @@ Tell your agent both keys when installing; `ruyi doctor` verifies live and warns
 | | |
 |---|---|
 | Memory store | **Converges, never sprawls** — raw entries get absorbed into profiles (one real store: 365 → 109 entries after one synthesis round) |
-| Per-turn cost | one small-model call, ~2s, ~13K tokens of listing in / ~100 tokens out — fractions of a cent |
+| Per-turn cost | one small-model call, ~1–2s; ~5K input tokens on average after the relevance gate (unrelated turns: ~1K, empty) — fractions of a cent |
 | Unrelated turns | selector returns empty = nothing injected, nothing wasted |
 | Repeat injection | 0 — a per-conversation ledger guarantees each item arrives once |
 | Dependencies | **0** runtime deps. `node:sqlite` + `node:http`. That's the whole stack |
 | Uninstall | delete one directory — your agent keeps working, it just stops remembering |
+| Observability | `/stats` live dashboard (requests by day × category × client) + `/tokens` per-day × per-model accounting, input / output / cache-served split |
 
 ## How it works (3 moving parts)
 

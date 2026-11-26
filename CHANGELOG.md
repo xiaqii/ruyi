@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.16.2] - 2026-11-26
+
+- Docs synced to the three-tool surface: AGENT.README/API.md/README/CC templates rewritten (single recall verb, no probe/list/get/ingest/wiki_ask); the CLAUDE.md memory-use rule installed by sync-sessions now teaches one recall call; README per-turn numbers updated to relevance-gate era; /activity documented; dashboard: probe column dropped, answers-reporting gets its own reply category, memory forgets count as writes
 ## [1.16.1] - 2026-11-26
 
 - Retire POST /probe (pointer dance now internal to /recall); new /tokens endpoint + dashboard card: per-day × per-model token usage with input/output/cache split and live-vs-dream scene; token_log v16 adds cached_tokens (OpenAI prompt_tokens_details.cached_tokens and Anthropic cache_read_input_tokens parsed separately)

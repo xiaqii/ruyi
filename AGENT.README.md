@@ -227,8 +227,8 @@ The pre-built config is `examples/opencode/opencode.jsonc`; merge it into
 }
 ```
 
-After restarting opencode, six tools should appear in the tool list (`ruyi_recall` etc. — opencode adds
-the `ruyi_` prefix automatically).
+After restarting opencode, three tools should appear in the tool list: `ruyi_recall`, `ruyi_remember`,
+`ruyi_admin` (opencode adds the `ruyi_` prefix automatically).
 
 ### You are on a machine without ruyi (remote access)
 
@@ -263,7 +263,7 @@ node C:\tools\sync-sessions.mjs --status
 #    currently have set, then installs: a SessionEnd sync hook — every finished
 #    conversation syncs itself; SessionStart + UserPromptSubmit injection hooks
 #    — memory surfaces in context automatically; CLAUDE.md memory-use rules —
-#    the model learns WHEN to probe/recall instead of answering from guesswork):
+#    the model learns WHEN to recall/remember instead of answering from guesswork):
 $env:RUYI_URL='<url>'; $env:RUYI_TOKEN='<token>'; node C:\tools\sync-sessions.mjs --install-hook
 
 # 7. First full sync of history (slims locally first — typically ~0.3% of raw size):
@@ -306,14 +306,15 @@ Notes:
 3. Delete `mcp-remote.mjs` / `sync-sessions.mjs`.
 4. Verify: `grep -i ruyi ~/.claude/settings.json ~/.claude/CLAUDE.md` finds nothing.
 Partial mode that IS supported: hooks without MCP (injection + sync keep working; the model just
-loses on-demand probe/recall/remember). MCP without hooks also works (query-only, no auto-injection).
+loses on-demand recall/remember). MCP without hooks also works (query-only, no auto-injection).
 
 ### You are Hermes / another MCP client (ruyi installed locally)
 
 Register `node <absolute repo path>/src/cli.ts mcp` as a stdio MCP server (check your client's MCP docs
-for the registration entry point). It exposes six tools: `recall` (fast/deep/excavate modes), `list`,
-`get`, `ingest`, `remember` (explicit write, via LLM merge adjudication), `admin` (forget/stats/profile
-three-in-one) — forget is a soft delete (diggable via excavate) and leaves a content fingerprint
+for the registration entry point). It exposes three tools: `recall` (search and get the entries back —
+fast/deep/excavate modes, or pass `ids`/`profile_ids` for a zero-LLM direct fetch), `remember` (explicit
+write, via LLM merge adjudication), and `admin` (forget/stats/profile three-in-one) — forget is a soft
+delete (diggable via excavate) and leaves a content fingerprint
 (tombstone): no write path will ever re-admit forgotten content, preventing old conversations from
 re-distilling it back. Clients add the server-name prefix automatically (opencode shows `ruyi_recall`,
 Claude Code shows `mcp__ruyi__recall`). The MCP process opens the same SQLite database directly
@@ -355,6 +356,7 @@ only. Temporary rules for the current conversation: just say them; long-term rul
 profiles by the nightly dream.
 POST /ingest   {"text": "..."}                               # submit text for dream distillation
 GET  /stats?days=7
+GET  /tokens?days=14     # per-day × per-model tokens: input / output / cache-served
 ```
 
 **Topic context on the auto path (since 0.9)**: a `conversation`+`auto` call is more than dedup — the
