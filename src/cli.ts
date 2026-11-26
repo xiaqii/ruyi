@@ -96,6 +96,48 @@ async function main(): Promise<void> {
 			startMcpServer();
 			break;
 
+		case "wiki-ingest": {
+			const { wikiIngest } = await import("./wiki.ts");
+			const library = String(flags.library ?? "");
+			const title = String(flags.title ?? "");
+			const dir = String(flags.dir ?? "");
+			if (!library || !title || !dir) {
+				console.error("usage: wiki-ingest --library=tcm --title=书名 --dir=/path/to/chapters [--author=作者]");
+				process.exit(1);
+			}
+			const r = await wikiIngest({ library, title, author: flags.author as string | undefined, dir, verbose: true });
+			console.log(`wiki-ingest: book #${r.bookId}, ${r.chapters} chapters, ${r.summarized} summarized`);
+			break;
+		}
+
+		case "wiki-reindex": {
+			const { wikiDb, wikiSummarizeBook } = await import("./wiki.ts");
+			const library = String(flags.library ?? "");
+			if (!library) {
+				console.error("usage: wiki-reindex --library=tcm");
+				process.exit(1);
+			}
+			const db = wikiDb(library);
+			const books = db.prepare("SELECT id, title FROM books").all() as Array<{ id: number; title: string }>;
+			for (const b of books) {
+				console.log(`[wiki] reindexing 《${b.title}》...`);
+				const r = await wikiSummarizeBook(library, b.id, true);
+				console.log(`[wiki]   ${r.summarized} chapters rewritten`);
+			}
+			break;
+		}
+
+		case "wiki-ask": {
+			const { wikiAsk } = await import("./wiki.ts");
+			const q = rest.join(" ");
+			if (!q) {
+				console.error("usage: wiki-ask <question> [--library=tcm] [--deep]");
+				process.exit(1);
+			}
+			console.log(await wikiAsk({ question: q, library: flags.library as string | undefined, deep: flags.deep === true }));
+			break;
+		}
+
 		case "inbox": {
 			const { runInbox } = await import("./inbox.ts");
 			const r = await runInbox({ verbose: true });

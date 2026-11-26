@@ -86,20 +86,30 @@ if [ -n "$RELEASE_BRANCH" ] && [ "$RELEASE_BRANCH" != "main" ]; then
 	# its release subject; everything after it on this branch is what main lacks.
 	PREV_ON_MAIN="$(git tag --sort=-v:refname --merged main | grep -v "^v$NEW$" | head -1)"
 	[ -n "$PREV_ON_MAIN" ] || { say "no previous release tag on main — carry onto main manually"; exit 1; }
-	PREV_SUBJ="$(git log -1 --format=%s "$PREV_ON_MAIN" | sed 's/^\(release: \)//')"
-	PREV_HERE="$(git log --format=%H --fixed-strings --grep="release: $PREV_SUBJ" HEAD | head -1)"
-	if [ -z "$PREV_HERE" ]; then
-		# Fall back: the version-number commit of that release on this branch.
-		PREV_HERE="$(git log --format=%H --fixed-strings --grep="v${PREV_ON_MAIN#v}" HEAD | head -1)"
-	fi
-	[ -n "$PREV_HERE" ] || { say "cannot locate $PREV_ON_MAIN's commit on '$RELEASE_BRANCH' — carry onto main manually"; exit 1; }
+	# PREV_HERE = the working-branch commit that produced that release. Tags are
+	# re-pointed at main's commits and release subjects drift during manual
+	# recovery, so neither the tag object nor subject matching is reliable.
+	# The CHANGELOG heading "## [X.Y.Z]" is introduced exactly once, by that
+	# release's version-bump commit — pickaxe finds it deterministically.
+	PREV_VER="${PREV_ON_MAIN#v}"
+	PREV_HERE="$(git log --format=%H -S"## [$PREV_VER]" -- CHANGELOG.md HEAD | head -1)"
+	[ -n "$PREV_HERE" ] || { say "cannot locate $PREV_ON_MAIN's CHANGELOG commit on '$RELEASE_BRANCH' — carry onto main manually"; exit 1; }
 	RELEASE_COMMITS="$(git rev-list --reverse --no-merges "$PREV_HERE"..HEAD)"
-	say "carrying $(echo "$RELEASE_COMMITS" | wc -w | tr -d ' ') commit(s) since $PREV_TAG"
+	say "carrying $(echo "$RELEASE_COMMITS" | wc -w | tr -d ' ') commit(s) since $PREV_ON_MAIN"
 	[ -n "$RELEASE_COMMITS" ] || { say "nothing to carry onto main"; exit 1; }
 	WT="$(mktemp -d /tmp/ruyi-release-main.XXXXXX)"
 	git worktree add -q "$WT" main
-	# shellcheck disable=SC2086
-	( cd "$WT" && git cherry-pick $RELEASE_COMMITS ) || { git worktree remove --force "$WT"; say "cherry-pick onto main failed — resolve manually"; exit 1; }
+	# Carry by DIFF, not cherry-pick: the two branches share history in different
+	# shapes (squashes, pre-release amalgam commits), so patch application is the
+	# robust operation. Conflicts fall back to the working branch's file — its
+	# release state is authoritative.
+	CARRY_FROM="$(git rev-parse "$PREV_HERE")"
+	CARRY_TO="$(git rev-parse HEAD)"
+	if ! ( cd "$WT" && git diff "$CARRY_FROM" "$CARRY_TO" -- . ':(exclude)package-lock.json' | git apply --3way - ); then
+		say "patch had conflicts — taking the working branch's release files wholesale"
+		( cd "$WT" && git checkout --theirs . 2>/dev/null; git checkout "$CARRY_TO" -- . )
+	fi
+	( cd "$WT" && git add -A && git commit -q -m "release: $NOTE" )
 	( cd "$WT" && git tag -f "v$NEW" HEAD >/dev/null && git push -q origin main && git push -q origin "v$NEW" --force )
 	MAIN_COMMIT="$(git -C "$WT" rev-parse HEAD)"
 	git worktree remove --force "$WT"

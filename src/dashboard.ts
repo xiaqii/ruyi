@@ -44,6 +44,7 @@ export function dashboardPage(): string {
   <h1>ruyi · 活动面板</h1>
   <div class="sub">实时数据 · 每 <b>30s</b> 自动刷新 · <span id="stamp"></span></div>
   <div class="card"><h2>按天 × 类别（次数 / 数据量）</h2><div id="byDay">加载中…</div></div>
+  <div class="card"><h2>token 消耗 · 按天 × 模型（入 / 出 / 缓存）</h2><div id="tokens">加载中…</div></div>
   <div class="card"><h2>按客户端汇总</h2><div id="byClient"></div></div>
   <div class="card"><h2>最近 30 条事件（刚才的对话触发了吗？看这里）</h2><div id="recent"></div></div>
 </div>
@@ -62,6 +63,8 @@ async function load() {
   if (!r.ok) throw new Error("HTTP " + r.status);
   const d = await r.json();
   render(d);
+  const t = await fetch("/tokens?days=14");
+  if (t.ok) renderTokens(await t.json());
   document.getElementById("stamp").textContent = "更新于 " + new Date().toLocaleTimeString("zh-CN");
 }
 function cell(c) { if (!c) return '<td class="muted">·</td>'; return "<td>" + c.n + " 次 · " + fmt(c.res || c.req) + "</td>"; }
@@ -83,6 +86,24 @@ function render(d) {
     h3 += "<tr><td>" + e.at.slice(5, 19).replace("T", " ") + '</td><td><span class="cat cat-' + e.category + '">' + e.category + '</span></td><td class="muted">' + esc(e.route) + "</td><td>" + esc(e.client || "—") + "</td><td>" + fmt(e.resBytes || e.reqBytes) + "</td><td>" + (e.ms > 1000 ? (e.ms/1000).toFixed(1) + "s" : e.ms + "ms") + "</td></tr>";
   }
   document.getElementById("recent").innerHTML = h3 + "</table>";
+}
+function fmtT(n) { if (n >= 1e9) return (n/1e9).toFixed(2) + "B"; if (n >= 1e6) return (n/1e6).toFixed(2) + "M"; if (n >= 1e3) return (n/1e3).toFixed(1) + "K"; return String(n); }
+function renderTokens(d) {
+  const rows = d.byDay || [];
+  if (!rows.length) { document.getElementById("tokens").innerHTML = '<span class="muted">（近期无 token 记录）</span>'; return; }
+  const today = new Date().toISOString().slice(0, 10);
+  const days = [...new Set(rows.map(r => r.day))].sort().reverse();
+  const SCENE = { live: "在线", run: "做梦·后台" };
+  let h = '<table><tr><th>日期</th><th>模型</th><th>场景</th><th>调用</th><th>入（新）</th><th>出</th><th>缓存命中</th></tr>';
+  for (const day of days) {
+    const dr = rows.filter(r => r.day === day);
+    const ti = dr.reduce((a, r) => a + r.input, 0), to = dr.reduce((a, r) => a + r.output, 0), tc = dr.reduce((a, r) => a + r.cached, 0);
+    h += '<tr class="' + (day === today ? "today" : "") + '"><td>' + day + (day === today ? "（今天）" : "") + '</td><td colspan="2"><b>合计</b></td><td>' + dr.reduce((a, r) => a + r.n, 0) + '</td><td><b>' + fmtT(ti) + '</b></td><td><b>' + fmtT(to) + '</b></td><td><b>' + fmtT(tc) + '</b></td></tr>';
+    for (const r of dr) {
+      h += '<tr><td class="muted"></td><td>' + esc(r.model) + '</td><td><span class="cat cat-' + (r.scene === "live" ? "inject" : "sync") + '">' + SCENE[r.scene] + '</span></td><td>' + r.n + '</td><td>' + fmtT(r.input) + '</td><td>' + fmtT(r.output) + '</td><td>' + fmtT(r.cached) + '</td></tr>';
+    }
+  }
+  document.getElementById("tokens").innerHTML = h + "</table>";
 }
 function sum(o) { return Object.values(o).reduce((a, c) => a + c.n, 0); }
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }

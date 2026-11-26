@@ -28,6 +28,8 @@ import {
 	tombstoneDigest,
 	upsertProfile,
 	SCHEMA_VERSION,
+	logTokens,
+	tokenUsageByModel,
 } from "../src/db.ts";
 import { stripInjectedEnvelope } from "../src/preprocess.ts";
 import { runDecay } from "../src/decay.ts";
@@ -97,6 +99,21 @@ const pcols = (migrated.prepare("PRAGMA table_info(profiles)").all() as { name: 
 ok(pcols.includes("maturity") && pcols.includes("status"), "profiles gained maturity + status");
 const legacyHits = ftsSearch(migrated, "阿里云", 5, "default");
 ok(legacyHits.length === 1, "FTS works on migrated data (CJK trigram)", `hits=${legacyHits.length}`);
+
+// ---- 2b. token accounting ----------------------------------------------------
+console.log("2b. token accounting: cached split + per-model aggregation");
+{
+	const tkdb = getDb(join(tmp, "tokens.db"));
+	logTokens(tkdb, { runId: "dream01", step: "extract", model: "glm-5.3", input: 1000, output: 200, cached: 300, latencyMs: 50 });
+	logTokens(tkdb, { step: "rerank", model: "kimi-for-coding", input: 500, output: 10, latencyMs: 20 });
+	const row = tkdb.prepare("SELECT input_tokens, output_tokens, cached_tokens FROM token_log WHERE step='extract'").get() as { input_tokens: number; output_tokens: number; cached_tokens: number };
+	ok(row.input_tokens === 1000 && row.output_tokens === 200 && row.cached_tokens === 300, "logTokens persists the cached column");
+	const rows = tokenUsageByModel(tkdb, 1);
+	const run = rows.find((r) => r.scene === "run");
+	const liveRow = rows.find((r) => r.scene === "live");
+	ok(!!run && run.model === "glm-5.3" && run.cached === 300, "tokenUsageByModel tags run_id rows as pipeline (dream) scene");
+	ok(!!liveRow && liveRow.model === "kimi-for-coding" && liveRow.cached === 0, "tokenUsageByModel tags run-less rows as live scene");
+}
 
 // ---- 3. FTS CJK + keywords ---------------------------------------------------
 console.log("3. FTS Chinese retrieval");

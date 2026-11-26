@@ -12,7 +12,7 @@ import {
 	listProfiles,
 	memoryCounts,
 	setReplyAnswer,
-	tokenUsage,
+	tokenUsage, tokenUsageByModel,
 } from "./db.ts";
 import type { Candidate } from "./types.ts";
 import { runDream, distillText, explicitRemember } from "./distill.ts";
@@ -94,8 +94,7 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 		const path = url.pathname.replace(/\/+$/, "") || "/";
 		// stats dashboard bookkeeping (written in the finally below)
 		const category =
-			path === "/probe" ? "probe"
-			: path === "/recall" ? "recall"
+			path === "/recall" ? "recall"
 			: path === "/inject" ? "inject"
 			: path === "/memories" || path === "/ingest" ? "remember"
 			: path.startsWith("/sync") ? "sync"
@@ -166,6 +165,14 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 				return send(res, 200, requestStats(db, days));
 			}
 
+			// Token accounting: per day × model, split into fresh input / output /
+			// cache-served. Rows with a run_id are pipeline calls (dream/sync/backfill);
+			// empty run_id means the call served a live request.
+			if (req.method === "GET" && path === "/tokens") {
+				const days = Math.min(90, Math.max(1, Number(url.searchParams.get("days") ?? "14")));
+				return send(res, 200, { byDay: tokenUsageByModel(db, days) });
+			}
+
 			if (!isLocal(req)) {
 				if (!authToken) return send(res, 503, { error: "remote access requires authToken in config" });
 				if (req.headers.authorization !== `Bearer ${authToken}`) {
@@ -177,20 +184,21 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 				return send(res, 200, getInject(ownerOf(url), cwdOf(url), scopeOf(url) ?? "smart"));
 			}
 
-			// Agent-initiated probe: cheap relevance check, returns one-line pointers only.
-			if (req.method === "POST" && path === "/probe") {
+			if (req.method === "POST" && path === "/wiki-ask") {
+				// Lazy-loaded: a broken wiki must never affect the memory endpoints.
 				const body = await readBody(req);
 				const question = typeof body.question === "string" ? body.question.trim() : "";
 				if (!question) return send(res, 400, { error: "question is required" });
 				try {
-					const { probe } = await import("./recall.ts");
-					const tier = body.tier === "quick" || body.tier === "scan" ? body.tier : "semantic";
-					const result = await probe(question, ownerOf(url, body), cwdOf(url, body), scopeOf(url, body), tier);
-					return send(res, 200, { ...result, serverTime: new Date().toLocaleString("zh-CN", { hour12: false, timeZone: "Asia/Shanghai" }) });
+					const { wikiAsk } = await import("./wiki.ts");
+					const answer = await wikiAsk({
+						question,
+						library: typeof body.library === "string" ? body.library : undefined,
+						deep: body.deep === true,
+					});
+					return send(res, 200, { answer });
 				} catch (e) {
-					// Probe is advisory — a probe-tier outage must never break the agent's
-					// tool call; empty result + note lets it proceed without memory context.
-					return send(res, 200, { hints: [], profiles: [], error: `probe unavailable: ${String(e).slice(0, 120)}` });
+					return send(res, 200, { answer: `(wiki unavailable: ${String(e).slice(0, 120)})` });
 				}
 			}
 
@@ -353,7 +361,7 @@ export function startServer(overrides?: { host?: string; port?: number; authToke
 			const status = (err as { httpStatus?: number }).httpStatus ?? 500;
 			return send(res, status, { error: err instanceof Error ? err.message : String(err) });
 		} finally {
-			if (path !== "/" && path !== "/health" && path !== "/stats" && path !== "/activity") {
+			if (path !== "/" && path !== "/health" && path !== "/stats" && path !== "/activity" && path !== "/tokens") {
 				logRequest(db, {
 					category,
 					route: `${req.method} ${path}`,

@@ -20,7 +20,7 @@ const dbs = new Map<string, DatabaseSync>();
  * v10 = replies.answer/gist (layered topic context). v11 = memories.mini + profiles.abstract
  *       (selector listing). v12 = inbox_files (raw-material inbox: per-file×lens offsets).
  */
-export const SCHEMA_VERSION = 15;
+export const SCHEMA_VERSION = 16;
 
 function migrate(d: DatabaseSync, from: number): void {
 	if (from < 1) {
@@ -99,6 +99,11 @@ function migrate(d: DatabaseSync, from: number): void {
 	}
 	if (from < 15) {
 		d.exec(`ALTER TABLE memories ADD COLUMN visibility TEXT NOT NULL DEFAULT ''`);
+	}
+	if (from < 16) {
+		// v16: cache-served tokens split out of input so cost dashboards can
+		// price them separately (cache-read is typically billed at a fraction).
+		d.exec(`ALTER TABLE token_log ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0`);
 	}
 	if (from < 12) {
 		createInboxFiles(d);
@@ -533,6 +538,7 @@ CREATE TABLE IF NOT EXISTS token_log (
   model          TEXT NOT NULL,
   input_tokens   INTEGER NOT NULL,
   output_tokens  INTEGER NOT NULL,
+  cached_tokens  INTEGER NOT NULL DEFAULT 0,
   latency_ms     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_token_log_at ON token_log(at);
@@ -925,11 +931,27 @@ export function requestStats(
 
 export function logTokens(
 	d: DatabaseSync,
-	entry: { runId?: string; step: string; sessionFile?: string; model: string; input: number; output: number; latencyMs?: number },
+	entry: { runId?: string; step: string; sessionFile?: string; model: string; input: number; output: number; cached?: number; latencyMs?: number },
 ): void {
 	d.prepare(
-		`INSERT INTO token_log (at, run_id, step, session_file, model, input_tokens, output_tokens, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-	).run(now(), entry.runId ?? null, entry.step, entry.sessionFile ?? null, entry.model, entry.input, entry.output, entry.latencyMs ?? 0);
+		`INSERT INTO token_log (at, run_id, step, session_file, model, input_tokens, output_tokens, cached_tokens, latency_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	).run(now(), entry.runId ?? null, entry.step, entry.sessionFile ?? null, entry.model, entry.input, entry.output, entry.cached ?? 0, entry.latencyMs ?? 0);
+}
+
+/** Per day × model token usage for the /tokens dashboard: fresh input, output,
+ *  cache-served input, and whether the call served a live request or a pipeline
+ *  run (dream/sync/backfill — anything carrying a run_id). */
+export function tokenUsageByModel(d: DatabaseSync, days: number): { day: string; model: string; scene: "live" | "run"; n: number; input: number; output: number; cached: number }[] {
+	const since = new Date(Date.now() - days * 86_400_000).toISOString();
+	return d
+		.prepare(
+			`SELECT substr(at, 1, 10) AS day, model,
+			        CASE WHEN COALESCE(run_id, '') = '' THEN 'live' ELSE 'run' END AS scene,
+			        COUNT(*) AS n, SUM(input_tokens) AS input, SUM(output_tokens) AS output,
+			        SUM(COALESCE(cached_tokens, 0)) AS cached
+			 FROM token_log WHERE at >= ? GROUP BY day, model, scene ORDER BY day DESC, input + output DESC`,
+		)
+		.all(since) as unknown as { day: string; model: string; scene: "live" | "run"; n: number; input: number; output: number; cached: number }[];
 }
 
 /** Every recall call, for demand-signal analysis (P3 槽位需求闭环) and latency observability. */

@@ -24,7 +24,7 @@ Two integration surfaces with equivalent capability:
   Multiple agents of the same person share one memory pool via the same owner; use different
   owners for different people or isolation needs.
 - **Errors**: uniform `{"error": "..."}` + non-200 status code.
-- **Timeout guidance** (important): pure-SQL endpoints (inject/list/get/forget/stats/profiles/
+- **Timeout guidance** (important): pure-SQL endpoints (inject/list/get/forget/stats/tokens/profiles/
   recall-fast) return in hundreds of milliseconds — a 5s client timeout is plenty. **LLM-backed
   endpoints** (recall-deep/excavate, POST /memories, ingest, synthesize, distill) take as long as
   the LLM takes — **client timeout must be ≥45 seconds**, with circuit-breaking recommended: when
@@ -37,7 +37,6 @@ Two integration surfaces with equivalent capability:
 |---|---|---|
 | GET `/health` | liveness + memory counts by status (no auth) | none |
 | GET `/inject` | opening bundle: profile directory tree | none |
-| POST `/probe` | pointer-only relevance check (`hints` + `profiles`), no content | hierarchical: two light calls; flat: one |
 | POST `/recall` | semantic recall of memories & profile chapters | fast: none / deep, excavate: yes |
 | GET `/memories` | list memories (one-line summaries) | none |
 | POST `/memories` | explicitly write one memory (via LLM merge adjudication) | yes |
@@ -51,6 +50,7 @@ Two integration surfaces with equivalent capability:
 | POST `/synthesize` | re-distill profiles now (normally driven by the nightly timer) | yes |
 | POST `/distill` | run one dream now (async, 202) | yes |
 | GET `/stats` | memory counts + token usage report | none |
+| GET `/tokens` | per-day × per-model token usage (input / output / cache-served; live vs pipeline split) | none |
 
 ---
 
@@ -87,21 +87,10 @@ the listing to pick chapters); thin clients need not render it into context at a
 zero-resident context, with discovery and selection entirely server-side. Clients that want a directory
 (e.g. a one-shot session-start Claude hook) may still fetch it themselves.
 
-### POST /probe — cheap pointer-only relevance check
+### POST /recall — semantic recall (the one retrieval surface)
 
-`{ "question": "...", "cwd": "/optional/project" }` → `{ "activation": "lookup|discussion|execution", "hints": [{"id", "kind", "line"}], "profiles": [{"id", "title"}] }`.
-No memory/profile content is returned; fetch selected content via `/recall` or the by-id routes.
-
-`tier`: `semantic` (default) = hierarchical two-step routing (root index → one shelf's chapter cards and
-memory pointers, single-root by default); `scan` = whole-store single-call selector; `quick` = zero-LLM
-keyword pass (fallback only: literal matching misses paraphrased facts).
-
-Default routing is hierarchical: a thin root-portrait index selects up to two specialist shelves, then a
-second light model call compares only their chapter cards and memory summaries. Direct FTS hits and every
-not-yet-woven memory bypass the hierarchy, so a root-routing miss cannot hide a memory. Set
-`recall.probeStrategy: "flat"` for the legacy whole-store selector; flat remains the automatic fallback.
-
-### POST /recall — semantic recall
+The former `POST /probe` pointer endpoint is gone: the pointer-then-fetch dance now runs inside
+`/recall` (gate → hierarchical routing → content). Callers just pass a `query` and get entries back.
 
 ```json
 {
@@ -117,8 +106,8 @@ not-yet-woven memory bypass the hierarchy, so a root-routing miss cannot hide a 
 | Field | Notes |
 |---|---|
 | `query` | required, non-empty |
-| `ids` | optional memory ids from `/probe`: direct SQL content fetch, zero LLM, no second semantic selection |
-| `profile_ids` | optional profile ids from `/probe`: same direct-fetch path |
+| `ids` | optional memory ids (from a pointer or an earlier result): direct SQL content fetch, zero LLM, no second semantic selection |
+| `profile_ids` | optional profile ids (from a pointer or an earlier result): same direct-fetch path |
 | `k` | max memories returned; server-configured default (6) |
 | `mode` | `fast` = pure keyword probe, zero LLM; `deep` (default) = one selector LLM call over each memory's short positioning handle + chapter abstracts; `excavate` = also dig absorbed/archived memories |
 | `include_store_card` | optional diagnostic opt-in. Routine recall/auto-injection never carries the dense store map, because it would bypass activation policy |

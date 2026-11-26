@@ -11,7 +11,7 @@ import {
 	memoryCounts,
 	tokenUsage,
 } from "./db.ts";
-import { probe, recall } from "./recall.ts";
+import { recall } from "./recall.ts";
 import { distillText, explicitRemember } from "./distill.ts";
 
 /**
@@ -109,18 +109,6 @@ async function handleToolCall(
 	const owner = typeof args.owner === "string" ? args.owner : "default";
 
 	switch (name) {
-		case "probe": {
-			const question = String(args.question ?? "").trim();
-			if (!question) return replyError(id, -32602, "question is required");
-			const r = await probe(question, owner, typeof args.cwd === "string" ? args.cwd : null);
-			if (r.hints.length === 0 && r.profiles.length === 0)
-				return reply(id, toolResult("No relevant memories found — safe to proceed without memory context."));
-			const lines = [
-				...r.profiles.map((p) => `[profile ${p.id}] ${p.title}`),
-				...r.hints.map((h) => `#${h.id} (${h.kind}) ${h.line}`),
-			];
-			return reply(id, toolResult(`Relevant pointers (fetch full entries with recall if needed):\n${lines.join("\n")}`));
-		}
 		case "recall": {
 			const query = String(args.query ?? "");
 			const k = typeof args.k === "number" ? args.k : undefined;
@@ -178,6 +166,18 @@ async function handleToolCall(
 			if (result.action === "blocked")
 				return reply(id, toolResult(`Blocked: this content was previously forgotten (tombstone) — not re-saved. If it genuinely matters now, say so explicitly and rephrase it.`));
 			return reply(id, toolResult(`Saved to long-term memory as #${result.id} (${result.action}): ${summary}`));
+		}
+		case "wiki_ask": {
+			// Lazy-loaded and self-contained: a broken wiki must never take the memory tools down.
+			const { wikiAsk } = await import("./wiki.ts");
+			const question = String(args.question ?? "").trim();
+			if (!question) return replyError(id, -32602, "question is required");
+			const text = await wikiAsk({
+				question,
+				library: typeof args.library === "string" ? args.library : undefined,
+				deep: args.deep === true,
+			});
+			return reply(id, toolResult(text));
 		}
 		case "admin": {
 			const action = String(args.action ?? "");

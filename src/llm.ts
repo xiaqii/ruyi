@@ -217,7 +217,7 @@ export function buildBody(llm: ResolvedLlm, opts: CompleteOptions, fixes: Set<st
 
 function endpointOf(llm: ResolvedLlm, key: string): { url: string; headers: Record<string, string> } {
 	if (llm.protocol === "openai") {
-		const base = llm.baseUrl.endsWith("/v1") ? llm.baseUrl : `${llm.baseUrl}/v1`;
+		const base = /\/v\d+$/.test(llm.baseUrl) ? llm.baseUrl : `${llm.baseUrl}/v1`;
 		return {
 			url: `${base}/chat/completions`,
 			headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
@@ -266,14 +266,22 @@ async function consumeStream(res: Response): Promise<Record<string, unknown>> {
 function parseResponse(
 	llm: ResolvedLlm,
 	data: Record<string, unknown>,
-): { text: string; inputTokens: number; outputTokens: number } {
+): { text: string; inputTokens: number; outputTokens: number; cachedTokens: number } {
 	if (llm.protocol === "openai") {
 		const choices = (data.choices ?? []) as { message?: { content?: string } }[];
-		const usage = (data.usage ?? {}) as { prompt_tokens?: number; completion_tokens?: number };
+		const usage = (data.usage ?? {}) as {
+			prompt_tokens?: number;
+			completion_tokens?: number;
+			prompt_tokens_details?: { cached_tokens?: number };
+		};
+		// OpenAI-style accounting: prompt_tokens is the TOTAL input (cache-served
+		// included). Split it so cached input can be priced at its lower rate.
+		const cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? 0;
 		return {
 			text: choices[0]?.message?.content ?? "",
-			inputTokens: usage.prompt_tokens ?? 0,
+			inputTokens: Math.max(0, (usage.prompt_tokens ?? 0) - cachedTokens),
 			outputTokens: usage.completion_tokens ?? 0,
+			cachedTokens,
 		};
 	}
 	const content = (data.content ?? []) as { type: string; text?: string }[];
@@ -285,14 +293,14 @@ function parseResponse(
 	};
 	// Anthropic-compatible endpoints may report cached prefixes separately
 	// (Kimi: input_tokens=0 + cache_read_input_tokens=N on cache hits).
-	const inputTokens =
-		(usage.input_tokens ?? 0) +
-		(usage.cache_creation_input_tokens ?? 0) +
-		(usage.cache_read_input_tokens ?? 0);
+	// Cache-write tokens are fresh input (billed at a premium) — count as input.
+	const cachedTokens = usage.cache_read_input_tokens ?? 0;
+	const inputTokens = (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
 	return {
 		text: content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n"),
 		inputTokens,
 		outputTokens: usage.output_tokens ?? 0,
+		cachedTokens,
 	};
 }
 
@@ -356,7 +364,7 @@ export async function complete(opts: CompleteOptions): Promise<LlmResult> {
 			}
 
 		const data = llm.stream && llm.protocol === "openai" ? await consumeStream(res) : ((await res.json()) as Record<string, unknown>);
-		const { text, inputTokens, outputTokens } = parseResponse(llm, data);
+		const { text, inputTokens, outputTokens, cachedTokens } = parseResponse(llm, data);
 		const latencyMs = Date.now() - startedAt;
 
 		const at = new Date().toISOString();
@@ -368,6 +376,7 @@ export async function complete(opts: CompleteOptions): Promise<LlmResult> {
 				model: llm.model,
 				input: inputTokens,
 				output: outputTokens,
+				cached: cachedTokens,
 				latencyMs,
 			});
 		} catch {
@@ -382,6 +391,7 @@ export async function complete(opts: CompleteOptions): Promise<LlmResult> {
 			model: llm.model,
 			input_tokens: inputTokens,
 			output_tokens: outputTokens,
+			cached_tokens: cachedTokens,
 			latency_ms: latencyMs,
 			downgrades: fixes.size > 0 ? [...fixes] : undefined,
 		});

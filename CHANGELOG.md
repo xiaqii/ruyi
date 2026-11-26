@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.16.1] - 2026-11-26
+
+- Retire POST /probe (pointer dance now internal to /recall); new /tokens endpoint + dashboard card: per-day × per-model token usage with input/output/cache split and live-vs-dream scene; token_log v16 adds cached_tokens (OpenAI prompt_tokens_details.cached_tokens and Anthropic cache_read_input_tokens parsed separately)
 ## [1.16.0] - 2026-11-26
 
 - Three memory tools (was eight): recall absorbs probe/list/get/ingest — search returns entries directly, ids fetch directly; remember; admin. wiki_ask tool unregistered (0 calls ever; wiki stays a local-branch experiment). Over-injection stays bounded: relevance gate, activation caps, per-conversation dedup ledger, compaction reset

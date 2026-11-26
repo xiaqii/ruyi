@@ -172,12 +172,11 @@ const projectId = insertMemory(
 	setMemoryVisibility(db, projectId, "personal");
 	const personal = await call("POST", "/recall", { query: scopeToken, k: 20, mode: "fast", cwd: "/root/pi", scope: "smart" });
 	ok((personal.json.memories as { id: number }[]).some((m) => m.id === projectId), "visibility=personal crosses cwds under smart scope");
-	// Probe tiers on a real fixture: quick is the zero-LLM literal pass and must
-	// surface the exact token it was given; activation is always reported.
+	// The pointer-only /probe endpoint was merged into /recall: it must be gone
+	// (one retrieval surface — query in, entries out).
 	{
-		const quick = await call("POST", "/probe", { question: scopeToken, tier: "quick", cwd: "/contract/project-a" });
-		const ids = Array.isArray(quick.json.hints) ? (quick.json.hints as { id: number }[]).map((h) => h.id) : [];
-		ok(quick.status === 200 && ids.includes(projectId) && typeof quick.json.activation === "string", "probe quick tier: zero-LLM literal pointer hit");
+		const gone = await call("POST", "/probe", { question: scopeToken });
+		ok(gone.status === 404, "POST /probe is retired (pointer dance lives inside /recall now)");
 	}
 	await call("POST", `/memories/${projectId}/forget`);
 }
@@ -256,12 +255,18 @@ const projectId = insertMemory(
 	ok(cf2.status === 404, "unknown client file rejected");
 
 	// request stats: requests are logged with client attribution and aggregate by day
-	await call("POST", "/probe", { question: "stats-contract-probe" }, { "x-ruyi-client": "contract-stats" });
+	await call("POST", "/recall", { query: "stats-contract-recall", mode: "fast" }, { "x-ruyi-client": "contract-stats" });
 	const act = await call("GET", "/activity?days=1");
 	const today = new Date().toISOString().slice(0, 10);
-	ok(act.status === 200 && act.json.byDay?.[today]?.probe?.n >= 1, "activity aggregates today's probe calls");
+	ok(act.status === 200 && act.json.byDay?.[today]?.recall?.n >= 1, "activity aggregates today's recall calls");
 	const cl = act.json.byClient?.["contract-stats"] ?? act.json.byClient?.unknown;
 	ok(!!cl, "activity attributes requests to the x-ruyi-client header");
+	// token accounting endpoint: day × model × scene rows with in/out/cached columns
+	{
+		const tk = await call("GET", "/tokens?days=1");
+		const rows = Array.isArray(tk.json.byDay) ? (tk.json.byDay as { model: string; scene: string; n: number; input: number; output: number; cached: number }[]) : [];
+		ok(tk.status === 200 && rows.every((r) => typeof r.model === "string" && (r.scene === "live" || r.scene === "run") && r.input >= 0 && r.output >= 0 && r.cached >= 0), "/tokens returns day × model rows with input/output/cached and a live/run scene");
+	}
 	const st = await fetch(`${BASE}/stats`, { headers: { accept: "text/html", ...(TOKEN ? { authorization: `Bearer ${TOKEN}` } : {}) }, signal: AbortSignal.timeout(15_000) });
 	ok(st.status === 200 && (st.headers.get("content-type") ?? "").includes("text/html"), "stats serves the dashboard page to browsers");
 
